@@ -50,7 +50,7 @@ def parse_fasta(path: Path, ccd: Mapping[str, Mol]) -> Target:  # noqa: C901
         assert len(header) >= 2, f"Invalid record id: {seq_record.id}"
 
         chain_id, entity_type = header[:2]
-        if entity_type.lower() not in {"protein", "dna", "rna", "ccd", "smiles"}:
+        if entity_type.lower() not in {"protein", "dna", "rna", "ccd", "smiles","conformer"}:
             msg = f"Invalid entity type: {entity_type}"
             raise ValueError(msg)
         if chain_id == "":
@@ -66,11 +66,10 @@ def parse_fasta(path: Path, ccd: Mapping[str, Mol]) -> Target:  # noqa: C901
         # Get chain id, entity type and sequence
         header = seq_record.id.split("|")
         chain_id, entity_type = header[:2]
-        if len(header) == 3 and header[2] != "":
-            assert (
-                entity_type.lower() == "protein"
-            ), "MSA_ID is only allowed for proteins"
-            msa_id = header[2]
+        if len(header) == 3:
+            supp_file = header[2]
+        else:
+            supp_file = None
 
         entity_type = entity_type.upper()
         seq = str(seq_record.seq)
@@ -81,7 +80,7 @@ def parse_fasta(path: Path, ccd: Mapping[str, Mol]) -> Target:  # noqa: C901
                     "id": chain_id,
                     "sequence": seq,
                     "modifications": [],
-                    "msa": msa_id,
+                    "msa": supp_file if len(header) == 3 else None,
                 },
             }
         elif entity_type == "RNA":
@@ -105,6 +104,7 @@ def parse_fasta(path: Path, ccd: Mapping[str, Mol]) -> Target:  # noqa: C901
                 "ligand": {
                     "id": chain_id,
                     "ccd": seq,
+                    "conformer": supp_file if len(header) == 3 else None,
                 }
             }
         elif entity_type.upper() == "SMILES":
@@ -112,9 +112,10 @@ def parse_fasta(path: Path, ccd: Mapping[str, Mol]) -> Target:  # noqa: C901
                 "ligand": {
                     "id": chain_id,
                     "smiles": seq,
+                    "conformer": supp_file if len(header) == 3 else None,
                 }
             }
-
+        
         sequences.append(molecule)
 
     data = {
