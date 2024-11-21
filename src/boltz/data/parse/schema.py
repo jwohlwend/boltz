@@ -592,6 +592,9 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     # Go through entities and parse them
     chains: dict[str, ParsedChain] = {}
     chain_to_msa: dict[str, str] = {}
+    entity_to_seq: dict[str, str] = {}
+    is_msa_custom = False
+    is_msa_auto = False
     for entity_id, items in enumerate(items_to_group.values()):
         # Get entity type and sequence
         entity_type = next(iter(items[0].keys())).lower()
@@ -599,28 +602,23 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         # Ensure all the items share the same msa
         msa = -1
         if entity_type == "protein":
-            # Check if MSA is present
-            if ("msa" not in items[0][entity_type]) or (
-                (items[0][entity_type]["msa"] is None)
-                or (items[0][entity_type]["msa"] == "")
-            ):
-                msg = """
-                Proteins must have an MSA. If you wish to force
-                the model to run in single sequence mode, please
-                use the special keyword 'empty' for this msa.
-                """
-                raise ValueError(msg)
-
-            # Get the msa
-            msa = items[0][entity_type]["msa"]
+            # Get the msa, default to 0, meaning auto-generated
+            msa = items[0][entity_type].get("msa", 0)
+            if (msa is None) or (msa == ""):
+                msa = 0
 
             # Check if all MSAs are the same within the same entity
-            if not all(item[entity_type]["msa"] == msa for item in items):
-                msg = "All proteins with the same sequence must share the same MSA!"
-                raise ValueError(msg)
+            for item in items:
+                item_msa = item[entity_type].get("msa", 0)
+                if (item_msa is None) or (item_msa == ""):
+                    item_msa = 0
+
+                if item_msa != msa:
+                    msg = "All proteins with the same sequence must share the same MSA!"
+                    raise ValueError(msg)
 
             # Set the MSA, warn if passed in single-sequence mode
-            if items[0][entity_type]["msa"] == "empty":
+            if msa == "empty":
                 msa = -1
                 msg = (
                     "Found explicit empty MSA for some proteins, will run "
@@ -628,6 +626,11 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                     "model predictions will be suboptimal without an MSA."
                 )
                 click.echo(msg)
+
+            if msa not in (0, -1):
+                is_msa_custom = True
+            elif msa == 0:
+                is_msa_auto = True
 
         # Parse a polymer
         if entity_type in {"protein", "dna", "rna"}:
@@ -646,9 +649,12 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             chain_type = const.chain_type_ids[entity_type.upper()]
             unk_token = const.unk_token[entity_type.upper()]
 
+            # Extract sequence
+            seq = items[0][entity_type]["sequence"]
+            entity_to_seq[entity_id] = seq
+
             # Convert sequence to tokens
-            seq = list(items[0][entity_type]["sequence"])
-            seq = [token_map.get(c, unk_token) for c in seq]
+            seq = [token_map.get(c, unk_token) for c in list(seq)]
 
             # Apply modifications
             for mod in items[0][entity_type].get("modifications", []):
@@ -738,6 +744,11 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             for chain_name in ids:
                 chains[chain_name] = parsed_chain
                 chain_to_msa[chain_name] = msa
+
+    # Check if msa is custom or auto
+    if is_msa_custom and is_msa_auto:
+        msg = "Cannot mix custom and auto-generated MSAs in the same input!"
+        raise ValueError(msg)
 
     # If no chains parsed fail
     if not chains:
@@ -882,6 +893,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             msa_id=chain_to_msa[chain["name"]],
             num_residues=int(chain["res_num"]),
             valid=True,
+            entity_id=int(chain["entity_id"]),
         )
         chain_infos.append(chain_info)
 
@@ -891,4 +903,8 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         chains=chain_infos,
         interfaces=[],
     )
-    return Target(record=record, structure=data)
+    return Target(
+        record=record,
+        structure=data,
+        sequences=entity_to_seq,
+    )

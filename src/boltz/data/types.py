@@ -352,6 +352,7 @@ class ChainInfo:
     msa_id: Union[str, int]
     num_residues: int
     valid: bool = True
+    entity_id: Optional[Union[str, int]] = None
 
 
 @dataclass(frozen=True)
@@ -384,6 +385,7 @@ class Target:
 
     record: Record
     structure: Structure
+    sequences: Optional[dict[str, str]] = None
 
 
 @dataclass(frozen=True)

@@ -5,7 +5,7 @@ Democratizing Biomolecular Interaction Modeling
 
 ![](docs/boltz1_pred_figure.png)
 
-Boltz-1 is an open-source model which predicts the 3D structure of proteins, rna, dna and small molecules; it handles modified residues, covalent ligands and glycans, as well as condition the generation on pocket residues. 
+Boltz-1 is an open-source model which predicts the 3D structure of proteins, RNA, DNA and small molecules; it handles modified residues, covalent ligands and glycans, as well as condition the generation on pocket residues. 
 
 For more information about the model, see our [technical report](https://gcorso.github.io/assets/boltz1.pdf).
 
@@ -48,18 +48,45 @@ If you're interested in retraining the model, see our [training instructions](do
 
 ## Contributing
 
-We welcome external contributions and are eager to engage with the community. Connect with us on our [Slack channel](https://boltz-community.slack.com/archives/C0818M6DWH2) to discuss advancements, share insights, and foster collaboration around Boltz-1.
+We welcome external contributions and are eager to engage with the community. Connect with us on our [Slack channel](https://join.slack.com/t/boltz-community/shared_invite/zt-2uexwkemv-Tqt9E747hVkE0VOWlgOcIw) to discuss advancements, share insights, and foster collaboration around Boltz-1.
 
 ## Coming very soon
 
+- [x] Auto-generated MSAs using MMseqs2
+- [x] More examples
+- [ ] Support for custom paired MSA
+- [ ] Confidence model checkpoint
 - [ ] Pocket conditioning support
-- [ ] More examples
 - [ ] Full data processing pipeline
 - [ ] Colab notebook for inference
-- [ ] Confidence model checkpoint
-- [ ] Support for custom paired MSA
 - [ ] Kernel integration
 
 ## License
 
 Our model and code are released under MIT License, and can be freely used for both academic and commercial purposes.
+
+
+## Cite
+
+If you use this code or the models in your research, please cite the following paper:
+
+```bibtex
+@article{wohlwend2024boltz1,
+  author = {Wohlwend, Jeremy and Corso, Gabriele and Passaro, Saro and Reveiz, Mateo and Leidal, Ken and Swiderski, Wojtek and Portnoi, Tally and Chinn, Itamar and Silterra, Jacob and Jaakkola, Tommi and Barzilay, Regina},
+  title = {Boltz-1: Democratizing Biomolecular Interaction Modeling},
+  year = {2024},
+  doi = {10.1101/2024.11.19.624167},
+  journal = {bioRxiv}
+}
+```
+
+In addition if you use the automatic MSA generation, please cite:
+
+```bibtex
+@article{mirdita2022colabfold,
+  title={ColabFold: making protein folding accessible to all},
+  author={Mirdita, Milot and Sch{\"u}tze, Konstantin and Moriwaki, Yoshitaka and Heo, Lim and Ovchinnikov, Sergey and Steinegger, Martin},
+  journal={Nature methods},
+  year={2022},
+}
+```
