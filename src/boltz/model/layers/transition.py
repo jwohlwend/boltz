@@ -13,7 +13,6 @@ class Transition(nn.Module):
         dim: int = 128,
         hidden: int = 512,
         out_dim: Optional[int] = None,
-        chunk_size: int = None,
     ) -> None:
         """Initialize the TransitionUpdate module.
 
@@ -25,8 +24,6 @@ class Transition(nn.Module):
             The dimension of the hidden, default 512
         out_dim: Optional[int]
             The dimension of the output, default None
-        chunk_size: int
-            The chunk size for inference, default None
 
         """
         super().__init__()
@@ -39,7 +36,6 @@ class Transition(nn.Module):
         self.fc3 = nn.Linear(hidden, out_dim, bias=False)
         self.silu = nn.SiLU()
         self.hidden = hidden
-        self.chunk_size = chunk_size
 
         init.bias_init_one_(self.norm.weight)
         init.bias_init_zero_(self.norm.bias)
@@ -48,7 +44,7 @@ class Transition(nn.Module):
         init.lecun_normal_init_(self.fc2.weight)
         init.final_init_(self.fc3.weight)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, chunk_size: int = None) -> Tensor:
         """Perform a forward pass.
 
         Parameters
@@ -64,16 +60,16 @@ class Transition(nn.Module):
         """
         x = self.norm(x)
 
-        if self.chunk_size is None or self.training:
+        if chunk_size is None or self.training:
             x = self.silu(self.fc1(x)) * self.fc2(x)
             x = self.fc3(x)
             return x
         else:
             # Compute in chunks
-            for i in range(0, self.hidden, self.chunk_size):
-                fc1_slice = self.fc1.weight[i : i + self.chunk_size, :]
-                fc2_slice = self.fc2.weight[i : i + self.chunk_size, :]
-                fc3_slice = self.fc3.weight[:, i : i + self.chunk_size]
+            for i in range(0, self.hidden, chunk_size):
+                fc1_slice = self.fc1.weight[i : i + chunk_size, :]
+                fc2_slice = self.fc2.weight[i : i + chunk_size, :]
+                fc3_slice = self.fc3.weight[:, i : i + chunk_size]
                 x_chunk = self.silu((x @ fc1_slice.T)) * (x @ fc2_slice.T)
                 if i == 0:
                     x_out = x_chunk @ fc3_slice.T

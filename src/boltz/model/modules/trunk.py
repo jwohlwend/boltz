@@ -129,11 +129,6 @@ class MSAModule(nn.Module):
         activation_checkpointing: bool = False,
         use_paired_feature: bool = False,
         offload_to_cpu: bool = False,
-        chunk_heads_pwa: bool = False,
-        chunk_size_transition_z: int = None,
-        chunk_size_transition_msa: int = None,
-        chunk_size_outer_product: int = None,
-        chunk_size_tri_attn: int = None,
         **kwargs,
     ) -> None:
         """Initialize the MSA module.
@@ -162,16 +157,6 @@ class MSAModule(nn.Module):
             Whether to use the paired feature, by default False
         offload_to_cpu : bool, optional
             Whether to offload to CPU, by default False
-        chunk_heads_pwa : bool, optional
-            Chunk heads for PWA, by default False
-        chunk_size_transition_z : int, optional
-            Chunk size for transition Z, by default None
-        chunk_size_transition_msa : int, optional
-            Chunk size for transition MSA, by default None
-        chunk_size_outer_product : int, optional
-            Chunk size for outer product, by default None
-        chunk_size_tri_attn : int, optional
-            Chunk size for triangle attention, by default None
 
         """
         super().__init__()
@@ -198,11 +183,6 @@ class MSAModule(nn.Module):
                             z_dropout,
                             pairwise_head_width,
                             pairwise_num_heads,
-                            chunk_heads_pwa=chunk_heads_pwa,
-                            chunk_size_transition_z=chunk_size_transition_z,
-                            chunk_size_transition_msa=chunk_size_transition_msa,
-                            chunk_size_outer_product=chunk_size_outer_product,
-                            chunk_size_tri_attn=chunk_size_tri_attn,
                         ),
                         offload_to_cpu=offload_to_cpu,
                     )
@@ -216,15 +196,15 @@ class MSAModule(nn.Module):
                         z_dropout,
                         pairwise_head_width,
                         pairwise_num_heads,
-                        chunk_heads_pwa=chunk_heads_pwa,
-                        chunk_size_transition_z=chunk_size_transition_z,
-                        chunk_size_transition_msa=chunk_size_transition_msa,
-                        chunk_size_outer_product=chunk_size_outer_product,
-                        chunk_size_tri_attn=chunk_size_tri_attn,
                     )
                 )
 
-    def forward(self, z: Tensor, emb: Tensor, feats: Dict[str, Tensor]) -> Tensor:
+    def forward(
+        self,
+        z: Tensor,
+        emb: Tensor,
+        feats: Dict[str, Tensor],
+    ) -> Tensor:
         """Perform the forward pass.
 
         Parameters
@@ -242,6 +222,27 @@ class MSAModule(nn.Module):
             The output pairwise embeddings.
 
         """
+        # Set chunk sizes
+        if not self.training:
+            if z.shape[1] > 1024:
+                chunk_heads_pwa = True
+                chunk_size_transition_z = 64
+                chunk_size_transition_msa = 32
+                chunk_size_outer_product = 4
+                chunk_size_tri_attn = 128
+            else:
+                chunk_heads_pwa = False
+                chunk_size_transition_z = None
+                chunk_size_transition_msa = None
+                chunk_size_outer_product = None
+                chunk_size_tri_attn = 512
+        else:
+            chunk_heads_pwa = False
+            chunk_size_transition_z = None
+            chunk_size_transition_msa = None
+            chunk_size_outer_product = None
+            chunk_size_tri_attn = None
+
         # Load relevant features
         msa = feats["msa"]
         has_deletion = feats["has_deletion"].unsqueeze(-1)
@@ -263,7 +264,17 @@ class MSAModule(nn.Module):
 
         # Perform MSA blocks
         for i in range(self.msa_blocks):
-            z, m = self.layers[i](z, m, token_mask, msa_mask)
+            z, m = self.layers[i](
+                z,
+                m,
+                token_mask,
+                msa_mask,
+                chunk_heads_pwa,
+                chunk_size_transition_z,
+                chunk_size_transition_msa,
+                chunk_size_outer_product,
+                chunk_size_tri_attn,
+            )
         return z
 
 
@@ -278,11 +289,6 @@ class MSALayer(nn.Module):
         z_dropout: float,
         pairwise_head_width: int = 32,
         pairwise_num_heads: int = 4,
-        chunk_heads_pwa: bool = False,
-        chunk_size_transition_z: int = None,
-        chunk_size_transition_msa: int = None,
-        chunk_size_outer_product: int = None,
-        chunk_size_tri_attn: int = None,
     ) -> None:
         """Initialize the MSA module.
 
@@ -301,31 +307,17 @@ class MSALayer(nn.Module):
             The pairwise head width, by default 32
         pairwise_num_heads : int, optional
             The number of pairwise heads, by default 4
-        chunk_heads_pwa : bool, optional
-            Chunk heads for PWA, by default False
-        chunk_size_transition_z : int, optional
-            Chunk size for transition Z, by default None
-        chunk_size_transition_msa : int, optional
-            Chunk size for transition MSA, by default None
-        chunk_size_outer_product : int, optional
-            Chunk size for outer product, by default None
-        chunk_size_tri_attn : int, optional
-            Chunk size for triangle attention, by default None
 
         """
         super().__init__()
         self.msa_dropout = msa_dropout
         self.z_dropout = z_dropout
-        self.chunk_size_tri_attn = chunk_size_tri_attn
-        self.msa_transition = Transition(
-            dim=msa_s, hidden=msa_s * 4, chunk_size=chunk_size_transition_msa
-        )
+        self.msa_transition = Transition(dim=msa_s, hidden=msa_s * 4)
         self.pair_weighted_averaging = PairWeightedAveraging(
             c_m=msa_s,
             c_z=token_z,
             c_h=32,
             num_heads=8,
-            chunk_heads=chunk_heads_pwa,
         )
 
         self.tri_mul_out = TriangleMultiplicationOutgoing(token_z)
@@ -339,17 +331,24 @@ class MSALayer(nn.Module):
         self.z_transition = Transition(
             dim=token_z,
             hidden=token_z * 4,
-            chunk_size=chunk_size_transition_z,
         )
         self.outer_product_mean = OuterProductMean(
             c_in=msa_s,
             c_hidden=32,
             c_out=token_z,
-            chunk_size=chunk_size_outer_product,
         )
 
     def forward(
-        self, z: Tensor, m: Tensor, token_mask: Tensor, msa_mask: Tensor
+        self,
+        z: Tensor,
+        m: Tensor,
+        token_mask: Tensor,
+        msa_mask: Tensor,
+        chunk_heads_pwa: bool = False,
+        chunk_size_transition_z: int = None,
+        chunk_size_transition_msa: int = None,
+        chunk_size_outer_product: int = None,
+        chunk_size_tri_attn: int = None,
     ) -> Tuple[Tensor, Tensor]:
         """Perform the forward pass.
 
@@ -374,11 +373,13 @@ class MSALayer(nn.Module):
         """
         # Communication to MSA stack
         msa_dropout = get_dropout_mask(self.msa_dropout, m, self.training)
-        m = m + msa_dropout * self.pair_weighted_averaging(m, z, token_mask)
-        m = m + self.msa_transition(m)
+        m = m + msa_dropout * self.pair_weighted_averaging(
+            m, z, token_mask, chunk_heads_pwa
+        )
+        m = m + self.msa_transition(m, chunk_size_transition_msa)
 
         # Communication to pairwise stack
-        z = z + self.outer_product_mean(m, msa_mask)
+        z = z + self.outer_product_mean(m, msa_mask, chunk_size_outer_product)
 
         # Compute pairwise stack
         dropout = get_dropout_mask(self.z_dropout, z, self.training)
@@ -391,17 +392,17 @@ class MSALayer(nn.Module):
         z = z + dropout * self.tri_att_start(
             z,
             mask=token_mask,
-            chunk_size=self.chunk_size_tri_attn if not self.training else None,
+            chunk_size=chunk_size_tri_attn,
         )
 
         dropout = get_dropout_mask(self.z_dropout, z, self.training, columnwise=True)
         z = z + dropout * self.tri_att_end(
             z,
             mask=token_mask,
-            chunk_size=self.chunk_size_tri_attn if not self.training else None,
+            chunk_size=chunk_size_tri_attn,
         )
 
-        z = z + self.z_transition(z)
+        z = z + self.z_transition(z, chunk_size_transition_z)
 
         return z, m
 
@@ -422,7 +423,6 @@ class PairformerModule(nn.Module):
         no_update_s: bool = False,
         no_update_z: bool = False,
         offload_to_cpu: bool = False,
-        chunk_size_tri_attn: int = None,
         **kwargs,
     ) -> None:
         """Initialize the Pairformer module.
@@ -451,8 +451,6 @@ class PairformerModule(nn.Module):
             Whether to update the pairwise embeddings, by default False
         offload_to_cpu : bool, optional
             Whether to offload to CPU, by default False
-        chunk_size_tri_attn : int, optional
-            The chunk size for triangle attention, by default None
 
         """
         super().__init__()
@@ -475,7 +473,6 @@ class PairformerModule(nn.Module):
                             pairwise_num_heads,
                             no_update_s,
                             False if i < num_blocks - 1 else no_update_z,
-                            chunk_size_tri_attn,
                         ),
                         offload_to_cpu=offload_to_cpu,
                     )
@@ -491,7 +488,6 @@ class PairformerModule(nn.Module):
                         pairwise_num_heads,
                         no_update_s,
                         False if i < num_blocks - 1 else no_update_z,
-                        chunk_size_tri_attn,
                     )
                 )
 
@@ -501,6 +497,7 @@ class PairformerModule(nn.Module):
         z: Tensor,
         mask: Tensor,
         pair_mask: Tensor,
+        chunk_size_tri_attn: int = None,
     ) -> Tuple[Tensor, Tensor]:
         """Perform the forward pass.
 
@@ -522,8 +519,16 @@ class PairformerModule(nn.Module):
             The updated pairwise embeddings.
 
         """
+        if not self.training:
+            if z.shape[1] > 1024:
+                chunk_size_tri_attn = 128
+            else:
+                chunk_size_tri_attn = 512
+        else:
+            chunk_size_tri_attn = None
+
         for layer in self.layers:
-            s, z = layer(s, z, mask, pair_mask)
+            s, z = layer(s, z, mask, pair_mask, chunk_size_tri_attn)
         return s, z
 
 
@@ -540,7 +545,6 @@ class PairformerLayer(nn.Module):
         pairwise_num_heads: int = 4,
         no_update_s: bool = False,
         no_update_z: bool = False,
-        chunk_size_tri_attn: int = None,
     ) -> None:
         """Initialize the Pairformer module.
 
@@ -562,8 +566,6 @@ class PairformerLayer(nn.Module):
             Whether to update the single embeddings, by default False
         no_update_z : bool, optional
             Whether to update the pairwise embeddings, by default False
-        chunk_size_tri_attn : int, optional
-            The chunk size for triangle attention, by default None
 
         """
         super().__init__()
@@ -572,7 +574,6 @@ class PairformerLayer(nn.Module):
         self.num_heads = num_heads
         self.no_update_s = no_update_s
         self.no_update_z = no_update_z
-        self.chunk_size_tri_attn = chunk_size_tri_attn
         if not self.no_update_s:
             self.attention = AttentionPairBias(token_s, token_z, num_heads)
         self.tri_mul_out = TriangleMultiplicationOutgoing(token_z)
@@ -593,6 +594,7 @@ class PairformerLayer(nn.Module):
         z: Tensor,
         mask: Tensor,
         pair_mask: Tensor,
+        chunk_size_tri_attn: int = None,
     ) -> Tuple[Tensor, Tensor]:
         """Perform the forward pass."""
         # Compute pairwise stack
@@ -606,14 +608,14 @@ class PairformerLayer(nn.Module):
         z = z + dropout * self.tri_att_start(
             z,
             mask=pair_mask,
-            chunk_size=self.chunk_size_tri_attn if not self.training else None,
+            chunk_size=chunk_size_tri_attn,
         )
 
         dropout = get_dropout_mask(self.dropout, z, self.training, columnwise=True)
         z = z + dropout * self.tri_att_end(
             z,
             mask=pair_mask,
-            chunk_size=self.chunk_size_tri_attn if not self.training else None,
+            chunk_size=chunk_size_tri_attn,
         )
 
         z = z + self.transition_z(z)
