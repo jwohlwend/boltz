@@ -1,0 +1,49 @@
+---
+
+name: default
+kind: pipeline
+type: kubernetes
+node_selector:
+  CPUs: 8
+
+steps:
+
+  - name: get version -- branch
+    image: ubuntu:latest
+    commands:
+      - echo $(cat VERSION)-$(echo $DRONE_COMMIT_BRANCH | sed 's/[/_-]//g')-$DRONE_BUILD_NUMBER > .tags
+      - echo $(cat .tags)
+    when:
+      event:
+        - push
+
+  - name: get version -- tag
+    image: ubuntu:latest
+    commands:
+      - echo $(cat VERSION) > .tags
+      - echo $(cat .tags)
+    when:
+      event:
+        - tag
+
+  - name: release server image -- branch
+    image: plugins/gcr
+    settings:
+      repo: cyrus-containers/boltz
+      debug: true
+      dockerfile: Dockerfile
+      json_key:
+        from_secret: dockerconfigjson
+    when:
+      event: push
+
+  - name: release server image -- tag
+    image: plugins/gcr
+    settings:
+      repo: cyrus-containers/boltz
+      debug: true
+      dockerfile: Dockerfile
+      json_key:
+        from_secret: dockerconfigjson
+    when:
+      event: tag
