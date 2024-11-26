@@ -1,5 +1,4 @@
-ARG BASE_IMAGE
-FROM ${BASE_IMAGE} AS builder
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
   git \
@@ -16,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-FROM ${BASE_IMAGE}
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 COPY --from=builder /opt/venv /opt/venv
 
