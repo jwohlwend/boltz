@@ -1,10 +1,12 @@
 from dataclasses import asdict, replace
+import json
 from pathlib import Path
 from typing import Literal
 
 import numpy as np
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.callbacks import BasePredictionWriter
+import torch
 from torch import Tensor
 
 from boltz.data.types import (
@@ -69,16 +71,13 @@ class BoltzWriter(BasePredictionWriter):
         coords = coords.unsqueeze(0)
 
         pad_masks = prediction["masks"]
-        if prediction.get("confidence") is not None:
-            confidences = prediction["confidence"]
-            confidences = confidences.reshape(len(records), -1).tolist()
-        else:
-            confidences = [0.0 for _ in range(len(records))]
+
+        # Get ranking
+        argsort = torch.argsort(prediction["confidence_score"], descending=True)
+        idx_to_rank = {idx.item(): rank for rank, idx in enumerate(argsort)}
 
         # Iterate over the records
-        for record, coord, pad_mask, _confidence in zip(
-            records, coords, pad_masks, confidences
-        ):
+        for record, coord, pad_mask in zip(records, coords, pad_masks):
             # Load the structure
             path = self.data_dir / f"{record.id}.npz"
             structure: Structure = Structure.load(path)
@@ -134,20 +133,97 @@ class BoltzWriter(BasePredictionWriter):
                 struct_dir.mkdir(exist_ok=True)
 
                 if self.output_format == "pdb":
-                    path = struct_dir / f"{record.id}_model_{model_idx}.pdb"
+                    path = (
+                        struct_dir / f"{record.id}_model_{idx_to_rank[model_idx]}.pdb"
+                    )
                     with path.open("w") as f:
                         f.write(to_pdb(new_structure))
                 elif self.output_format == "mmcif":
-                    path = struct_dir / f"{record.id}_model_{model_idx}.cif"
+                    path = (
+                        struct_dir / f"{record.id}_model_{idx_to_rank[model_idx]}.cif"
+                    )
                     with path.open("w") as f:
-                        f.write(to_mmcif(new_structure))
+                        if "plddt" in prediction:
+                            f.write(
+                                to_mmcif(new_structure, prediction["plddt"][model_idx])
+                            )
+                        else:
+                            f.write(to_mmcif(new_structure))
                 else:
-                    path = struct_dir / f"{record.id}_model_{model_idx}.npz"
+                    path = (
+                        struct_dir / f"{record.id}_model_{idx_to_rank[model_idx]}.npz"
+                    )
                     np.savez_compressed(path, **asdict(new_structure))
+
+                # Save confidence summary
+                if "plddt" in prediction:
+                    path = (
+                        struct_dir
+                        / f"confidence_{record.id}_model_{idx_to_rank[model_idx]}.json"
+                    )
+                    confidence_summary_dict = {}
+                    for key in [
+                        "confidence_score",
+                        "ptm",
+                        "iptm",
+                        "ligand_iptm",
+                        "protein_iptm",
+                        "complex_plddt",
+                        "complex_iplddt",
+                        "complex_pde",
+                        "complex_ipde",
+                    ]:
+                        confidence_summary_dict[key] = prediction[key][model_idx].item()
+                    confidence_summary_dict["chains_ptm"] = {
+                        idx: prediction["pair_chains_iptm"][idx][idx][model_idx].item()
+                        for idx in prediction["pair_chains_iptm"]
+                    }
+                    confidence_summary_dict["pair_chains_iptm"] = {
+                        idx1: {
+                            idx2: prediction["pair_chains_iptm"][idx1][idx2][
+                                model_idx
+                            ].item()
+                            for idx2 in prediction["pair_chains_iptm"][idx1]
+                        }
+                        for idx1 in prediction["pair_chains_iptm"]
+                    }
+                    with path.open("w") as f:
+                        f.write(
+                            json.dumps(
+                                confidence_summary_dict,
+                                indent=4,
+                            )
+                        )
+
+                    # Save plddt
+                    plddt = prediction["plddt"][model_idx]
+                    path = (
+                        struct_dir
+                        / f"plddt_{record.id}_model_{idx_to_rank[model_idx]}.npz"
+                    )
+                    np.savez_compressed(path, plddt=plddt.cpu().numpy())
+
+                # Save pae
+                if "pae" in prediction:
+                    pae = prediction["pae"][model_idx]
+                    path = (
+                        struct_dir
+                        / f"pae_{record.id}_model_{idx_to_rank[model_idx]}.npz"
+                    )
+                    np.savez_compressed(path, pae=pae.cpu().numpy())
+
+                # Save pde
+                if "pde" in prediction:
+                    pde = prediction["pde"][model_idx]
+                    path = (
+                        struct_dir
+                        / f"pde_{record.id}_model_{idx_to_rank[model_idx]}.npz"
+                    )
+                    np.savez_compressed(path, pde=pde.cpu().numpy())
 
     def on_predict_epoch_end(
         self,
-        trainer: Trainer,  # noqa: ARG00s2
+        trainer: Trainer,  # noqa: ARG002
         pl_module: LightningModule,  # noqa: ARG002
     ) -> None:
         """Print the number of failed examples."""

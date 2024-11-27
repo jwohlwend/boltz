@@ -1,6 +1,6 @@
 import gc
 import random
-from typing import Any, Optional, Dict
+from typing import Any, Dict, Optional
 
 import torch
 import torch._dynamo
@@ -228,7 +228,6 @@ class Boltz1(LightningModule):
                 self.confidence_module = ConfidenceModule(
                     token_s,
                     token_z,
-                    confidence_prediction=confidence_prediction,
                     compute_pae=alpha_pae > 0,
                     imitate_trunk=True,
                     pairformer_args=pairformer_args,
@@ -240,7 +239,6 @@ class Boltz1(LightningModule):
                 self.confidence_module = ConfidenceModule(
                     token_s,
                     token_z,
-                    confidence_prediction=confidence_prediction,
                     compute_pae=alpha_pae > 0,
                     **confidence_model_args,
                 )
@@ -262,6 +260,7 @@ class Boltz1(LightningModule):
         num_sampling_steps: Optional[int] = None,
         multiplicity_diffusion_train: int = 1,
         diffusion_samples: int = 1,
+        run_confidence_sequentially: bool = False,
     ) -> dict[str, Tensor]:
         dict_out = {}
 
@@ -361,6 +360,7 @@ class Boltz1(LightningModule):
                     feats=feats,
                     pred_distogram_logits=dict_out["pdistogram"].detach(),
                     multiplicity=diffusion_samples,
+                    run_sequentially=run_confidence_sequentially,
                 )
             )
         if self.confidence_prediction and self.confidence_module.use_s_diffusion:
@@ -587,6 +587,7 @@ class Boltz1(LightningModule):
                 recycling_steps=self.validation_args.recycling_steps,
                 num_sampling_steps=self.validation_args.sampling_steps,
                 diffusion_samples=n_samples,
+                run_confidence_sequentially=self.validation_args.run_confidence_sequentially,
             )
 
         except RuntimeError as e:  # catch out of memory exceptions
@@ -1119,13 +1120,32 @@ class Boltz1(LightningModule):
                 recycling_steps=self.predict_args["recycling_steps"],
                 num_sampling_steps=self.predict_args["sampling_steps"],
                 diffusion_samples=self.predict_args["diffusion_samples"],
+                run_confidence_sequentially=True,
             )
             pred_dict = {"exception": False}
             pred_dict["masks"] = batch["atom_pad_mask"]
             pred_dict["coords"] = out["sample_atom_coords"]
-            if self.confidence_prediction:
-                pred_dict["confidence"] = out["iptm"]
-
+            if self.predict_args.get("write_confidence_summary", True):
+                pred_dict["confidence_score"] = (
+                    4 * out["complex_plddt"] + out["iptm"]
+                ) / 5
+                for key in [
+                    "ptm",
+                    "iptm",
+                    "ligand_iptm",
+                    "protein_iptm",
+                    "pair_chains_iptm",
+                    "complex_plddt",
+                    "complex_iplddt",
+                    "complex_pde",
+                    "complex_ipde",
+                    "plddt",
+                ]:
+                    pred_dict[key] = out[key]
+            if self.predict_args.get("write_full_pae", True):
+                pred_dict["pae"] = out["pae"]
+            if self.predict_args.get("write_full_pde", False):
+                pred_dict["pde"] = out["pde"]
             return pred_dict
 
         except RuntimeError as e:  # catch out of memory exceptions
@@ -1176,13 +1196,6 @@ class Boltz1(LightningModule):
             self.ema = ExponentialMovingAverage(
                 parameters=self.parameters(), decay=self.ema_decay
             )
-        if self.use_ema:
-            if self.ema.compatible(checkpoint["ema"]["shadow_params"]):
-                self.ema.load_state_dict(checkpoint["ema"], device=torch.device("cpu"))
-            else:
-                print("EMA not compatible with checkpoint, skipping...")
-        elif "ema" in checkpoint:
-            self.load_state_dict(checkpoint["ema"]["shadow_params"], strict=False)
 
     def on_train_start(self):
         if self.use_ema and self.ema is None:

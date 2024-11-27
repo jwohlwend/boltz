@@ -158,7 +158,9 @@ def check_inputs(
     return data
 
 
-def compute_msa(data: dict[str, str], msa_dir: Path, msa_server_url:str, msa_pairing_strategy:str) -> list[Path]:
+def compute_msa(
+    data: dict[str, str], msa_dir: Path, msa_server_url: str, msa_pairing_strategy: str
+) -> list[Path]:
     """Compute the MSA for the input data.
 
     Parameters
@@ -175,7 +177,13 @@ def compute_msa(data: dict[str, str], msa_dir: Path, msa_server_url:str, msa_pai
 
     """
     # Run MMSeqs2
-    msa = run_mmseqs2(list(data.values()), msa_dir, use_pairing=len(data) > 1, host_url=msa_server_url, pairing_strategy=msa_pairing_strategy)
+    msa = run_mmseqs2(
+        list(data.values()),
+        msa_dir,
+        use_pairing=len(data) > 1,
+        host_url=msa_server_url,
+        pairing_strategy=msa_pairing_strategy,
+    )
 
     # Dump to A3M
     for idx, key in enumerate(data):
@@ -278,7 +286,12 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
         if to_generate:
             msg = f"Generating MSA for {path} with {len(to_generate)} protein entities."
             click.echo(msg)
-            compute_msa(to_generate, msa_dir, msa_server_url=msa_server_url, msa_pairing_strategy=msa_pairing_strategy)
+            compute_msa(
+                to_generate,
+                msa_dir,
+                msa_server_url=msa_server_url,
+                msa_pairing_strategy=msa_pairing_strategy,
+            )
 
         # Parse MSA data
         msas = {c.msa_id for c in target.record.chains if c.msa_id != -1}
@@ -375,6 +388,24 @@ def cli() -> None:
     default=1,
 )
 @click.option(
+    "--write_confidence_summary",
+    type=bool,
+    help="Whether to dump the confidence metrics summary and plddt into a json file. Default is True.",
+    default=True,
+)
+@click.option(
+    "--write_full_pae",
+    type=bool,
+    help="Whether to dump the pae into a npz file. Default is True.",
+    default=True,
+)
+@click.option(
+    "--write_full_pde",
+    type=bool,
+    help="Whether to dump the pde into a npz file. Default is False.",
+    default=False,
+)
+@click.option(
     "--output_format",
     type=click.Choice(["pdb", "mmcif"]),
     help="The output format to use for the predictions. Default is mmcif.",
@@ -418,6 +449,9 @@ def predict(
     recycling_steps: int = 3,
     sampling_steps: int = 200,
     diffusion_samples: int = 1,
+    write_confidence_summary: bool = True,
+    write_full_pae: bool = True,
+    write_full_pde: bool = False,
     output_format: Literal["pdb", "mmcif"] = "mmcif",
     num_workers: int = 2,
     override: bool = False,
@@ -492,6 +526,9 @@ def predict(
         "recycling_steps": recycling_steps,
         "sampling_steps": sampling_steps,
         "diffusion_samples": diffusion_samples,
+        "write_confidence_summary": write_confidence_summary,
+        "write_full_pae": write_full_pae,
+        "write_full_pde": write_full_pde,
     }
     model_module: Boltz1 = Boltz1.load_from_checkpoint(
         checkpoint,
@@ -499,6 +536,7 @@ def predict(
         predict_args=predict_args,
         map_location="cpu",
         diffusion_process_args=asdict(BoltzDiffusionParams()),
+        ema=False,
     )
     model_module.eval()
 

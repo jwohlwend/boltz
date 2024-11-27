@@ -74,7 +74,6 @@ class ConfidenceModule(nn.Module):
             Whether to compile pairformer, by default False.
 
         """
-
         super().__init__()
         self.max_num_atoms_per_token = 23
         self.no_update_s = pairformer_args.get("no_update_s", False)
@@ -191,7 +190,44 @@ class ConfidenceModule(nn.Module):
         pred_distogram_logits,
         multiplicity=1,
         s_diffusion=None,
+        run_sequentially=False,
     ):
+        if run_sequentially and multiplicity > 1:
+            assert z.shape[0] == 1, "Not supported with batch size > 1"
+            out_dicts = []
+            for sample_idx in range(multiplicity):
+                out_dicts.append(  # noqa: PERF401
+                    self.forward(
+                        s_inputs,
+                        s,
+                        z,
+                        x_pred[sample_idx : sample_idx + 1],
+                        feats,
+                        pred_distogram_logits,
+                        multiplicity=1,
+                        s_diffusion=s_diffusion[sample_idx : sample_idx + 1]
+                        if s_diffusion is not None
+                        else None,
+                        run_sequentially=False,
+                    )
+                )
+
+            out_dict = {}
+            for key in out_dicts[0]:
+                if key != "pair_chains_iptm":
+                    out_dict[key] = torch.cat([out[key] for out in out_dicts], dim=0)
+                else:
+                    pair_chains_iptm = {}
+                    for chain_idx1 in out_dicts[0][key].keys():
+                        chains_iptm = {}
+                        for chain_idx2 in out_dicts[0][key][chain_idx1].keys():
+                            chains_iptm[chain_idx2] = torch.cat(
+                                [out[key][chain_idx1][chain_idx2] for out in out_dicts],
+                                dim=0,
+                            )
+                        pair_chains_iptm[chain_idx1] = chains_iptm
+                    out_dict[key] = pair_chains_iptm
+            return out_dict
         if self.imitate_trunk:
             s_inputs = self.input_embedder(feats)
 
@@ -302,7 +338,7 @@ class ConfidenceHeads(nn.Module):
         num_plddt_bins=50,
         num_pde_bins=64,
         num_pae_bins=64,
-        compute_pae: bool = False,
+        compute_pae: bool = True,
     ):
         """Initialize the confidence head.
 
@@ -348,10 +384,9 @@ class ConfidenceHeads(nn.Module):
         if self.compute_pae:
             pae_logits = self.to_pae_logits(z)
 
-        # Weights used to compute the interface pLDDT and PDE
-        ligand_weight = 20
-        non_interface_weight = 1
-        interface_weight = 10
+        # Weights used to compute the interface pLDDT
+        ligand_weight = 2
+        interface_weight = 1
 
         # Retrieve relevant features
         token_type = feats["mol_type"]
@@ -374,15 +409,12 @@ class ConfidenceHeads(nn.Module):
             is_contact * is_different_chain * (1 - is_ligand_token).unsqueeze(-1),
             dim=-1,
         ).values
-        token_non_interface_mask = (1 - token_interface_mask) * (1 - is_ligand_token)
         iplddt_weight = (
-            is_ligand_token * ligand_weight
-            + token_interface_mask * interface_weight
-            + token_non_interface_mask * non_interface_weight
+            is_ligand_token * ligand_weight + token_interface_mask * interface_weight
         )
-        complex_iplddt = (plddt * token_pad_mask * iplddt_weight).sum(
-            dim=-1
-        ) / torch.sum(token_pad_mask * iplddt_weight, dim=-1)
+        complex_iplddt = (plddt * token_pad_mask * iplddt_weight).sum(dim=-1) / (
+            torch.sum(token_pad_mask * iplddt_weight, dim=-1) + 1e-5
+        )
 
         # Compute the aggregated PDE and iPDE
         pde = compute_aggregated_metric(pde_logits, end=32)
@@ -431,12 +463,13 @@ class ConfidenceHeads(nn.Module):
         if self.compute_pae:
             out_dict["pae_logits"] = pae_logits
             out_dict["pae"] = compute_aggregated_metric(pae_logits, end=32)
-            ptm, iptm, ligand_iptm, protein_iptm = compute_ptms(
+            ptm, iptm, ligand_iptm, protein_iptm, pair_chains_iptm = compute_ptms(
                 pae_logits, x_pred, feats, multiplicity
             )
             out_dict["ptm"] = ptm
             out_dict["iptm"] = iptm
             out_dict["ligand_iptm"] = ligand_iptm
             out_dict["protein_iptm"] = protein_iptm
+            out_dict["pair_chains_iptm"] = pair_chains_iptm
 
         return out_dict

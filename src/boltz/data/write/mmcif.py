@@ -1,17 +1,19 @@
 import io
-from typing import Iterator
+from typing import Iterator, Optional
 
 import ihm
+import modelcif
 from modelcif import Assembly, AsymUnit, Entity, System, dumper
 from modelcif.model import AbInitioModel, Atom, ModelGroup
 from rdkit import Chem
+from torch import Tensor
 
 from boltz.data import const
 from boltz.data.types import Structure
 from boltz.data.write.utils import generate_tags
 
 
-def to_mmcif(structure: Structure) -> str:  # noqa: C901
+def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # noqa: C901
     """Write a structure into an MMCIF file.
 
     Parameters
@@ -108,15 +110,10 @@ def to_mmcif(structure: Structure) -> str:  # noqa: C901
         asym_unit_map[chain_idx] = asym
     modeled_assembly = Assembly(asym_unit_map.values(), name="Modeled assembly")
 
-    # class _LocalPLDDT(modelcif.qa_metric.Local, modelcif.qa_metric.PLDDT):
-    #     name = "pLDDT"
-    #     software = None
-    #     description = "Predicted lddt"
-
-    # class _GlobalPLDDT(modelcif.qa_metric.Global, modelcif.qa_metric.PLDDT):
-    #     name = "pLDDT"
-    #     software = None
-    #     description = "Global pLDDT, mean of per-residue pLDDTs"
+    class _LocalPLDDT(modelcif.qa_metric.Local, modelcif.qa_metric.PLDDT):
+        name = "pLDDT"
+        software = None
+        description = "Predicted lddt"
 
     class _MyModel(AbInitioModel):
         def get_atoms(self) -> Iterator[Atom]:
@@ -161,36 +158,28 @@ def to_mmcif(structure: Structure) -> str:  # noqa: C901
                             occupancy=1.00,
                         )
 
-        def add_scores(self):
-            return
-            # local scores
-            # plddt_per_residue = {}
-            # for i in range(n):
-            #     for mask, b_factor in zip(atom_mask[i], b_factors[i]):
-            #         if mask < 0.5:
-            #             continue
-            #         # add 1 per residue, not 1 per atom
-            #         if chain_index[i] not in plddt_per_residue:
-            #             # first time a chain index is seen: add the key and start the residue dict
-            #             plddt_per_residue[chain_index[i]] = {residue_index[i]: b_factor}
-            #         if residue_index[i] not in plddt_per_residue[chain_index[i]]:
-            #             plddt_per_residue[chain_index[i]][residue_index[i]] = b_factor
-            # plddts = []
-            # for chain_idx in plddt_per_residue:
-            #     for residue_idx in plddt_per_residue[chain_idx]:
-            #         plddt = plddt_per_residue[chain_idx][residue_idx]
-            #         plddts.append(plddt)
-            #         self.qa_metrics.append(
-            #             _LocalPLDDT(
-            #                 asym_unit_map[chain_idx].residue(residue_idx), plddt
-            #             )
-            #         )
-            # # global score
-            # self.qa_metrics.append((_GlobalPLDDT(np.mean(plddts))))
+        def add_plddt(self, plddts):
+            res_num = 0
+            for chain in structure.chains:
+                chain_idx = chain["asym_id"]
+                res_start = chain["res_idx"]
+                res_end = chain["res_idx"] + chain["res_num"]
+                residues = structure.residues[res_start:res_end]
+                # We rename the chains in alphabetical order
+                for residue in residues:
+                    residue_idx = residue["res_idx"] + 1
+                    self.qa_metrics.append(
+                        _LocalPLDDT(
+                            asym_unit_map[chain_idx].residue(residue_idx),
+                            plddts[res_num].item(),
+                        )
+                    )
+                    res_num += 1
 
     # Add the model and modeling protocol to the file and write them out:
     model = _MyModel(assembly=modeled_assembly, name="Model")
-    # model.add_scores()
+    if plddts is not None:
+        model.add_plddt(plddts)
 
     model_group = ModelGroup([model], name="All models")
     system.model_groups.append(model_group)
