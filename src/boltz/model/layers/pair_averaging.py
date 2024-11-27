@@ -14,7 +14,6 @@ class PairWeightedAveraging(nn.Module):
         c_h: int,
         num_heads: int,
         inf: float = 1e6,
-        chunk_heads: bool = False,
     ) -> None:
         """Initialize the pair weighted averaging layer.
 
@@ -30,8 +29,6 @@ class PairWeightedAveraging(nn.Module):
             The number of heads.
         inf: float
             The value to use for masking, default 1e6.
-        chunk_heads: bool
-            Whether to sequentially compute heads at inference, default False.
 
         """
         super().__init__()
@@ -40,7 +37,6 @@ class PairWeightedAveraging(nn.Module):
         self.c_h = c_h
         self.num_heads = num_heads
         self.inf = inf
-        self.chunk_heads = chunk_heads
 
         self.norm_m = nn.LayerNorm(c_m)
         self.norm_z = nn.LayerNorm(c_z)
@@ -51,7 +47,9 @@ class PairWeightedAveraging(nn.Module):
         self.proj_o = nn.Linear(c_h * num_heads, c_m, bias=False)
         init.final_init_(self.proj_o.weight)
 
-    def forward(self, m: Tensor, z: Tensor, mask: Tensor) -> Tensor:
+    def forward(
+        self, m: Tensor, z: Tensor, mask: Tensor, chunk_heads: False = bool
+    ) -> Tensor:
         """Forward pass.
 
         Parameters
@@ -73,7 +71,7 @@ class PairWeightedAveraging(nn.Module):
         m = self.norm_m(m)
         z = self.norm_z(z)
 
-        if self.chunk_heads and not self.training:
+        if chunk_heads and not self.training:
             # Compute heads sequentially
             o_chunks = []
             for head_idx in range(self.num_heads):
