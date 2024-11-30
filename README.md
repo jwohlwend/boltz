@@ -42,6 +42,12 @@ Boltz currently accepts three input formats:
 
 To see all available options: `boltz predict --help` and for more informaton on these input formats, see our [prediction instructions](docs/prediction.md).
 
+### Build easily with Gradio
+
+```
+python gradio_app.py
+```
+
 ## Training
 
 If you're interested in retraining the model, see our [training instructions](docs/training.md).
