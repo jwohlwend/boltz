@@ -2,6 +2,7 @@ import pickle
 import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
+import tempfile
 from typing import Literal, Optional
 
 import click
@@ -162,11 +163,12 @@ def check_inputs(
 
 
 def compute_msa(
+    target_id: str,
     data: dict[str, str],
     msa_dir: Path,
     msa_server_url: str,
     msa_pairing_strategy: str,
-) -> list[Path]:
+) -> None:
     """Compute the MSA for the input data.
 
     Parameters
@@ -175,33 +177,33 @@ def compute_msa(
         The input protein sequences.
     msa_dir : Path
         The msa temp directory.
-
-    Returns
-    -------
-    list[Path]
-        The list of MSA files.
-
     """
     if len(data) > 1:
-        paired_msas = run_mmseqs2(
-            list(data.values()),
-            msa_dir / "tmp",
-            use_env=True,
-            use_pairing=True,
-            host_url=msa_server_url,
-            pairing_strategy=msa_pairing_strategy,
-        )
+        with tempfile.TemporaryDirectory(
+            prefix=target_id, suffix="_paired", dir=msa_dir
+        ) as td:
+            paired_msas = run_mmseqs2(
+                list(data.values()),
+                td,
+                use_env=True,
+                use_pairing=True,
+                host_url=msa_server_url,
+                pairing_strategy=msa_pairing_strategy,
+            )
     else:
         paired_msas = [""] * len(data)
 
-    unpaired_msa = run_mmseqs2(
-        list(data.values()),
-        msa_dir / "tmp",
-        use_env=True,
-        use_pairing=False,
-        host_url=msa_server_url,
-        pairing_strategy=msa_pairing_strategy,
-    )
+    with tempfile.TemporaryDirectory(
+            prefix=target_id, suffix="_unpaired", dir=msa_dir
+        ) as td:
+        unpaired_msa = run_mmseqs2(
+            list(data.values()),
+            td,
+            use_env=True,
+            use_pairing=False,
+            host_url=msa_server_url,
+            pairing_strategy=msa_pairing_strategy,
+        )
 
     for idx, name in enumerate(data):
         # Get paired sequences
@@ -324,6 +326,7 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
             msg = f"Generating MSA for {path} with {len(to_generate)} protein entities."
             click.echo(msg)
             compute_msa(
+                target_id,
                 to_generate,
                 msa_dir,
                 msa_server_url=msa_server_url,
