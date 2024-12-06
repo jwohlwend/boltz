@@ -29,12 +29,6 @@ ENV PATH="/opt/venv/bin:$PATH" \
   LANG=C.UTF-8 \
   PYTHONUNBUFFERED=1
 
-ARG USERNAME=boltz
-ARG UID=900
-ARG GID=900
-RUN groupadd --gid $GID $USERNAME && \
-  useradd --uid $UID --gid $GID --create-home --shell /bin/bash $USERNAME
-
 WORKDIR /app
 
 COPY LICENSE /app/LICENSE
@@ -43,8 +37,5 @@ COPY examples /app/examples
 COPY scripts /app/scripts
 COPY docs /app/docs
 
-RUN chown -R $USERNAME:$USERNAME /app
-
-USER $USERNAME
 
 ENTRYPOINT ["boltz"]
