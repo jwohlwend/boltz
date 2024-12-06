@@ -22,6 +22,7 @@ from boltz.data.types import MSA, Manifest, Record
 from boltz.data.write.writer import BoltzWriter
 from boltz.model.model import Boltz1
 
+
 CCD_URL = "https://huggingface.co/boltz-community/boltz-1/resolve/main/ccd.pkl"
 MODEL_URL = (
     "https://huggingface.co/boltz-community/boltz-1/resolve/main/boltz1_conf.ckpt"
@@ -489,6 +490,21 @@ def cli() -> None:
     help="Pairing strategy to use. Used only if --use_msa_server is set. Options are 'greedy' and 'complete'",
     default="greedy",
 )
+
+@click.option(
+    "--rosetta_relax",
+    is_flag=True,
+    help="Whether to performs rosetta repacking and fastrelaxation",
+)
+
+@click.option(
+    "--relax_cores",
+    type=int,
+    default=16,
+    help="Number of cores for rosetta relaxation",
+)
+
+
 def predict(
     data: str,
     out_dir: str,
@@ -508,6 +524,8 @@ def predict(
     use_msa_server: bool = False,
     msa_server_url: str = "https://api.colabfold.com",
     msa_pairing_strategy: str = "greedy",
+    rosetta_relax: bool = False,
+    relax_cores: int = 8,
 ) -> None:
     """Run predictions with Boltz-1."""
     # If cpu, write a friendly warning
@@ -615,6 +633,8 @@ def predict(
         data_dir=processed.targets_dir,
         output_dir=out_dir / "predictions",
         output_format=output_format,
+        rosetta_relax=rosetta_relax,
+        rosetta_relax_cores=relax_cores,
     )
 
     trainer = Trainer(
