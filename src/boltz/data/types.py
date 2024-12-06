@@ -365,6 +365,12 @@ class InterfaceInfo:
 
 
 @dataclass(frozen=True)
+class InferenceOptions:
+    binders: list[int]
+    pocket: Optional[list[tuple[int, int]]]
+
+
+@dataclass(frozen=True)
 class Record(JSONSerializable):
     """Record datatype."""
 
@@ -372,6 +378,7 @@ class Record(JSONSerializable):
     structure: StructureInfo
     chains: list[ChainInfo]
     interfaces: list[InterfaceInfo]
+    inference_options: Optional[InferenceOptions] = None
 
 
 ####################################################################################################

@@ -151,6 +151,13 @@ class PredictionDataset(torch.utils.data.Dataset):
         except Exception as e:  # noqa: BLE001
             print(f"Tokenizer failed on {record.id} with error {e}. Skipping.")  # noqa: T201
             return self.__getitem__(0)
+        
+        # Inference specific options
+        options = record.inference_options
+        if options is None:
+            binders, pocket = None, None
+        else:
+            binders, pocket = options.binders, options.pocket
 
         # Compute features
         try:
@@ -163,6 +170,8 @@ class PredictionDataset(torch.utils.data.Dataset):
                 pad_to_max_seqs=False,
                 symmetries={},
                 compute_symmetries=False,
+                inference_binder=binders,
+                inference_pocket=pocket,
             )
         except Exception as e:  # noqa: BLE001
             print(f"Featurizer failed on {record.id} with error {e}. Skipping.")  # noqa: T201

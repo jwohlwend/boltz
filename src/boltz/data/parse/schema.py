@@ -16,6 +16,7 @@ from boltz.data.types import (
     ChainInfo,
     Connection,
     Interface,
+    InferenceOptions,
     Record,
     Residue,
     Structure,
@@ -780,6 +781,8 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
 
     # Parse constraints
     connections = []
+    pocket_binders = []
+    pocket_residues = []
     constraints = schema.get("constraints", [])
     for constraint in constraints:
         if "bond" in constraint:
@@ -788,12 +791,13 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             c1, r1, a1 = atom_idx_map[(c1, r1 - 1, a1)]  # 1-indexed
             c2, r2, a2 = atom_idx_map[(c2, r2 - 1, a2)]  # 1-indexed
             connections.append((c1, c2, r1, r2, a1, a2))
-
         elif "pocket" in constraint:
             binder = constraint["pocket"]["binder"]
             contacts = constraint["pocket"]["contacts"]
-            msg = f"Pocket constraints not implemented yet: {binder} - {contacts}"
-            raise NotImplementedError(msg)
+            pocket_binders.append(chain_to_idx[binder])
+            pocket_residues.extend([
+                (chain_to_idx[chain_name],residue_index) for chain_name,residue_index in contacts
+            ])
         else:
             msg = f"Invalid constraint: {constraint}"
             raise ValueError(msg)
@@ -833,11 +837,17 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         )
         chain_infos.append(chain_info)
 
+    options = InferenceOptions(
+        binders=pocket_binders,
+        pocket=pocket_residues
+    )
+
     record = Record(
         id=name,
         structure=struct_info,
         chains=chain_infos,
         interfaces=[],
+        inference_options=options,
     )
     return Target(
         record=record,
