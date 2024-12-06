@@ -40,7 +40,7 @@ Boltz currently accepts three input formats:
 
 3. A directory containing files of the above formats, for batched processing
 
-To see all available options: `boltz predict --help` and for more informaton on these input formats, see our [prediction instructions](docs/prediction.md).
+To see all available options: `boltz predict --help` and for more information on these input formats, see our [prediction instructions](docs/prediction.md).
 
 ## Training
 
