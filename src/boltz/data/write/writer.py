@@ -143,7 +143,7 @@ class BoltzWriter(BasePredictionWriter):
                     )
                     with path.open("w") as f:
                         f.write(to_pdb(new_structure))
-                    self.paths_to_relax.append(path)
+                    self.paths_to_relax.append(Path(path).resolve())
                 elif self.output_format == "mmcif":
                     path = (
                         struct_dir / f"{record.id}_model_{idx_to_rank[model_idx]}.cif"
@@ -155,7 +155,7 @@ class BoltzWriter(BasePredictionWriter):
                             )
                         else:
                             f.write(to_mmcif(new_structure))
-                    self.paths_to_relax.append(path)
+                    self.paths_to_relax.append(Path(path).resolve())
                 else:
                     path = (
                         struct_dir / f"{record.id}_model_{idx_to_rank[model_idx]}.npz"
@@ -242,3 +242,6 @@ class BoltzWriter(BasePredictionWriter):
             ret = parallel_relax(
                 self.paths_to_relax, override=True, cores=self.rosetta_relax_cores
             )
+            # save energies dataframe
+            csv = Path(self.paths_to_relax[0]).parent.parent / "rosetta_energies.csv"
+            ret.sort_values("repacked_energy").to_csv(csv, index=False)

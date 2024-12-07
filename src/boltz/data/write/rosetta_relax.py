@@ -83,12 +83,22 @@ def fastrelax(input_path, out_path, constrain_relax_to_start_coords=True):
     return scorefxn(pose)
 
 
-def relax(input_path, output_dir=None, override=False):
+def relax(
+    input_path, output_dir=None, override=False, save_logs=True, save_energies=True
+):
     input_path = Path(input_path)
     if output_dir is None:
         output_dir = input_path.parent
-    stdout = str(output_dir / f"rosetta-relax_{input_path.stem}.stdout")
-    stderr = str(output_dir / f"rosetta-relax_{input_path.stem}.stderr")
+    stdout = (
+        str(output_dir / f"rosetta-relax_{input_path.stem}.stdout")
+        if save_logs
+        else "/dev/null"
+    )
+    stderr = (
+        str(output_dir / f"rosetta-relax_{input_path.stem}.stderr")
+        if save_logs
+        else "/dev/null"
+    )
 
     with redirect_stdout(open(stdout, "w")):
         with redirect_stderr(open(stderr, "w")):
@@ -118,9 +128,12 @@ def relax(input_path, output_dir=None, override=False):
                 )
             )
 
-            json_path = output_dir / f"energies_{input_path.stem}.json"
-            with open(json_path, "w") as f:
-                json.dump(ret, f, indent=4)  # `indent=4` makes the file human-readable
+            if save_energies:
+                json_path = output_dir / f"energies_{input_path.stem}.json"
+                with open(json_path, "w") as f:
+                    json.dump(
+                        ret, f, indent=4
+                    )  # `indent=4` makes the file human-readable
 
             sys.stdout.flush()
             sys.stderr.flush()
@@ -128,7 +141,14 @@ def relax(input_path, output_dir=None, override=False):
     return ret
 
 
-def parallel_relax(input_paths, output_dir=None, override=False, cores=16):
+def parallel_relax(
+    input_paths,
+    output_dir=None,
+    override=False,
+    save_logs=False,
+    save_energies=True,
+    cores=8,
+):
     import multiprocessing
     from functools import partial
 
@@ -141,7 +161,13 @@ def parallel_relax(input_paths, output_dir=None, override=False, cores=16):
         ret = pd.DataFrame(
             tqdm(
                 ex.imap_unordered(
-                    partial(relax, output_dir=output_dir, override=override),
+                    partial(
+                        relax,
+                        output_dir=output_dir,
+                        override=override,
+                        save_logs=save_logs,
+                        save_energies=save_energies,
+                    ),
                     input_paths,
                 ),
                 total=len(input_paths),
