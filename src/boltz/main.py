@@ -494,13 +494,13 @@ def cli() -> None:
 @click.option(
     "--rosetta_relax",
     is_flag=True,
-    help="Whether to performs rosetta repacking and fastrelaxation",
+    help="Whether to perform Rosetta repacking and fastrelax. Installation of pyrosetta and a valid license are required",
 )
 
 @click.option(
     "--relax_cores",
     type=int,
-    default=16,
+    default=8,
     help="Number of cores for rosetta relaxation",
 )
 
