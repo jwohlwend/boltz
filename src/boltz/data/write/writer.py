@@ -240,8 +240,11 @@ class BoltzWriter(BasePredictionWriter):
             from boltz.data.write.rosetta_relax import parallel_relax
 
             ret = parallel_relax(
-                self.paths_to_relax, override=True, cores=self.rosetta_relax_cores
+                self.paths_to_relax,
+                override=True,
+                cores=self.rosetta_relax_cores,
+                save_energies=False,
             )
             # save energies dataframe
             csv = Path(self.paths_to_relax[0]).parent.parent / "rosetta_energies.csv"
-            ret.sort_values("repacked_energy").to_csv(csv, index=False)
+            ret.sort_values(by=['name', 'repacked_energy']).reset_index(drop=True).to_csv(csv, index=False)
