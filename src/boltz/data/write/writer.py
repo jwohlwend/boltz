@@ -245,6 +245,8 @@ class BoltzWriter(BasePredictionWriter):
                 cores=self.rosetta_relax_cores,
                 save_energies=False,
             )
-            # save energies dataframe
+            # Save energies DataFrame
             csv = Path(self.paths_to_relax[0]).parent.parent / "rosetta_energies.csv"
-            ret.sort_values(by=['name', 'repacked_energy']).reset_index(drop=True).to_csv(csv, index=False)
+            ret.sort_values(by=["name", "repacked_energy"]).reset_index(
+                drop=True
+            ).to_csv(csv, index=False)

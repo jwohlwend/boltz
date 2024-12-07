@@ -490,21 +490,17 @@ def cli() -> None:
     help="Pairing strategy to use. Used only if --use_msa_server is set. Options are 'greedy' and 'complete'",
     default="greedy",
 )
-
 @click.option(
     "--rosetta_relax",
     is_flag=True,
     help="Whether to perform Rosetta repacking and fastrelax. Installation of pyrosetta and a valid license are required",
 )
-
 @click.option(
     "--relax_cores",
     type=int,
     default=8,
     help="Number of cores for rosetta relaxation",
 )
-
-
 def predict(
     data: str,
     out_dir: str,
