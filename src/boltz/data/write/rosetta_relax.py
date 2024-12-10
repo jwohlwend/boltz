@@ -174,5 +174,5 @@ def parallel_relax(
                 desc="Rosetta Relaxation",
             )
         )
-    ret['name'] = [Path(p).parent.name for p in ret.input_path]
+    ret["name"] = [Path(p).parent.name for p in ret.input_path]
     return ret

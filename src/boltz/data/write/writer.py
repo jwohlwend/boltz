@@ -16,7 +16,7 @@ from boltz.data.types import (
 )
 from boltz.data.write.mmcif import to_mmcif
 from boltz.data.write.pdb import to_pdb
-
+import pandas as pd
 
 class BoltzWriter(BasePredictionWriter):
     """Custom writer for predictions."""
@@ -27,7 +27,7 @@ class BoltzWriter(BasePredictionWriter):
         output_dir: str,
         output_format: Literal["pdb", "mmcif"] = "mmcif",
         rosetta_relax: bool = False,
-        rosetta_relax_cores: int = 16,
+        rosetta_relax_cores: int = 8,
     ) -> None:
         """Initialize the writer.
 
@@ -247,6 +247,8 @@ class BoltzWriter(BasePredictionWriter):
             )
             # Save energies DataFrame
             csv = Path(self.paths_to_relax[0]).parent.parent / "rosetta_energies.csv"
-            ret.sort_values(by=["name", "repacked_energy"]).reset_index(
-                drop=True
-            ).to_csv(csv, index=False)
+            ret = ret.sort_values(by=["name", "repacked_energy"]).reset_index(drop=True)
+            if csv.exists():
+                print(f"`{csv}` exists! appending ...")
+                ret = pd.concat([pd.read_csv(csv), ret])
+            ret.to_csv(csv, index=False)
