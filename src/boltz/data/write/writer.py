@@ -18,6 +18,7 @@ from boltz.data.write.mmcif import to_mmcif
 from boltz.data.write.pdb import to_pdb
 import pandas as pd
 
+
 class BoltzWriter(BasePredictionWriter):
     """Custom writer for predictions."""
 
@@ -26,8 +27,6 @@ class BoltzWriter(BasePredictionWriter):
         data_dir: str,
         output_dir: str,
         output_format: Literal["pdb", "mmcif"] = "mmcif",
-        rosetta_relax: bool = False,
-        rosetta_relax_cores: int = 8,
     ) -> None:
         """Initialize the writer.
 
@@ -45,8 +44,6 @@ class BoltzWriter(BasePredictionWriter):
         self.data_dir = Path(data_dir)
         self.output_dir = Path(output_dir)
         self.output_format = output_format
-        self.rosetta_relax = rosetta_relax
-        self.rosetta_relax_cores = rosetta_relax_cores
         self.paths_to_relax = []
         self.failed = 0
 
@@ -233,22 +230,8 @@ class BoltzWriter(BasePredictionWriter):
         trainer: Trainer,  # noqa: ARG002
         pl_module: LightningModule,  # noqa: ARG002
     ) -> None:
-        """Print the number of failed examples. Perform rosetta relaxation if requested."""
+        """Print the number of failed examples."""
         print(f"\nNumber of failed examples: {self.failed}")  # noqa: T201
 
-        if self.rosetta_relax and len(self.paths_to_relax) > 0:
-            from boltz.data.write.rosetta_relax import parallel_relax
-
-            ret = parallel_relax(
-                self.paths_to_relax,
-                override=True,
-                cores=self.rosetta_relax_cores,
-                save_energies=False,
-            )
-            # Save energies DataFrame
-            csv = Path(self.paths_to_relax[0]).parent.parent / "rosetta_energies.csv"
-            ret = ret.sort_values(by=["name", "repacked_energy"]).reset_index(drop=True)
-            if csv.exists():
-                print(f"`{csv}` exists! appending ...")
-                ret = pd.concat([pd.read_csv(csv), ret])
-            ret.to_csv(csv, index=False)
+    def get_paths_to_relax(self):
+        return self.paths_to_relax

@@ -10,6 +10,7 @@ from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.utilities import rank_zero_only
 from tqdm import tqdm
+import pandas as pd
 
 from boltz.data import const
 from boltz.data.module.inference import BoltzInferenceDataModule
@@ -525,6 +526,7 @@ def predict(
 ) -> None:
     """Run predictions with Boltz-1."""
     # If cpu, write a friendly warning
+
     if accelerator == "cpu":
         msg = "Running on CPU, this will be slow. Consider using a GPU."
         click.echo(msg)
@@ -629,8 +631,6 @@ def predict(
         data_dir=processed.targets_dir,
         output_dir=out_dir / "predictions",
         output_format=output_format,
-        rosetta_relax=rosetta_relax,
-        rosetta_relax_cores=relax_cores,
     )
 
     trainer = Trainer(
@@ -648,6 +648,40 @@ def predict(
         datamodule=data_module,
         return_predictions=False,
     )
+
+    paths_to_relax = pred_writer.get_paths_to_relax()
+    if rosetta_relax and len(paths_to_relax) > 0:
+        from boltz.data.write.rosetta_relax import parallel_relax
+
+        # release the device. it fails when multiple devices are requested.
+        del model_module, trainer, data_module, pred_writer
+        if devices == 1:
+            release_cuda()
+
+        ret = parallel_relax(
+            paths_to_relax,
+            override=True,
+            cores=relax_cores,
+            save_energies=True,
+        )
+        csv = Path(paths_to_relax[0]).parent.parent / "rosetta_energies.csv"
+        ret = ret.sort_values(by=["name", "repacked_energy"]).reset_index(drop=True)
+        if csv.exists():
+            print(f"`{csv}` exists! appending ...\n")
+            ret = pd.concat([ret, pd.read_csv(csv)])
+        ret.to_csv(csv, index=False)
+
+
+def release_cuda():
+    from numba import cuda
+    # import gc
+
+    # torch.cuda.empty_cache()
+    # gc.collect()
+    device = cuda.get_current_device()
+    print(f"Releasing device: {device}")
+    device.reset()
+    cuda.close()
 
 
 if __name__ == "__main__":

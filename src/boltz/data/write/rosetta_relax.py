@@ -37,7 +37,7 @@ def get_rosetta_score(input_path):
     return scorefxn(pose)
 
 
-def repack_sidechains(input_path, out_path):
+def repack_sidechains(input_path, out_path, **kwargs):
     """
         Performs Rosetta side-chain repacking and returns the final score
     Args:
@@ -50,17 +50,15 @@ def repack_sidechains(input_path, out_path):
 
     pose = pose_from_file(str(input_path))
     scorefxn = get_score_function()
-
     packer = PackRotamersMover()
     packer.task_factory(rosetta.core.pack.task.TaskFactory())
     packer.score_function(scorefxn)
-
     packer.apply(pose)
     pose.dump_pdb(str(out_path))
     return scorefxn(pose)
 
 
-def fastrelax(input_path, out_path, constrain_relax_to_start_coords=True):
+def fastrelax(input_path, out_path, constrain_relax_to_start_coords=True, **kwargs):
     """
     Performs Rosetta FastRelax and returns the final score
     Args:
@@ -71,20 +69,23 @@ def fastrelax(input_path, out_path, constrain_relax_to_start_coords=True):
     """
     ensure_pyrosetta_initialized()
 
-    pose = pose_from_pdb(str(input_path))
+    pose = pose_from_file(str(input_path))
     scorefxn = get_score_function()
-
     fast_relax = FastRelax()
     fast_relax.set_scorefxn(scorefxn)
     fast_relax.constrain_relax_to_start_coords(constrain_relax_to_start_coords)
-
     fast_relax.apply(pose)
     pose.dump_pdb(str(out_path))
     return scorefxn(pose)
 
 
 def relax(
-    input_path, output_dir=None, override=False, save_logs=True, save_energies=True
+    input_path,
+    output_dir=None,
+    override=False,
+    save_logs=True,
+    save_energies=True,
+    **kwargs,
 ):
     input_path = Path(input_path)
     if output_dir is None:
@@ -107,7 +108,7 @@ def relax(
 
             repacked_path = output_dir / f"repacked_{input_path.stem}.pdb"
             repacked_energy = (
-                repack_sidechains(input_path, repacked_path)
+                repack_sidechains(input_path, repacked_path, **kwargs)
                 if not repacked_path.exists() or override
                 else get_rosetta_score(repacked_path)
             )
@@ -117,7 +118,7 @@ def relax(
 
             relax_path = output_dir / f"fastrelaxed_{input_path.stem}.pdb"
             fastrelaxed_energy = (
-                fastrelax(repacked_path, relax_path)
+                fastrelax(repacked_path, relax_path, **kwargs)
                 if not relax_path.exists() or override
                 else get_rosetta_score(relax_path)
             )
@@ -148,6 +149,7 @@ def parallel_relax(
     save_logs=False,
     save_energies=True,
     cores=8,
+    **kwargs,
 ):
     import multiprocessing
     from functools import partial
@@ -167,6 +169,7 @@ def parallel_relax(
                         override=override,
                         save_logs=save_logs,
                         save_energies=save_energies,
+                        **kwargs,
                     ),
                     input_paths,
                 ),
