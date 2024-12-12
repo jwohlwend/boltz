@@ -653,15 +653,11 @@ def predict(
     if rosetta_relax and len(paths_to_relax) > 0:
         from boltz.data.write.rosetta_relax import parallel_relax
 
-        # release the device. it fails when multiple devices are requested.
-        del model_module, trainer, data_module, pred_writer
-        if devices == 1:
-            release_cuda()
-
+        release_resources(trainer, model_module, data_module, pred_writer)
         ret = parallel_relax(
             paths_to_relax,
             override=True,
-            cores=relax_cores,
+            cores=min(relax_cores, len(paths_to_relax)),
             save_energies=True,
         )
         csv = Path(paths_to_relax[0]).parent.parent / "rosetta_energies.csv"
@@ -672,16 +668,17 @@ def predict(
         ret.to_csv(csv, index=False)
 
 
-def release_cuda():
-    from numba import cuda
-    # import gc
+def release_resources(trainer=None, *objects):
+    import gc
 
-    # torch.cuda.empty_cache()
-    # gc.collect()
-    device = cuda.get_current_device()
-    print(f"Releasing device: {device}")
-    device.reset()
-    cuda.close()
+    for obj in objects:
+        try:
+            del obj
+        except Exception as e:
+            print(f"Error releasing object {obj}: {e}")
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":
