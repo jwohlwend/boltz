@@ -48,7 +48,7 @@ If you're interested in retraining the model, see our [training instructions](do
 
 ## Contributing
 
-We welcome external contributions and are eager to engage with the community. Connect with us on our [Slack channel](https://join.slack.com/t/boltz-community/shared_invite/zt-2uexwkemv-Tqt9E747hVkE0VOWlgOcIw) to discuss advancements, share insights, and foster collaboration around Boltz-1.
+We welcome external contributions and are eager to engage with the community. Connect with us on our [Slack channel](https://join.slack.com/t/boltz-community/shared_invite/zt-2w0bw6dtt-kZU4png9HUgprx9NK2xXZw) to discuss advancements, share insights, and foster collaboration around Boltz-1.
 
 ## Coming very soon
 
@@ -57,7 +57,7 @@ We welcome external contributions and are eager to engage with the community. Co
 - [x] Support for custom paired MSA
 - [x] Confidence model checkpoint
 - [x] Chunking for lower memory usage
-- [ ] Pocket conditioning support
+- [x] Pocket conditioning support
 - [ ] Full data processing pipeline
 - [ ] Colab notebook for inference
 - [ ] Kernel integration

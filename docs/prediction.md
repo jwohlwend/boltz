@@ -51,7 +51,11 @@ constraints:
 
 The `modifications` field is an optional field that allows you to specify modified residues in the polymer (`protein`, `dna` or`rna`). The `position` field specifies the index (starting from 1) of the residue, and `ccd` is the CCD code of the modified residue. This field is currently only supported for CCD ligands.
 
-`constraints` is an optional field that allows you to specify additional information about the input structure. Currently, we support just `bond`. The `bond` constraint specifies a covalent bonds between two atoms (`atom1` and `atom2`). It is currently only supported for CCD ligands and canonical residues, `CHAIN_ID` refers to the id of the residue set above, `RES_IDX` is the index (starting from 1) of the residue (1 for ligands), and `ATOM_NAME` is the standardized atom name (can be verified in CIF file of that component on the RCSB website).
+`constraints` is an optional field that allows you to specify additional information about the input structure. 
+
+* The `bond` constraint specifies a covalent bonds between two atoms (`atom1` and `atom2`). It is currently only supported for CCD ligands and canonical residues, `CHAIN_ID` refers to the id of the residue set above, `RES_IDX` is the index (starting from 1) of the residue (1 for ligands), and `ATOM_NAME` is the standardized atom name (can be verified in CIF file of that component on the RCSB website).
+
+* The `pocket` constraint specifies the residues associated with a ligand, where `binder` refers to the chain binding to the pocket (which can be a molecule, protein, DNA or RNA) and `contacts` is the list of chain and residue indices (starting from 1) associated with the pocket. The model currently only supports the specification of a single `binder` chain (and any number of `contacts` residues in other chains).
 
 As an example:
 
@@ -113,24 +117,25 @@ As an example to predict a structure using 10 recycling steps and 25 samples (th
     boltz predict input_path --recycling_steps 10 --diffusion_samples 25
 
 
-| **Option**                    | **Type**        | **Default**        | **Description**                                                                                    |
-|-------------------------------|-----------------|--------------------|----------------------------------------------------------------------------------------------------|
-| `--out_dir PATH`              | `PATH`          | `./`             | The path where to save the predictions.                                                            |
-| `--cache PATH`                | `PATH`          | `~/.boltz`         | The directory where to download the data and model.                                                |
-| `--checkpoint PATH`           | `PATH`          | None      | An optional checkpoint. Uses the provided Boltz-1 model by default.                                |
-| `--devices INTEGER`           | `INTEGER`       | `1`                | The number of devices to use for prediction.                                                       |
-| `--accelerator`               | `[gpu,cpu,tpu]` | `gpu`              | The accelerator to use for prediction.                                                             |
-| `--recycling_steps INTEGER`   | `INTEGER`       | `3`                | The number of recycling steps to use for prediction.                                               |
-| `--sampling_steps INTEGER`    | `INTEGER`       | `200`              | The number of sampling steps to use for prediction.                                                |
-| `--diffusion_samples INTEGER` | `INTEGER`       | `1`                | The number of diffusion samples to use for prediction.                                             |
-| `--output_format`             | `[pdb,mmcif]`   | `mmcif`            | The output format to use for the predictions.                                                      |
-| `--num_workers INTEGER`       | `INTEGER`       | `2`                | The number of dataloader workers to use for prediction.                                            |
-| `--override`                  | `FLAG`          | `False`            | Whether to override existing predictions if found.                                                 |
-| `--use_msa_server`            | `FLAG`          | `False`            | Whether to use the msa server to generate msa's.                                                   |
-| `--msa_server_url`            | str          | `https://api.colabfold.com`            | MSA server url. Used only if --use_msa_server is set.                                              |
-| `--msa_pairing_strategy`      | str          | `greedy`            | Pairing strategy to use. Used only if --use_msa_server is set. Options are 'greedy' and 'complete'. |
-| `--write_full_pae`            | `FLAG`          | `False`            | Whether to save the full PAE matrix as a file.                                                     |
-| `--write_full_pde`            | `FLAG`          | `False`            | Whether to save the full PDE matrix as a file.                                                   |
+| **Option**              | **Type**        | **Default**                 | **Description**                                                                                                                                                                      |
+|-------------------------|-----------------|-----------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `--out_dir`             | `PATH`          | `./`                        | The path where to save the predictions.                                                                                                                                              |
+| `--cache`               | `PATH`          | `~/.boltz`                  | The directory where to download the data and model.                                                                                                                                  |
+| `--checkpoint`          | `PATH`          | None                        | An optional checkpoint. Uses the provided Boltz-1 model by default.                                                                                                                  |
+| `--devices`             | `INTEGER`       | `1`                         | The number of devices to use for prediction.                                                                                                                                         |
+| `--accelerator`         | `[gpu,cpu,tpu]` | `gpu`                       | The accelerator to use for prediction.                                                                                                                                               |
+| `--recycling_steps`     | `INTEGER`       | `3`                         | The number of recycling steps to use for prediction.                                                                                                                                 |
+| `--sampling_steps`      | `INTEGER`       | `200`                       | The number of sampling steps to use for prediction.                                                                                                                                  |
+| `--diffusion_samples`   | `INTEGER`       | `1`                         | The number of diffusion samples to use for prediction.                                                                                                                               |
+| `--step_scale`          | `FLOAT`         | `1.638`                     | The step size is related to the temperature at which the diffusion process samples the distribution. The lower the higher the diversity among samples (recommended between 1 and 2). |
+| `--output_format`       | `[pdb,mmcif]`   | `mmcif`                     | The output format to use for the predictions.                                                                                                                                        |
+| `--num_workers`  | `INTEGER`       | `2`                         | The number of dataloader workers to use for prediction.                                                                                                                              |
+| `--override`            | `FLAG`          | `False`                     | Whether to override existing predictions if found.                                                                                                                                   |
+| `--use_msa_server`      | `FLAG`          | `False`                     | Whether to use the msa server to generate msa's.                                                                                                                                     |
+| `--msa_server_url`      | str             | `https://api.colabfold.com` | MSA server url. Used only if --use_msa_server is set.                                                                                                                                |
+| `--msa_pairing_strategy` | str             | `greedy`                    | Pairing strategy to use. Used only if --use_msa_server is set. Options are 'greedy' and 'complete'                                                                                   |
+| `--write_full_pae`      | `FLAG`          | `False`                     | Whether to save the full PAE matrix as a file.                                                                                                                                       |
+| `--write_full_pde`      | `FLAG`          | `False`                     | Whether to save the full PDE matrix as a file.                                                                                                                                       |
 | `--rosetta_relax`            | `FLAG`          | `False`            | Whether to perform rosetta repacking and fastrelax. Installation of pyrosetta and a valid license are required.
 | `--relax_cores`            | `INTEGER`          | `8`            | Number of cores for rosetta relaxation.
 

@@ -383,7 +383,7 @@ def process_token_features(
     binder_pocket_cutoff: Optional[float] = 6.0,
     binder_pocket_sampling_geometric_p: Optional[float] = 0.0,
     only_ligand_binder_pocket: Optional[bool] = False,
-    inference_binder: Optional[int] = None,
+    inference_binder: Optional[list[int]] = None,
     inference_pocket: Optional[list[tuple[int, int]]] = None,
 ) -> dict[str, Tensor]:
     """Get the token features.
@@ -446,10 +446,12 @@ def process_token_features(
         assert inference_pocket is not None
         pocket_residues = set(inference_pocket)
         for idx, token in enumerate(token_data):
-            if token["asym_id"] == inference_binder:
+            if token["asym_id"] in inference_binder:
                 pocket_feature[idx] = const.pocket_contact_info["BINDER"]
             elif (token["asym_id"], token["res_idx"]) in pocket_residues:
                 pocket_feature[idx] = const.pocket_contact_info["POCKET"]
+            else:
+                pocket_feature[idx] = const.pocket_contact_info["UNSELECTED"]
     elif (
         binder_pocket_conditioned_prop > 0.0
         and random.random() < binder_pocket_conditioned_prop
