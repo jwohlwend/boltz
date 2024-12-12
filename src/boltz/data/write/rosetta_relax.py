@@ -159,7 +159,6 @@ def parallel_relax(
             "WARNING: If your structure contains a ligand, use CCD ligands in Boltz input and choose CIF as the output format. "
             "This will ensure that the atom/residue naming is compatible with Rosetta."
         )
-    print(input_paths)
     with multiprocessing.get_context("spawn").Pool(cores) as ex:
         ret = pd.DataFrame(
             tqdm(
