@@ -2,6 +2,7 @@ from pyrosetta import *
 from pyrosetta.rosetta.core.scoring import get_score_function
 from pyrosetta.rosetta.protocols.minimization_packing import PackRotamersMover
 from pyrosetta.rosetta.protocols.relax import FastRelax
+from pyrosetta.rosetta.core.pack.task import TaskFactory
 
 from pathlib import Path
 import json
@@ -50,8 +51,11 @@ def repack_sidechains(input_path, out_path, **kwargs):
 
     pose = pose_from_file(str(input_path))
     scorefxn = get_score_function()
+    tf = TaskFactory()
+    tf.push_back(pyrosetta.rosetta.core.pack.task.operation.InitializeFromCommandline())
+    tf.push_back(pyrosetta.rosetta.core.pack.task.operation.RestrictToRepacking())
     packer = PackRotamersMover()
-    packer.task_factory(rosetta.core.pack.task.TaskFactory())
+    packer.task_factory(tf)
     packer.score_function(scorefxn)
     packer.apply(pose)
     pose.dump_pdb(str(out_path))
