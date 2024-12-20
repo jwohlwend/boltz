@@ -10,6 +10,7 @@ from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.utilities import rank_zero_only
 from tqdm import tqdm
+import pandas as pd
 
 from boltz.data import const
 from boltz.data.module.inference import BoltzInferenceDataModule
@@ -21,6 +22,7 @@ from boltz.data.parse.yaml import parse_yaml
 from boltz.data.types import MSA, Manifest, Record
 from boltz.data.write.writer import BoltzWriter
 from boltz.model.model import Boltz1
+
 
 CCD_URL = "https://huggingface.co/boltz-community/boltz-1/resolve/main/ccd.pkl"
 MODEL_URL = (
@@ -496,6 +498,17 @@ def cli() -> None:
     help="Pairing strategy to use. Used only if --use_msa_server is set. Options are 'greedy' and 'complete'",
     default="greedy",
 )
+@click.option(
+    "--rosetta_relax",
+    is_flag=True,
+    help="Whether to perform Rosetta repacking and fastrelax. Installation of pyrosetta and a valid license are required",
+)
+@click.option(
+    "--relax_cores",
+    type=int,
+    default=8,
+    help="Number of cores for rosetta relaxation",
+)
 def predict(
     data: str,
     out_dir: str,
@@ -516,9 +529,12 @@ def predict(
     use_msa_server: bool = False,
     msa_server_url: str = "https://api.colabfold.com",
     msa_pairing_strategy: str = "greedy",
+    rosetta_relax: bool = False,
+    relax_cores: int = 8,
 ) -> None:
     """Run predictions with Boltz-1."""
     # If cpu, write a friendly warning
+
     if accelerator == "cpu":
         msg = "Running on CPU, this will be slow. Consider using a GPU."
         click.echo(msg)
@@ -642,6 +658,37 @@ def predict(
         datamodule=data_module,
         return_predictions=False,
     )
+
+    paths_to_relax = pred_writer.get_paths_to_relax()
+    if rosetta_relax and len(paths_to_relax) > 0:
+        from boltz.data.write.rosetta_relax import parallel_relax
+
+        release_resources(trainer, model_module, data_module, pred_writer)
+        ret = parallel_relax(
+            paths_to_relax,
+            override=True,
+            cores=min(relax_cores, len(paths_to_relax)),
+            save_energies=True,
+        )
+        csv = Path(paths_to_relax[0]).parent.parent / "rosetta_energies.csv"
+        ret = ret.sort_values(by=["name", "repacked_energy"]).reset_index(drop=True)
+        if csv.exists():
+            print(f"`{csv}` exists! appending ...\n")
+            ret = pd.concat([ret, pd.read_csv(csv)])
+        ret.to_csv(csv, index=False)
+
+
+def release_resources(trainer=None, *objects):
+    import gc
+
+    for obj in objects:
+        try:
+            del obj
+        except Exception as e:
+            print(f"Error releasing object {obj}: {e}")
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":
