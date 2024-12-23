@@ -16,8 +16,6 @@ from boltz.data.types import (
 )
 from boltz.data.write.mmcif import to_mmcif
 from boltz.data.write.pdb import to_pdb
-import pandas as pd
-
 
 class BoltzWriter(BasePredictionWriter):
     """Custom writer for predictions."""
@@ -134,29 +132,27 @@ class BoltzWriter(BasePredictionWriter):
                 struct_dir = self.output_dir / record.id
                 struct_dir.mkdir(exist_ok=True)
 
+                # Get plddt's
+                plddts = None
+                if "plddt" in prediction:
+                    plddts = prediction["plddt"][model_idx]
+
+                # Create path name
+                outname = f"{record.id}_model_{idx_to_rank[model_idx]}"
+
+                # Save the structure
                 if self.output_format == "pdb":
-                    path = (
-                        struct_dir / f"{record.id}_model_{idx_to_rank[model_idx]}.pdb"
-                    )
+                    path = struct_dir / f"{outname}.pdb"
                     with path.open("w") as f:
-                        f.write(to_pdb(new_structure))
-                    self.paths_to_relax.append(Path(path).resolve())
+                        f.write(to_pdb(new_structure, plddts=plddts))
+                        self.paths_to_relax.append(Path(path).resolve())
                 elif self.output_format == "mmcif":
-                    path = (
-                        struct_dir / f"{record.id}_model_{idx_to_rank[model_idx]}.cif"
-                    )
+                    path = struct_dir / f"{outname}.cif"
                     with path.open("w") as f:
-                        if "plddt" in prediction:
-                            f.write(
-                                to_mmcif(new_structure, prediction["plddt"][model_idx])
-                            )
-                        else:
-                            f.write(to_mmcif(new_structure))
-                    self.paths_to_relax.append(Path(path).resolve())
+                        f.write(to_mmcif(new_structure, plddts=plddts))
+                        self.paths_to_relax.append(Path(path).resolve())
                 else:
-                    path = (
-                        struct_dir / f"{record.id}_model_{idx_to_rank[model_idx]}.npz"
-                    )
+                    path = struct_dir / f"{outname}.npz"
                     np.savez_compressed(path, **asdict(new_structure))
 
                 # Save confidence summary

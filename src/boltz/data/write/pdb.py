@@ -1,11 +1,14 @@
+from typing import Optional
+
 from rdkit import Chem
+from torch import Tensor
 
 from boltz.data import const
 from boltz.data.types import Structure
 from boltz.data.write.utils import generate_tags
 
 
-def to_pdb(structure: Structure) -> str:  # noqa: PLR0915
+def to_pdb(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # noqa: PLR0915
     """Write a structure into a PDB file.
 
     Parameters
@@ -29,6 +32,7 @@ def to_pdb(structure: Structure) -> str:  # noqa: PLR0915
     periodic_table = Chem.GetPeriodicTable()
 
     # Add all atom sites.
+    res_num = 0
     for chain in structure.chains:
         # We rename the chains in alphabetical order
         chain_idx = chain["asym_id"]
@@ -68,7 +72,7 @@ def to_pdb(structure: Structure) -> str:  # noqa: PLR0915
                 res_name_3 = (
                     "LIG" if record_type == "HETATM" else str(residue["name"][:3])
                 )
-                b_factor = 1.00
+                b_factor = 1.00 if plddts is None else round(plddts[res_num].item(), 2)
 
                 # PDB is a columnar format, every space matters here!
                 atom_line = (
@@ -82,6 +86,8 @@ def to_pdb(structure: Structure) -> str:  # noqa: PLR0915
                 pdb_lines.append(atom_line)
                 atom_reindex_ter.append(atom_index)
                 atom_index += 1
+
+            res_num += 1
 
         should_terminate = chain_idx < (len(structure.chains) - 1)
         if should_terminate:

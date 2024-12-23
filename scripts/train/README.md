@@ -1,1 +1,1 @@
-Please see our [training instructions](docs/training.md).
+Please see our [training instructions](../../docs/training.md).

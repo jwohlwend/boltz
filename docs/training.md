@@ -34,7 +34,7 @@ rm openfold_processed_msa.tar
 
 - The pre-computed symmetry files for ligands:
 ```bash
-wget https://boltz1.s3.us-east-2.amazonaws.com/symmetries.pkl
+wget https://boltz1.s3.us-east-2.amazonaws.com/symmetry.pkl
 ```
 
 ## Modify the configuration file
