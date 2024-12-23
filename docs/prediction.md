@@ -47,13 +47,13 @@ constraints:
         binder: CHAIN_ID
         contacts: [[CHAIN_ID, RES_IDX], [CHAIN_ID, RES_IDX]]
 ```
-`sequences` has one entry for every unique chain/molecule in the input. Each polymer entity as a `ENTITY_TYPE`  either `protein`, `dna` or`rna` and have a `sequence` attribute. Non-polymer entities are indicated by `ENTITY_TYPE` equal to `ligand` and have a `smiles` or `ccd` attribute. `CHAIN_ID` is the unique identifier for each chain/molecule, and it should be set as a list in case of multiple identical entities in the structure. For proteins, the `msa` key is required by default but can be ommited by passing the `--use_msa_server` flag which will auto-generate the MSA using the mmseqs2 server. If you wish to use a precomputed MSA, use the `msa` attribute with `MSA_PATH` indicating the path to the `.a3m` file containing the MSA for that protein. If you wish to explicitly run single sequence mode (which is generally advised against as it will hurt model performance), you may do so by using the special keyword `empty` for that protein (ex: `msa: empty`). For custom MSA, you may wish to indicate pairing keys to the model. You can do so by using a CSV format instead of a3m with two columns: `sequence` with the protein sequences and `key` which is a unique identifier indicating matching rows across CSV files of each protein chain.
+`sequences` has one entry for every unique chain/molecule in the input. Each polymer entity as a `ENTITY_TYPE`  either `protein`, `dna` or `rna` and have a `sequence` attribute. Non-polymer entities are indicated by `ENTITY_TYPE` equal to `ligand` and have a `smiles` or `ccd` attribute. `CHAIN_ID` is the unique identifier for each chain/molecule, and it should be set as a list in case of multiple identical entities in the structure. For proteins, the `msa` key is required by default but can be omited by passing the `--use_msa_server` flag which will auto-generate the MSA using the mmseqs2 server. If you wish to use a precomputed MSA, use the `msa` attribute with `MSA_PATH` indicating the path to the `.a3m` file containing the MSA for that protein. If you wish to explicitly run single sequence mode (which is generally advised against as it will hurt model performance), you may do so by using the special keyword `empty` for that protein (ex: `msa: empty`). For custom MSA, you may wish to indicate pairing keys to the model. You can do so by using a CSV format instead of a3m with two columns: `sequence` with the protein sequences and `key` which is a unique identifier indicating matching rows across CSV files of each protein chain.
 
 The `modifications` field is an optional field that allows you to specify modified residues in the polymer (`protein`, `dna` or`rna`). The `position` field specifies the index (starting from 1) of the residue, and `ccd` is the CCD code of the modified residue. This field is currently only supported for CCD ligands.
 
 `constraints` is an optional field that allows you to specify additional information about the input structure. 
 
-* The `bond` constraint specifies a covalent bonds between two atoms (`atom1` and `atom2`). It is currently only supported for CCD ligands and canonical residues, `CHAIN_ID` refers to the id of the residue set above, `RES_IDX` is the index (starting from 1) of the residue (1 for ligands), and `ATOM_NAME` is the standardized atom name (can be verified in CIF file of that component on the RCSB website).
+* The `bond` constraint specifies covalent bonds between two atoms (`atom1` and `atom2`). It is currently only supported for CCD ligands and canonical residues, `CHAIN_ID` refers to the id of the residue set above, `RES_IDX` is the index (starting from 1) of the residue (1 for ligands), and `ATOM_NAME` is the standardized atom name (can be verified in CIF file of that component on the RCSB website).
 
 * The `pocket` constraint specifies the residues associated with a ligand, where `binder` refers to the chain binding to the pocket (which can be a molecule, protein, DNA or RNA) and `contacts` is the list of chain and residue indices (starting from 1) associated with the pocket. The model currently only supports the specification of a single `binder` chain (and any number of `contacts` residues in other chains).
 
@@ -84,7 +84,7 @@ The fasta format is a little simpler, and should contain entries as follows:
 SEQUENCE
 ```
 
-The `CHAIN_ID` is a unique identifier for each input chain. The `ENTITY_TYPE` can be one of `protein`, `dna`, `rna`, `smiles`, `ccd` (note that we support both smiles and CCD code for ligands). The `MSA_PATH` is only applicable to proteins. By default, MSA's are required, but they can be ommited by passing the `--use_msa_server` flag which will auto-generate the MSA using the mmseqs2 server. If you wish to use a custom MSA, use it toset path to the `.a3m` file containing a pre-computed MSA for this protein. If you wish to explicitly run single sequence mode (which is generally advised against as it will hurt model performance), you may do so by using the special keyword `empty` for that protein (ex: `>A|protein|empty`). For custom MSA, you may wish to indicate pairing keys to the model. You can do so by using a CSV format instead of a3m with two columns: `sequence` with the protein sequences and `key` which is a unique identifier indicating matching rows across CSV files of each protein chain.
+The `CHAIN_ID` is a unique identifier for each input chain. The `ENTITY_TYPE` can be one of `protein`, `dna`, `rna`, `smiles`, `ccd` (note that we support both smiles and CCD code for ligands). The `MSA_PATH` is only applicable to proteins. By default, MSA's are required, but they can be omited by passing the `--use_msa_server` flag which will auto-generate the MSA using the mmseqs2 server. If you wish to use a custom MSA, use it to set the path to the `.a3m` file containing a pre-computed MSA for this protein. If you wish to explicitly run single sequence mode (which is generally advised against as it will hurt model performance), you may do so by using the special keyword `empty` for that protein (ex: `>A|protein|empty`). For custom MSA, you may wish to indicate pairing keys to the model. You can do so by using a CSV format instead of a3m with two columns: `sequence` with the protein sequences and `key` which is a unique identifier indicating matching rows across CSV files of each protein chain.
 
 For each of these cases, the corresponding `SEQUENCE` will contain an amino acid sequence (e.g. `EFKEAFSLF`), a sequence of nucleotide bases (e.g. `ATCG`), a smiles string (e.g. `CC1=CC=CC=C1`), or a CCD code (e.g. `ATP`), depending on the entity.
 
@@ -112,9 +112,11 @@ The following options are available for the `predict` command:
 
     boltz predict input_path [OPTIONS]
 
-As an example to predict a structure using 10 recycling steps and 25 samples (the default parameters for AlphaFold3) use (note however that the prediction will take significantly longer):
+As an example, to predict a structure using 10 recycling steps and 25 samples (the default parameters for AlphaFold3) use:
 
     boltz predict input_path --recycling_steps 10 --diffusion_samples 25
+
+(note however that the prediction will take significantly longer)
 
 
 | **Option**              | **Type**        | **Default**                 | **Description**                                                                                                                                                                      |

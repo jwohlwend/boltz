@@ -443,7 +443,7 @@ def cli() -> None:
     "--step_scale",
     type=float,
     help="The step size is related to the temperature at which the diffusion process samples the distribution."
-         "The lower the higher the diversity among samples (recommended between 1 and 2). Default is 1.638.",
+    "The lower the higher the diversity among samples (recommended between 1 and 2). Default is 1.638.",
     default=1.638,
 )
 @click.option(

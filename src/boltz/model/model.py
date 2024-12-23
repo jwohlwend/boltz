@@ -442,12 +442,17 @@ class Boltz1(LightningModule):
                 out,
                 batch,
             )
-            diffusion_loss_dict = self.structure_module.compute_loss(
-                batch,
-                out,
-                multiplicity=self.training_args.diffusion_multiplicity,
-                **self.diffusion_loss_args,
-            )
+            try:
+                diffusion_loss_dict = self.structure_module.compute_loss(
+                    batch,
+                    out,
+                    multiplicity=self.training_args.diffusion_multiplicity,
+                    **self.diffusion_loss_args,
+                )
+            except Exception as e:
+                print(f"Skipping batch {batch_idx} due to error: {e}")
+                return None
+
         else:
             disto_loss = 0.0
             diffusion_loss_dict = {"loss": 0.0, "loss_breakdown": {}}

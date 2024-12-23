@@ -42,6 +42,14 @@ Boltz currently accepts three input formats:
 
 To see all available options: `boltz predict --help` and for more information on these input formats, see our [prediction instructions](docs/prediction.md).
 
+## Evaluation
+
+To encourage reproducibility and facilitate comparison with other models, we provide the evaluation scripts and predictions for Boltz-1, Chai-1 and AlphaFold3 on our test benchmark dataset as well as CASP15. These datasets are created to contain biomolecules different from the training data and to benchmark the performance of these models we run them with the same input MSAs and same number  of recycling and diffusion steps. More details on these evaluations can be found in our [evaluation instructions](docs/evaluation.md).
+
+![Test set evaluations](docs/plot_test.png)
+![CASP15 set evaluations](docs/plot_casp.png)
+
+
 ## Training
 
 If you're interested in retraining the model, see our [training instructions](docs/training.md).
@@ -58,7 +66,7 @@ We welcome external contributions and are eager to engage with the community. Co
 - [x] Confidence model checkpoint
 - [x] Chunking for lower memory usage
 - [x] Pocket conditioning support
-- [ ] Full data processing pipeline
+- [x] Full data processing pipeline
 - [ ] Colab notebook for inference
 - [ ] Kernel integration
 
