@@ -92,15 +92,18 @@ def finalize(outdir: Path) -> None:
     failed_count = 0
     records = []
     for record in records_dir.iterdir():
-        path = records_dir / record
+        path = record
         try:
             with path.open("r") as f:
                 records.append(json.load(f))
         except:  # noqa: E722
             failed_count += 1
             print(f"Failed to parse {record}")  # noqa: T201
-    print(f"Failed to parse {failed_count} entries)")  # noqa: T201
-
+    if failed_count > 0:
+        print(f"Failed to parse {failed_count} entries.")  # noqa: T201
+    else:
+        print("All entries parsed successfully.")  
+    
     # Save manifest
     outpath = outdir / "manifest.json"
     with outpath.open("w") as f:
