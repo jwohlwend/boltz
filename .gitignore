@@ -8,10 +8,12 @@ __pycache__/
 
 # Distribution / packaging
 .Python
+boltz_results_ligand/
 build/
 develop-eggs/
 dist/
 downloads/
+download/
 eggs/
 .eggs/
 lib/
