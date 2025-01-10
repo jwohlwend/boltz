@@ -21,6 +21,8 @@ class OuterProductMeanTest(unittest.TestCase):
         for name, param in self.layer.named_parameters():
             nn.init.normal_(param, mean=1., std=1.)
 
+        # Set to eval mode
+        self.layer.eval()
 
     def test_chunk(self):
         chunk_sizes = [16, 33, 64, 83, 100]
