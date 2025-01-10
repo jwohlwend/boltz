@@ -15,14 +15,16 @@
 
 import importlib
 import math
-from typing import Optional, Callable, List, Tuple
+from typing import Callable, List, Optional, Tuple
 
+from einops import rearrange
+
+from boltz.model.layers import initialize
 from boltz.model.layers.triangular_attention.utils import (
-    permute_final_dims,
     flatten_final_dims,
     is_fp16_enabled,
+    permute_final_dims,
 )
-from boltz.model.layers import initialize
 
 deepspeed_is_installed = importlib.util.find_spec("deepspeed") is not None
 ds4s_is_installed = (
@@ -41,8 +43,12 @@ if fa_is_installed:
     from flash_attn.flash_attn_interface import flash_attn_unpadded_kvpacked_func
 
 
+trifast_is_installed = importlib.util.find_spec("trifast") is not None
+if trifast_is_installed:
+    from trifast import triangle_attention
+
 import torch
-import torch.nn as nn
+from torch import nn
 
 DEFAULT_LMA_Q_CHUNK_SIZE = 1024
 DEFAULT_LMA_KV_CHUNK_SIZE = 4096
@@ -411,6 +417,7 @@ class Attention(nn.Module):
         use_memory_efficient_kernel: bool = False,
         use_deepspeed_evo_attention: bool = False,
         use_lma: bool = False,
+        use_trifast: bool = True,
         lma_q_chunk_size: int = DEFAULT_LMA_Q_CHUNK_SIZE,
         lma_kv_chunk_size: int = DEFAULT_LMA_KV_CHUNK_SIZE,
         use_flash: bool = False,
@@ -437,11 +444,15 @@ class Attention(nn.Module):
                 Whether to use low-memory attention (Staats & Rabe 2021). If
                 none of the "use_<...>" flags are True, a stock PyTorch
                 implementation is used instead
+            use_trifast:
+                Whether to use the TriFast attention kernel.
             lma_q_chunk_size:
                 Query chunk size (for LMA)
             lma_kv_chunk_size:
                 Key/Value chunk size (for LMA)
+
         Returns
+        -------
             [*, Q, C_q] attention update
         """
         if use_lma and (lma_q_chunk_size is None or lma_kv_chunk_size is None):
@@ -461,6 +472,7 @@ class Attention(nn.Module):
             use_deepspeed_evo_attention,
             use_lma,
             use_flash,
+            use_trifast,
         ]
         if sum(attn_options) > 1:
             raise ValueError("Choose at most one alternative attention algorithm")
@@ -468,8 +480,10 @@ class Attention(nn.Module):
         if biases is None:
             biases = []
 
-        # DeepSpeed attention kernel applies scaling internally
-        q, k, v = self._prep_qkv(q_x, kv_x, apply_scale=not use_deepspeed_evo_attention)
+        # DeepSpeed/TriFast attention kernel applies scaling internally
+        q, k, v = self._prep_qkv(
+            q_x, kv_x, apply_scale=not (use_deepspeed_evo_attention or use_trifast)
+        )
 
         if is_fp16_enabled():
             use_memory_efficient_kernel = False
@@ -498,8 +512,12 @@ class Attention(nn.Module):
             o = o.transpose(-2, -3)
         elif use_flash:
             o = _flash_attn(q, k, v, flash_mask)
+
+        elif use_trifast:
+            o = _trifast_attn(q, k, v, biases)
+
         else:
-            o = _attention(q, k, v, biases)
+            o = wrapped_attention(q, k, v, biases)
             o = o.transpose(-2, -3)
 
         o = self._wrap_up(o, q_x)
@@ -634,6 +652,46 @@ def _lma(
 
         o[..., q_s : q_s + q_chunk_size, :] = q_chunk_out
 
+    return o
+
+
+def _trifast_attn(q, k, v, biases):
+    orig_n_dims = len(q.shape)
+
+    if len(biases) != 2:
+        raise ValueError(f"Trifast expects two bias terms, found {len(biases)}")
+
+    mask, b = biases
+
+    if len(b.shape) == 5:
+        # Sometimes there is an extra batch dim -- why?
+        b = b.squeeze(0)
+
+    if orig_n_dims == 4:
+        # add fake batch dim
+        q = q.unsqueeze(0)
+        k = k.unsqueeze(0)
+        v = v.unsqueeze(0)
+        # b = b.unsqueeze(0) not sure why this and only this has a batch dim?
+        mask = mask.unsqueeze(0)
+
+    if len(q.shape) != 5:
+        raise ValueError(f"Trifast expects q/k/v to be 5D, found {len(q.shape)}")
+
+    # Reorder q/k/v
+    q = rearrange(q, "b i h j d -> b h i j d")
+    k = rearrange(k, "b i h j d -> b h i j d")
+    v = rearrange(v, "b i h j d -> b h i j d")
+
+    # Make mask the right shape.
+    mask = rearrange(mask, "b i () () j -> b i j").bool()
+
+    o = triangle_attention(q, k, v, b, mask)
+    o = rearrange(o, "b h i j d -> b i j h d")
+
+    # Remove the batch dim if we added it.
+    if orig_n_dims == 4:
+        o = o.squeeze(0)
     return o
 
 
