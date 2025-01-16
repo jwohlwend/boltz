@@ -12,6 +12,7 @@ trainer:
 #   project: boltz
 #   entity: boltz
 
+
 output: SET_PATH_HERE
 pretrained: PATH_TO_CHECKPOINT_FILE
 resume: null
@@ -41,8 +42,8 @@ data:
       date: "2021-09-30"
       ref: released
     - _target_: boltz.data.filter.dynamic.resolution.ResolutionFilter
-      resolution: 9.0
-  
+      resolution: 4.0
+
   tokenizer:
     _target_: boltz.data.tokenize.boltz.BoltzTokenizer
   featurizer:
@@ -61,8 +62,8 @@ data:
   random_seed: 42
   pin_memory: true
   overfit: null
-  crop_validation: false
-  return_train_symmetries: false
+  crop_validation: true
+  return_train_symmetries: true
   return_val_symmetries: true
   train_binder_pocket_conditioned_prop: 0.3
   val_binder_pocket_conditioned_prop: 0.3
@@ -123,7 +124,10 @@ model:
     activation_checkpointing: true
     offload_to_cpu: false
 
-  confidence_prediction: false
+  structure_prediction_training: true
+  confidence_prediction: true
+  alpha_pae: 1
+  confidence_imitate_trunk: true
   confidence_model_args:
     num_dist_bins: 64
     max_dist: 22
@@ -139,10 +143,10 @@ model:
 
   training_args:
     recycling_steps: 3
-    sampling_steps: 20
+    sampling_steps: 200
     diffusion_multiplicity: 16
-    diffusion_samples: 2
-    confidence_loss_weight: 1e-4
+    diffusion_samples: 1
+    confidence_loss_weight: 3e-3
     diffusion_loss_weight: 4.0
     distogram_loss_weight: 3e-2
     adam_beta_1: 0.9
@@ -155,13 +159,15 @@ model:
     lr_start_decay_after_n_steps: 50000
     lr_decay_every_n_steps: 50000
     lr_decay_factor: 0.95
+    symmetry_correction: true
+    run_confidence_sequentially: false
 
   validation_args:
     recycling_steps: 3
     sampling_steps: 200
     diffusion_samples: 5
     symmetry_correction: true
-    run_confidence_sequentially: false
+    run_confidence_sequentially: true
 
   diffusion_process_args:
     sigma_min: 0.0004

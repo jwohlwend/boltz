@@ -15,7 +15,7 @@ from boltz.data.feature.symmetry import get_symmetries
 from boltz.data.filter.dynamic.filter import DynamicFilter
 from boltz.data.sample.sampler import Sample, Sampler
 from boltz.data.tokenize.tokenizer import Tokenizer
-from boltz.data.types import MSA, Input, Manifest, Record, Structure
+from boltz.data.types import MSA, Connection, Input, Manifest, Record, Structure
 
 
 @dataclass
@@ -106,7 +106,7 @@ def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
         bonds=structure["bonds"],
         residues=structure["residues"],
         chains=structure["chains"],
-        connections=structure["connections"],
+        connections=structure["connections"].astype(Connection),
         interfaces=structure["interfaces"],
         mask=structure["mask"],
     )

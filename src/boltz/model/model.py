@@ -123,9 +123,6 @@ class Boltz1(LightningModule):
             "resolved_loss",
             "pde_loss",
             "pae_loss",
-            "rel_plddt_loss",
-            "rel_pde_loss",
-            "rel_pae_loss",
         ]:
             self.train_confidence_loss_dict_logger[m] = MeanMetric()
 
@@ -201,6 +198,7 @@ class Boltz1(LightningModule):
             )
 
         # Output modules
+        use_accumulate_token_repr = confidence_prediction and "use_s_diffusion" in confidence_model_args and confidence_model_args["use_s_diffusion"]
         self.structure_module = AtomDiffusion(
             score_model_args={
                 "token_z": token_z,
@@ -213,8 +211,7 @@ class Boltz1(LightningModule):
                 **score_model_args,
             },
             compile_score=compile_structure,
-            accumulate_token_repr="use_s_diffusion" in confidence_model_args
-            and confidence_model_args["use_s_diffusion"],
+            accumulate_token_repr=use_accumulate_token_repr,
             **diffusion_process_args,
         )
         self.distogram_module = DistogramModule(token_z, num_bins)
@@ -1198,10 +1195,11 @@ class Boltz1(LightningModule):
             checkpoint["ema"] = self.ema.state_dict()
 
     def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
-        if self.use_ema and self.ema is None:
+        if self.use_ema and "ema" in checkpoint and self.ema.compatible(checkpoint["ema"]["shadow_params"]):
             self.ema = ExponentialMovingAverage(
                 parameters=self.parameters(), decay=self.ema_decay
             )
+            self.ema.load_state_dict(checkpoint["ema"], device=torch.device("cpu"))
 
     def on_train_start(self):
         if self.use_ema and self.ema is None:

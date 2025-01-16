@@ -10,7 +10,7 @@ from boltz.data import const
 from boltz.data.feature.featurizer import BoltzFeaturizer
 from boltz.data.feature.pad import pad_to_max
 from boltz.data.tokenize.boltz import BoltzTokenizer
-from boltz.data.types import MSA, Input, Manifest, Record, Structure
+from boltz.data.types import MSA, Connection, Input, Manifest, Record, Structure
 
 
 def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
@@ -38,7 +38,7 @@ def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
         bonds=structure["bonds"],
         residues=structure["residues"],
         chains=structure["chains"],
-        connections=structure["connections"],
+        connections=structure["connections"].astype(Connection),
         interfaces=structure["interfaces"],
         mask=structure["mask"],
     )
@@ -151,7 +151,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         except Exception as e:  # noqa: BLE001
             print(f"Tokenizer failed on {record.id} with error {e}. Skipping.")  # noqa: T201
             return self.__getitem__(0)
-        
+
         # Inference specific options
         options = record.inference_options
         if options is None:

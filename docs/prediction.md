@@ -162,3 +162,33 @@ out_dir/
 └── processed/                                                 # Processed data used during execution 
 ```
 The `predictions` folder contains a unique folder for each input file. The input folders contain `diffusion_samples` predictions saved in the output_format ordered by confidence score as well as additional files containing the predictions of the confidence model. The `processed` folder contains the processed input files that are used by the model during inference.
+
+The output `.json` file contains various aggregated confidence scores for specific sample. The structure of the file is as follows:
+```yaml
+{
+    "confidence_score": 0.8367,       # Aggregated score used to sort the predictions, corresponds to 0.8 * complex_plddt + 0.2 * iptm (ptm for single chains)
+    "ptm": 0.8425,                    # Predicted TM score for the complex
+    "iptm": 0.8225,                   # Predicted TM score when aggregating at the interfaces
+    "ligand_iptm": 0.0,               # ipTM but only aggregating at protein-ligand interfaces
+    "protein_iptm": 0.8225,           # ipTM but only aggregating at protein-protein interfaces
+    "complex_plddt": 0.8402,          # Average pLDDT score for the complex
+    "complex_iplddt": 0.8241,         # Average pLDDT score when upweighting interface tokens
+    "complex_pde": 0.8912,            # Average PDE score for the complex
+    "complex_ipde": 5.1650,           # Average PDE score when aggregating at interfaces  
+    "chains_ptm": {                   # Predicted TM score within each chain
+        "0": 0.8533,
+        "1": 0.8330
+    },
+    "pair_chains_iptm": {             # Predicted (interface) TM score between each pair of chains
+        "0": {
+            "0": 0.8533,
+            "1": 0.8090
+        },
+        "1": {
+            "0": 0.8225,
+            "1": 0.8330
+        }
+    }
+}
+```
+`confidence_score`, `ptm` and `plddt` scores (and their interface and individual chain analogues) have a range of [0, 1], where higher values indicate higher confidence. `pde` scores have a unit of angstroms, where lower values indicate higher confidence.

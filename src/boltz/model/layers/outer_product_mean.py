@@ -83,6 +83,8 @@ class OuterProductMean(nn.Module):
                     z_out = z.to(m) @ sliced_weight_proj_o.T
                 else:
                     z_out = z_out + z.to(m) @ sliced_weight_proj_o.T
+            
+            z_out = z_out + self.proj_o.bias # add bias
             return z_out
         else:
             mask = mask[:, :, None, :] * mask[:, :, :, None]

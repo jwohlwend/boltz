@@ -65,6 +65,34 @@ data:
 
 `max_tokens` and `max_atoms` are the maximum number of tokens and atoms in the crop. Depending on the size of the GPUs you are using (as well as the training speed desired), you may want to adjust these values. Other recommended values are 256 and 2304, or 384 and 3456 respectively.
 
+Here is an example of how to set multiple dataset sources like the PDB and OpenFold distillation dataset that we used to train the structure model:
+
+
+```yaml
+  datasets:
+    - _target_: foldeverything.task.train.data.DatasetConfig
+      target_dir: PATH_TO_PDB_TARGETS_DIR
+      msa_dir: PATH_TO_PDB_MSA_DIR
+      prob: 0.5
+      sampler:
+        _target_: boltz.data.sample.cluster.ClusterSampler
+      cropper:
+        _target_: boltz.data.crop.boltz.BoltzCropper
+        min_neighborhood: 0
+        max_neighborhood: 40
+      split: ./scripts/train/assets/validation_ids.txt
+    - _target_: foldeverything.task.train.data.DatasetConfig
+      target_dir: PATH_TO_DISTILLATION_TARGETS_DIR
+      msa_dir: PATH_TO_DISTILLATION_MSA_DIR
+      prob: 0.5
+      sampler:
+        _target_: boltz.data.sample.cluster.ClusterSampler
+      cropper:
+        _target_: boltz.data.crop.boltz.BoltzCropper
+        min_neighborhood: 0
+        max_neighborhood: 40
+```
+
 ## Run the training script
 
 Before running the full training, we recommend using the debug flag. This turns off DDP (sets single device) and sets `num_workers` to 0 so everything is in a single process, as well as disabling wandb:
@@ -136,7 +164,7 @@ gunzip -d pdb_seqres.txt.gz
 When this is done, you can run the clustering script, which assigns proteins to 40% similarity clusters and rna/dna to a cluster for each unique sequence. For ligands, each CCD code is also assigned to its own cluster.
 
 ```bash
-python cluster.py --ccd ccd.pkl --sequences pdb_seqres.txt --mmseqs PATH_TO_MMSEQS_EXECUTABLE --output ./clustering
+python cluster.py --ccd ccd.pkl --sequences pdb_seqres.txt --mmseqs PATH_TO_MMSEQS_EXECUTABLE --outdir ./clustering
 ```
 
 > Note: you must install mmseqs (see: https://github.com/soedinglab/mmseqs2?tab=readme-ov-file#installation)
@@ -191,7 +219,7 @@ wget https://boltz1.s3.us-east-2.amazonaws.com/taxonomy.rdb
 You can now process the raw MSAs. First launch a redis server. We use redis to share the large taxonomy dictionary across workers, so MSA processing can happen in parallel without blowing up the RAM usage.
 
 ```bash
-redis-server --dbfilename taxonomy.rdb --redis-port 7777
+redis-server --dbfilename taxonomy.rdb --port 7777
 ```
 
 Please wait a few minutes for the DB to initialize. It will print `Ready to accept connections` when ready.
@@ -215,7 +243,7 @@ https://www.rcsb.org/docs/programmatic-access/file-download-services
 
 ```bash
 wget https://boltz1.s3.us-east-2.amazonaws.com/ccd.rdb
-redis-server --dbfilename ccd.rdb --redis-port 7777
+redis-server --dbfilename ccd.rdb --port 7777
 ```
 > Note: You must have redis installed (see: https://redis.io/docs/latest/operate/oss_and_stack/install/install-redis/)
 

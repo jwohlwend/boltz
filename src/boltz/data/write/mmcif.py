@@ -147,6 +147,11 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
                         element = element.upper()
                         residue_index = residue["res_idx"] + 1
                         pos = atom_coords[i]
+                        biso = (
+                            100.00
+                            if plddts is None
+                            else round(plddts[res_num].item() * 100, 2)
+                        )
                         yield Atom(
                             asym_unit=asym_unit_map[chain_idx],
                             type_symbol=element,
@@ -156,9 +161,7 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
                             y=f"{pos[1]:.5f}",
                             z=f"{pos[2]:.5f}",
                             het=het,
-                            biso=1
-                            if plddts is None
-                            else round(plddts[res_num].item(), 2),
+                            biso=biso,
                             occupancy=1,
                         )
 

@@ -1,8 +1,10 @@
 import os
+import string
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+import random
 
 import hydra
 import omegaconf
@@ -142,12 +144,18 @@ def train(raw_config: str, args: list[str]) -> None:  # noqa: C901, PLR0912, PLR
 
             # Update the checkpoint with the new state_dict
             checkpoint["state_dict"] = new_state_dict
+
+            # Save the modified checkpoint
+            random_string = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+            file_path = os.path.dirname(cfg.pretrained) + "/" + random_string + ".ckpt"
+            print(f"Saving modified checkpoint to {file_path} created by broadcasting trunk of {cfg.pretrained} to confidence module.")
+            torch.save(checkpoint, file_path)
         else:
             file_path = cfg.pretrained
 
         print(f"Loading model from {file_path}")
         model_module = type(model_module).load_from_checkpoint(
-            file_path, strict=False, **(model_module.hparams)
+            file_path, map_location="cpu", strict=False, **(model_module.hparams)
         )
 
         if cfg.load_confidence_from_trunk:

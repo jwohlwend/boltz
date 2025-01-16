@@ -11,6 +11,7 @@ from typing import Any, Optional
 import numpy as np
 import rdkit
 from mmcif import parse_mmcif
+from p_tqdm import p_umap
 from redis import Redis
 from tqdm import tqdm
 
@@ -95,10 +96,10 @@ def finalize(outdir: Path) -> None:
         try:
             with path.open("r") as f:
                 records.append(json.load(f))
-        except:
+        except:  # noqa: E722
             failed_count += 1
-            print(f"Failed to parse {record}")
-    print(f"Failed to parse {failed_count} entries)")
+            print(f"Failed to parse {record}")  # noqa: T201
+    print(f"Failed to parse {failed_count} entries)")  # noqa: T201
 
     # Save manifest
     outpath = outdir / "manifest.json"
@@ -169,7 +170,7 @@ def parse(data: PDB, resource: Resource, clusters: dict) -> Target:
 
 
 def process_structure(
-    data,
+    data: PDB,
     resource: Resource,
     outdir: Path,
     filters: list[StaticFilter],
@@ -179,7 +180,7 @@ def process_structure(
 
     Parameters
     ----------
-    data : PDB
+    item : PDB
         The raw input data.
     resource: Resource
         The shared resource.
@@ -264,50 +265,37 @@ def process(args) -> None:
     pickle_option = rdkit.Chem.PropertyPickleOptions.AllProps
     rdkit.Chem.SetDefaultPickleProperties(pickle_option)
 
-    # Check if we can run in parallel
-    num_processes = min(args.num_processes, multiprocessing.cpu_count())
-    parallel = num_processes > 1
-
     # Load shared data from redis
-    print("Loading shared data from Redis...")
-    shared_data = Resource(host=args.redis_host, port=args.redis_port)
+    resource = Resource(host=args.redis_host, port=args.redis_port)
 
     # Get data points
     print("Fetching data...")
     data = fetch(args.datadir)
 
-    # Randomly permute the data
-    random = np.random.RandomState()
-    permute = random.permutation(len(data))
-    data = [data[i] for i in permute]
+    # Check if we can run in parallel
+    max_processes = multiprocessing.cpu_count()
+    num_processes = max(1, min(args.num_processes, max_processes, len(data)))
+    parallel = num_processes > 1
 
     # Run processing
+    print("Processing data...")
     if parallel:
         # Create processing function
         fn = partial(
             process_structure,
-            host=args.redis_host,
-            port=args.redis_port,
+            resource=resource,
             outdir=args.outdir,
             clusters=clusters,
             filters=filters,
         )
-
-        # Split the data into random chunks
-        size = len(data) // num_processes
-        chunks = [data[i : i + size] for i in range(0, len(data), size)]
-
         # Run processing in parallel
-        with multiprocessing.Pool(num_processes) as pool:  # noqa: SIM117
-            with tqdm(total=len(chunks)) as pbar:
-                for _ in pool.imap_unordered(fn, chunks):
-                    pbar.update()
+        p_umap(fn, data, num_cpus=num_processes)
     else:
-        for item in tqdm(data, total=len(data)):
+        for item in tqdm(data):
             process_structure(
                 item,
-                shared_data,
-                args.outdir,
+                resource=resource,
+                outdir=args.outdir,
                 clusters=clusters,
                 filters=filters,
             )

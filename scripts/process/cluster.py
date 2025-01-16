@@ -27,13 +27,18 @@ def main(args: argparse.Namespace) -> None:
         data = list(SeqIO.parse(f, "fasta"))
 
     proteins = set()
+    shorts = set()
     nucleotides = set()
 
+    # Separate the sequences into proteins, nucleotides and short sequences
+    # Short sequences cause a bug in the clustering, so they are separated
     for seq in data:
-        if set(seq.seq).issubset({"A", "C", "G", "T", "U"}):
-            nucleotides.add(str(seq.seq))
+        if set(str(seq.seq)).issubset({"A", "C", "G", "T", "U", "N"}):
+            nucleotides.add(str(seq.seq).strip())
+        elif len(str(seq.seq).strip()) < 10:  # noqa: PLR2004
+            shorts.add(str(seq.seq).strip())
         else:
-            proteins.add(str(seq.seq))
+            proteins.add(str(seq.seq).strip())
 
     # Run mmseqs on the protein data
     proteins = [f">{hash_sequence(seq)}\n{seq}" for seq in proteins]
@@ -53,22 +58,21 @@ def main(args: argparse.Namespace) -> None:
     items = protein_data[1]
     clustering = dict(zip(list(items), list(clusters)))
 
+    # Each shqrt sequence is given an id
+    for short in shorts:
+        short_id = hash_sequence(short)
+        clustering[short_id] = short_id
+
     # Each unique rna sequence is given an id
-    visited = {}
     for nucl in nucleotides:
         nucl_id = hash_sequence(nucl)
-        if nucl not in visited:
-            clustering[nucl_id] = nucl_id
-            visited[nucl] = nucl_id
-        else:
-            clustering[nucl_id] = visited[nucl]
+        clustering[nucl_id] = nucl_id
 
     # Load ligand data
     with Path(args.ccd).open("rb") as handle:
         ligand_data = pickle.load(handle)  # noqa: S301
 
     # Each unique ligand CCD is given an id
-    visited = {}
     for ccd_code in ligand_data:
         clustering[ccd_code] = ccd_code
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from p_tqdm import p_umap
 from redis import Redis
 from tqdm import tqdm
 
@@ -32,20 +33,17 @@ class Resource:
 
 
 def process_msa(
-    data: list,
-    host: str,
-    port: int,
+    path: Path,
     outdir: str,
     max_seqs: int,
+    resource: Resource,
 ) -> None:
     """Run processing in a worker thread."""
     outdir = Path(outdir)
-    resource = Resource(host=host, port=port)
-    for path in tqdm(data, total=len(data)):
-        out_path = outdir / f"{path.stem}.npz"
-        if not out_path.exists():
-            msa = parse_a3m(path, resource, max_seqs)
-            np.savez_compressed(out_path, **asdict(msa))
+    out_path = outdir / f"{path.stem}.npz"
+    if not out_path.exists():
+        msa = parse_a3m(path, resource, max_seqs)
+        np.savez_compressed(out_path, **asdict(msa))
 
 
 def process(args) -> None:
@@ -53,46 +51,41 @@ def process(args) -> None:
     # Create output directory
     args.outdir.mkdir(parents=True, exist_ok=True)
 
-    # Check if we can run in parallel
-    num_processes = min(args.num_processes, multiprocessing.cpu_count())
-    parallel = num_processes > 1
-
-    # Load shared data from redis
-    print("Loading shared data from Redis...")
-    shared_data = Resource(host=args.redis_host, port=args.redis_port)
+    # Load the resource
+    resource = Resource(host=args.redis_host, port=args.redis_port)
 
     # Get data points
     print("Fetching data...")
-    data = args.msadir.rglob("*.a3m*")
+    data = list(args.msadir.rglob("*.a3m*"))
     print(f"Found {len(data)} MSA's.")
 
-    # Randomly permute the data
-    random = np.random.RandomState()
-    permute = random.permutation(len(data))
-    data = [data[i] for i in permute]
+    # Check if we can run in parallel
+    max_processes = multiprocessing.cpu_count()
+    num_processes = max(1, min(args.num_processes, max_processes, len(data)))
+    parallel = num_processes > 1
 
     # Run processing
     if parallel:
         # Create processing function
         fn = partial(
             process_msa,
-            host=args.redis_host,
-            port=args.redis_port,
             outdir=args.outdir,
+            max_seqs=args.max_seqs,
+            resource=resource,
         )
 
-        # Split the data into random chunks
-        size = len(data) // num_processes
-        chunks = [data[i : i + size] for i in range(0, len(data), size)]
+        # Run in parallel
+        p_umap(fn, data, num_cpus=num_processes)
 
-        # Run processing in parallel
-        with multiprocessing.Pool(num_processes) as pool:  # noqa: SIM117
-            with tqdm(total=len(chunks)) as pbar:
-                for _ in pool.imap_unordered(fn, chunks):
-                    pbar.update()
     else:
-        for item in tqdm(data, total=len(data)):
-            process_msa(item, shared_data, args.outdir)
+        # Run in serial
+        for path in tqdm(data):
+            process_msa(
+                path,
+                outdir=args.outdir,
+                max_seqs=args.max_seqs,
+                resource=resource,
+            )
 
 
 if __name__ == "__main__":

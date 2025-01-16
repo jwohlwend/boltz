@@ -747,7 +747,7 @@ def parse_polymer(  # noqa: C901, PLR0915, PLR0912
         entity=entity,
         residues=parsed,
         type=chain_type,
-        sequence=sequence,
+        sequence=gemmi.one_letter_code(sequence),
     )
 
 

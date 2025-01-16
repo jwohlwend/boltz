@@ -1,12 +1,11 @@
 from dataclasses import dataclass
-from typing import List
 
 import numpy as np
 from scipy.spatial.distance import cdist
 
 from boltz.data import const
-from boltz.data.types import Structure
 from boltz.data.filter.static.filter import StaticFilter
+from boltz.data.types import Structure
 
 
 class MinimumLengthFilter(StaticFilter):
@@ -222,7 +221,7 @@ class ClashingChainsFilter(StaticFilter):
         pairs = [(i, j) for i, j in pairs if i < j]
 
         # Compute clashes
-        clashes: List[Clash] = []
+        clashes: list[Clash] = []
         for i, j in pairs:
             # Get the chains
             c1 = structure.chains[i]
