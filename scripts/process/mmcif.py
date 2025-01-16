@@ -877,6 +877,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
 
     # Parse entities
     # Create mapping from subchain id to entity
+    structure.setup_entities()
     entities: dict[str, gemmi.Entity] = {}
     entity_ids: dict[str, int] = {}
     for entity_id, entity in enumerate(structure.entities):
