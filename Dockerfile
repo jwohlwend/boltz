@@ -11,5 +11,6 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone &
     add-apt-repository ppa:deadsnakes/ppa -y && \
     apt-get update && \
     apt-get install -y python3.11 python3-pip && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
     pip install --upgrade pip && \
     pip install boltz -U
