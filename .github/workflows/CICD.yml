@@ -1,210 +1,210 @@
-# name: CI/CD
-# on:
-#   push:
-#     branches:
-#     - main
+name: CI/CD
+on:
+  push:
+    branches:
+    - main
 
-# env:
-#   PROJECT_ID: zipbio-research
-#   WIF_PROVIDER: "projects/672104224520/locations/global/workloadIdentityPools/github-actions-pool/providers/gh-actions-provider"
-#   WIF_SERVICE_ACCOUNT: "github-actions-sa@zipbio-research.iam.gserviceaccount.com"
-#   GAR_LOCATION: northamerica-northeast1
-#   DOCKER_REGISTRY: zipbio-docker
-#   SERVICE: boltz
-#   SIF_REGISTRY: boltz-sif
-#   SIF_FILE_PREFIX: boltz
-#   VM_NAME: clusterv6-controller
-#   VM_ZONE: us-central1-a
+env:
+  PROJECT_ID: zipbio-research
+  WIF_PROVIDER: "projects/672104224520/locations/global/workloadIdentityPools/github-actions-pool/providers/gh-actions-provider"
+  WIF_SERVICE_ACCOUNT: "github-actions-sa@zipbio-research.iam.gserviceaccount.com"
+  GAR_LOCATION: northamerica-northeast1
+  DOCKER_REGISTRY: zipbio-docker
+  SERVICE: boltz
+  SIF_REGISTRY: boltz-sif
+  SIF_FILE_PREFIX: boltz
+  VM_NAME: clusterv6-controller
+  VM_ZONE: us-central1-a
 
-# jobs:
-#   build:
-#     permissions:
-#       contents: 'read'
-#       id-token: 'write'
-#     runs-on: ubuntu-latest
-#     steps:
-#       - name: Checkout
-#         uses: actions/checkout@v4
-#         with:        
-#           repository: 'ZipBioTx/boltz'
+jobs:
+  build:
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:        
+          repository: 'ZipBioTx/boltz'
  
-#       # Authenticate via Workload Identity Federation
-#       - name: Authenticate gcloud
-#         id: "auth"
-#         uses: "google-github-actions/auth@v2"
-#         with:
-#           token_format: 'access_token'
-#           workload_identity_provider: ${{ env.WIF_PROVIDER }}
-#           service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+      # Authenticate via Workload Identity Federation
+      - name: Authenticate gcloud
+        id: "auth"
+        uses: "google-github-actions/auth@v2"
+        with:
+          token_format: 'access_token'
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
 
-#       # Setup gcloud cli
-#       - name: Set up Cloud SDK
-#         uses: google-github-actions/setup-gcloud@v2
+      # Setup gcloud cli
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
 
-#       # Login to Google Container Registry
-#       - name: Run gcloud auth configure-docker
-#         run: |-
-#           gcloud auth configure-docker --quiet ${{ env.GAR_LOCATION }}-docker.pkg.dev
+      # Login to Google Container Registry
+      - name: Run gcloud auth configure-docker
+        run: |-
+          gcloud auth configure-docker --quiet ${{ env.GAR_LOCATION }}-docker.pkg.dev
 
-#       # Setup singularity
-#       - name: Set up Singularity
-#         uses: eWaterCycle/setup-singularity@v7
-#         with:
-#           singularity-version: 3.8.7
+      # Setup singularity
+      - name: Set up Singularity
+        uses: eWaterCycle/setup-singularity@v7
+        with:
+          singularity-version: 3.8.7
 
-#       # Generate Docker metadata
-#       - name: Generate Docker Metadata
-#         id: metadata
-#         uses: docker/metadata-action@v4.3.0
-#         with:
-#           # list of Docker images to use as base name for tags
-#           images: |
-#             ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{env.DOCKER_REGISTRY}}/${{ env.SERVICE }}
-#           # generate Docker tags based on the following events:
-#           tags: |
-#             ${{ github.sha }}
-#             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
-#             type=raw,value=${{ github.ref_name }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+      # Generate Docker metadata
+      - name: Generate Docker Metadata
+        id: metadata
+        uses: docker/metadata-action@v4.3.0
+        with:
+          # list of Docker images to use as base name for tags
+          images: |
+            ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{env.DOCKER_REGISTRY}}/${{ env.SERVICE }}
+          # generate Docker tags based on the following events:
+          tags: |
+            ${{ github.sha }}
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=raw,value=${{ github.ref_name }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
-#       # Set up docker buildx
-#       - name: Set up Docker Buildx
-#         uses: docker/setup-buildx-action@v3.5.0
-#         with:
-#           driver-opts: |
-#             image=moby/buildkit:v0.15.2
+      # Set up docker buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3.5.0
+        with:
+          driver-opts: |
+            image=moby/buildkit:v0.15.2
 
-#       # Build and Push Docker Image
-#       - name: Build and Push ${{ inputs.service }}
-#         uses: docker/build-push-action@v6.5.0
-#         with:
-#           push: true
-#           load: true
-#           context: .
-#           file: docker/Dockerfile
-#           tags: ${{ steps.metadata.outputs.tags }}
-#           labels: |
-#             commmitsha=${{ github.sha }}
-#           cache-from: type=registry,ref=${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{env.DOCKER_REGISTRY}}/${{ env.SERVICE }}:buildcache
-#           cache-to: type=registry,ref=${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{env.DOCKER_REGISTRY}}/${{ env.SERVICE }}:buildcache,mode=max
+      # Build and Push Docker Image
+      - name: Build and Push ${{ inputs.service }}
+        uses: docker/build-push-action@v6.5.0
+        with:
+          push: true
+          load: true
+          context: .
+          file: docker/Dockerfile
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: |
+            commmitsha=${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{env.DOCKER_REGISTRY}}/${{ env.SERVICE }}:buildcache
+          cache-to: type=registry,ref=${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{env.DOCKER_REGISTRY}}/${{ env.SERVICE }}:buildcache,mode=max
 
-#       - name: Convert Docker image to SIF
-#         run: |
-#             docker image save ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{env.DOCKER_REGISTRY}}/${{ env.SERVICE }}:${{ github.sha }} -o tmp.tar
-#             if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-#               singularity build ${{ env.SIF_FILE_PREFIX }}-latest.sif docker-archive:tmp.tar
-#             fi
-#             if [[ "${{ github.ref }}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-#               singularity build ${{ env.SIF_FILE_PREFIX }}-${{ github.ref_name }}.sif docker-archive:tmp.tar
-#             fi
+      - name: Convert Docker image to SIF
+        run: |
+            docker image save ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{env.DOCKER_REGISTRY}}/${{ env.SERVICE }}:${{ github.sha }} -o tmp.tar
+            if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+              singularity build ${{ env.SIF_FILE_PREFIX }}-latest.sif docker-archive:tmp.tar
+            fi
+            if [[ "${{ github.ref }}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              singularity build ${{ env.SIF_FILE_PREFIX }}-${{ github.ref_name }}.sif docker-archive:tmp.tar
+            fi
 
-#       # New version is always added and lts version is rotated if branch is main
-#       - name: Upload SIF file to Generic Artifact Registry
-#         run: |
-#             if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-#             echo "Uploading new version"
-#             gcloud artifacts generic upload \
-#               --project=${{ env.PROJECT_ID }} \
-#               --source=${{ env.SIF_FILE_PREFIX }}-latest.sif \
-#               --package=${{ env.SERVICE }} \
-#               --version=${{ github.sha }} \
-#               --location=${{ env.GAR_LOCATION }} \
-#               --repository=${{ env.SIF_REGISTRY }}
+      # New version is always added and lts version is rotated if branch is main
+      - name: Upload SIF file to Generic Artifact Registry
+        run: |
+            if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "Uploading new version"
+            gcloud artifacts generic upload \
+              --project=${{ env.PROJECT_ID }} \
+              --source=${{ env.SIF_FILE_PREFIX }}-latest.sif \
+              --package=${{ env.SERVICE }} \
+              --version=${{ github.sha }} \
+              --location=${{ env.GAR_LOCATION }} \
+              --repository=${{ env.SIF_REGISTRY }}
 
-#               echo "Replacing lts version with newest version"
-#               if gcloud artifacts files delete \
-#                 ${{ env.SERVICE }}:lts:${{ env.SIF_FILE_PREFIX }}-latest.sif \
-#                 --location=${{ env.GAR_LOCATION }} \
-#                 --repository=${{ env.SIF_REGISTRY }}  \
-#                 --quiet ; then
-#                 echo "Deleted lts version"
-#               fi
+              echo "Replacing lts version with newest version"
+              if gcloud artifacts files delete \
+                ${{ env.SERVICE }}:lts:${{ env.SIF_FILE_PREFIX }}-latest.sif \
+                --location=${{ env.GAR_LOCATION }} \
+                --repository=${{ env.SIF_REGISTRY }}  \
+                --quiet ; then
+                echo "Deleted lts version"
+              fi
 
-#               echo "Uploading new lts version"
-#               gcloud artifacts generic upload \
-#                 --project=${{ env.PROJECT_ID }} \
-#                 --source=${{ env.SIF_FILE_PREFIX }}-latest.sif \
-#                 --package=${{ env.SERVICE }} \
-#                 --version=lts \
-#                 --location=${{ env.GAR_LOCATION }} \
-#                 --repository=${{ env.SIF_REGISTRY }}   
-#             else
-#               echo "Not on main branch."
-#             fi
-#             if [[ "${{ github.ref }}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-#             echo "Uploading new semantic version"
-#             gcloud artifacts generic upload \
-#               --project=${{ env.PROJECT_ID }} \
-#               --source=${{ env.SIF_FILE_PREFIX }}-${{ github.ref_name }}.sif \
-#               --package=${{ env.SERVICE }} \
-#               --version=${{ github.ref_name }} \
-#               --location=${{ env.GAR_LOCATION }} \
-#               --repository=${{ env.SIF_REGISTRY }}
-#             fi
+              echo "Uploading new lts version"
+              gcloud artifacts generic upload \
+                --project=${{ env.PROJECT_ID }} \
+                --source=${{ env.SIF_FILE_PREFIX }}-latest.sif \
+                --package=${{ env.SERVICE }} \
+                --version=lts \
+                --location=${{ env.GAR_LOCATION }} \
+                --repository=${{ env.SIF_REGISTRY }}   
+            else
+              echo "Not on main branch."
+            fi
+            if [[ "${{ github.ref }}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Uploading new semantic version"
+            gcloud artifacts generic upload \
+              --project=${{ env.PROJECT_ID }} \
+              --source=${{ env.SIF_FILE_PREFIX }}-${{ github.ref_name }}.sif \
+              --package=${{ env.SERVICE }} \
+              --version=${{ github.ref_name }} \
+              --location=${{ env.GAR_LOCATION }} \
+              --repository=${{ env.SIF_REGISTRY }}
+            fi
 
-#   # Only runs when the branch is 'main'
-#   deploy:
-#     # Add 'id-token' with the intended permissions for workload identity federation
-#     permissions:
-#       contents: 'read'
-#       id-token: 'write'
-#     runs-on: ubuntu-latest
-#     needs: [build]
-#     steps:
-#       # Authenticate via Workload Identity Federation
-#       - name: Authenticate gcloud
-#         id: "auth"
-#         uses: "google-github-actions/auth@v2"
-#         with:
-#           token_format: 'access_token'
-#           workload_identity_provider: ${{ env.WIF_PROVIDER }}
-#           service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+  # Only runs when the branch is 'main'
+  deploy:
+    # Add 'id-token' with the intended permissions for workload identity federation
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      # Authenticate via Workload Identity Federation
+      - name: Authenticate gcloud
+        id: "auth"
+        uses: "google-github-actions/auth@v2"
+        with:
+          token_format: 'access_token'
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
 
-#       # Setup gcloud cli
-#       - name: Set up Cloud SDK
-#         uses: google-github-actions/setup-gcloud@v2
-#         with:
-#           install_components: beta
+      # Setup gcloud cli
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: beta
 
-#       # Run command via IAP
-#       - name: Download Artifact in VM
-#         run: |
-#           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-#             gcloud beta compute ssh ${{ env.VM_NAME }} \
-#                 --project=${{ env.PROJECT_ID }} \
-#                 --zone=${{ env.VM_ZONE }} \
-#                 --tunnel-through-iap \
-#                 --quiet \
-#                 --command="bash -s" <<EOF
-#                   sudo mkdir -p /runtime/singularity_images/${{ github.event.repository.name }}
-#                   sudo rm /runtime/singularity_images/${{ github.event.repository.name }}/${{ env.SIF_FILE_PREFIX }}-latest.sif
-#                   sudo gcloud artifacts generic download \
-#                       --destination=/runtime/singularity_images/${{ github.event.repository.name }} \
-#                       --location=${{ env.GAR_LOCATION }} \
-#                       --repository=${{ env.SIF_REGISTRY }}   \
-#                       --package=${{ env.SERVICE }} \
-#                       --version=lts \
-#                       --name=${{ env.SIF_FILE_PREFIX }}-latest.sif
-#                   sudo chmod +x /runtime/singularity_images/${{ github.event.repository.name }}/${{ env.SIF_FILE_PREFIX }}-latest.sif
-#                   sudo chown root:root /runtime/singularity_images/${{ github.event.repository.name }}/${{ env.SIF_FILE_PREFIX }}-latest.sif
-#           EOF
-#           fi
-#           if [[ "${{ github.ref }}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-#             gcloud beta compute ssh ${{ env.VM_NAME }} \
-#                 --project=${{ env.PROJECT_ID }} \
-#                 --zone=${{ env.VM_ZONE }} \
-#                 --tunnel-through-iap \
-#                 --quiet \
-#                 --command="bash -s" <<EOF
-#                   sudo mkdir -p /runtime/singularity_images/${{ github.event.repository.name }}
-#                   sudo rm /runtime/singularity_images/${{ github.event.repository.name }}/${{ env.SIF_FILE_PREFIX }}-${{ github.ref_name }}.sif
-#                   sudo gcloud artifacts generic download \
-#                       --destination=/runtime/singularity_images/${{ github.event.repository.name }} \
-#                       --location=${{ env.GAR_LOCATION }} \
-#                       --repository=${{ env.SIF_REGISTRY }}   \
-#                       --package=${{ env.SERVICE }} \
-#                       --version=${{ github.ref_name }} \
-#                       --name=${{ env.SIF_FILE_PREFIX }}-${{ github.ref_name }}.sif
-#                   sudo chmod +x /runtime/singularity_images/${{ github.event.repository.name }}/${{ env.SIF_FILE_PREFIX }}-${{ github.ref_name }}.sif
-#                   sudo chown root:root /runtime/singularity_images/${{ github.event.repository.name }}/${{ env.SIF_FILE_PREFIX }}-${{ github.ref_name }}.sif
-#           EOF
-#           fi
+      # Run command via IAP
+      - name: Download Artifact in VM
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            gcloud beta compute ssh ${{ env.VM_NAME }} \
+                --project=${{ env.PROJECT_ID }} \
+                --zone=${{ env.VM_ZONE }} \
+                --tunnel-through-iap \
+                --quiet \
+                --command="bash -s" <<EOF
+                  sudo mkdir -p /runtime/singularity_images/${{ github.event.repository.name }}
+                  sudo rm /runtime/singularity_images/${{ github.event.repository.name }}/${{ env.SIF_FILE_PREFIX }}-latest.sif
+                  sudo gcloud artifacts generic download \
+                      --destination=/runtime/singularity_images/${{ github.event.repository.name }} \
+                      --location=${{ env.GAR_LOCATION }} \
+                      --repository=${{ env.SIF_REGISTRY }}   \
+                      --package=${{ env.SERVICE }} \
+                      --version=lts \
+                      --name=${{ env.SIF_FILE_PREFIX }}-latest.sif
+                  sudo chmod +x /runtime/singularity_images/${{ github.event.repository.name }}/${{ env.SIF_FILE_PREFIX }}-latest.sif
+                  sudo chown root:root /runtime/singularity_images/${{ github.event.repository.name }}/${{ env.SIF_FILE_PREFIX }}-latest.sif
+          EOF
+          fi
+          if [[ "${{ github.ref }}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            gcloud beta compute ssh ${{ env.VM_NAME }} \
+                --project=${{ env.PROJECT_ID }} \
+                --zone=${{ env.VM_ZONE }} \
+                --tunnel-through-iap \
+                --quiet \
+                --command="bash -s" <<EOF
+                  sudo mkdir -p /runtime/singularity_images/${{ github.event.repository.name }}
+                  sudo rm /runtime/singularity_images/${{ github.event.repository.name }}/${{ env.SIF_FILE_PREFIX }}-${{ github.ref_name }}.sif
+                  sudo gcloud artifacts generic download \
+                      --destination=/runtime/singularity_images/${{ github.event.repository.name }} \
+                      --location=${{ env.GAR_LOCATION }} \
+                      --repository=${{ env.SIF_REGISTRY }}   \
+                      --package=${{ env.SERVICE }} \
+                      --version=${{ github.ref_name }} \
+                      --name=${{ env.SIF_FILE_PREFIX }}-${{ github.ref_name }}.sif
+                  sudo chmod +x /runtime/singularity_images/${{ github.event.repository.name }}/${{ env.SIF_FILE_PREFIX }}-${{ github.ref_name }}.sif
+                  sudo chown root:root /runtime/singularity_images/${{ github.event.repository.name }}/${{ env.SIF_FILE_PREFIX }}-${{ github.ref_name }}.sif
+          EOF
+          fi
