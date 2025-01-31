@@ -82,6 +82,11 @@ target/
 profile_default/
 ipython_config.py
 
+# add the boltz-cuda124-latest.sif file to the .gitignore
+# Singularity image files
+boltz-cuda124-latest.sif
+*.sif
+
 # pyenv
 #   For a library or package, you might want to ignore these files since the code is
 #   intended to run in multiple environments; otherwise, check them in:

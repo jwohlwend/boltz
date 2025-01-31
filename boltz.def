@@ -1,0 +1,24 @@
+Bootstrap: docker
+From: nvidia/cuda:12.4.0-runtime-ubuntu22.04
+
+%environment
+    export DEBIAN_FRONTEND=noninteractive
+    export TZ=America/New_York
+
+%post
+    ln -snf /usr/share/zoneinfo/America/New_York /etc/localtime
+    echo "America/New_York" > /etc/timezone
+    apt-get update
+    apt-get install -y software-properties-common
+    add-apt-repository ppa:deadsnakes/ppa -y
+    apt-get update
+    apt-get install -y python3.11 python3-pip
+    pip install --upgrade pip
+    pip install boltz -U
+
+%labels
+    Author ZipBio
+    Version 1.0
+
+%help
+    This Singularity image contains Boltz-1 for biomolecular structure prediction.
