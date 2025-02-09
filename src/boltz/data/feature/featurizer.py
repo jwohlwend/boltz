@@ -2,8 +2,11 @@ import math
 import random
 from typing import Optional
 
+import numba
 import numpy as np
+import numpy.typing as npt
 import torch
+from numba import types
 from torch import Tensor, from_numpy
 from torch.nn.functional import one_hot
 
@@ -301,12 +304,6 @@ def construct_paired_msa(  # noqa: C901, PLR0915, PLR0912
         pairing = pairing[:max_seqs]
         is_paired = is_paired[:max_seqs]
 
-    # Create MSA data
-    msa_data = []
-    del_data = []
-    paired_data = []
-    gap_token_id = const.token_ids["-"]
-
     # Map (chain_id, seq_idx, res_idx) to deletion
     deletions = {}
     for chain_id, chain_msa in msa.items():
@@ -322,35 +319,145 @@ def construct_paired_msa(  # noqa: C901, PLR0915, PLR0912
                 deletions[(chain_id, seq_idx, res_idx)] = deletion
 
     # Add all the token MSA data
-    for token in data.tokens:
-        token_res_types = []
-        token_deletions = []
-        token_is_paired = []
-        for row_pairing, row_is_paired in zip(pairing, is_paired):
-            res_idx = int(token["res_idx"])
-            chain_id = int(token["asym_id"])
-            seq_idx = row_pairing[chain_id]
-            token_is_paired.append(row_is_paired[chain_id])
-
-            # Add residue type
-            if seq_idx == -1:
-                token_res_types.append(gap_token_id)
-                token_deletions.append(0)
-            else:
-                sequence = msa[chain_id].sequences[seq_idx]
-                res_start = sequence["res_start"]
-                res_type = msa[chain_id].residues[res_start + res_idx][0]
-                deletion = deletions.get((chain_id, seq_idx, res_idx), 0)
-                token_res_types.append(res_type)
-                token_deletions.append(deletion)
-
-        msa_data.append(token_res_types)
-        del_data.append(token_deletions)
-        paired_data.append(token_is_paired)
+    msa_data, del_data, paired_data = prepare_msa_arrays(
+        data.tokens, pairing, is_paired, deletions, msa
+    )
 
     msa_data = torch.tensor(msa_data, dtype=torch.long)
     del_data = torch.tensor(del_data, dtype=torch.float)
     paired_data = torch.tensor(paired_data, dtype=torch.float)
+
+    return msa_data, del_data, paired_data
+
+
+def prepare_msa_arrays(
+    tokens,
+    pairing: list[dict[int, int]],
+    is_paired: list[dict[int, int]],
+    deletions: dict[tuple[int, int, int], int],
+    msa: dict[int, MSA],
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+    """Reshape data to play nicely with numba jit."""
+    token_asym_ids_arr = np.array([t["asym_id"] for t in tokens], dtype=np.int64)
+    token_res_idxs_arr = np.array([t["res_idx"] for t in tokens], dtype=np.int64)
+
+    chain_ids = sorted(msa.keys())
+
+    # chain_ids are not necessarily contiguous (e.g. they might be 0, 24, 25).
+    # This allows us to look up a chain_id by it's index in the chain_ids list.
+    chain_id_to_idx = {chain_id: i for i, chain_id in enumerate(chain_ids)}
+    token_asym_ids_idx_arr = np.array(
+        [chain_id_to_idx[asym_id] for asym_id in token_asym_ids_arr], dtype=np.int64
+    )
+
+    pairing_arr = np.zeros((len(pairing), len(chain_ids)), dtype=np.int64)
+    is_paired_arr = np.zeros((len(is_paired), len(chain_ids)), dtype=np.int64)
+
+    for i, row_pairing in enumerate(pairing):
+        for chain_id in chain_ids:
+            pairing_arr[i, chain_id_to_idx[chain_id]] = row_pairing[chain_id]
+
+    for i, row_is_paired in enumerate(is_paired):
+        for chain_id in chain_ids:
+            is_paired_arr[i, chain_id_to_idx[chain_id]] = row_is_paired[chain_id]
+
+    max_seq_len = max(len(msa[chain_id].sequences) for chain_id in chain_ids)
+
+    # we want res_start from sequences
+    msa_sequences = np.full((len(chain_ids), max_seq_len), -1, dtype=np.int64)
+    for chain_id in chain_ids:
+        for i, seq in enumerate(msa[chain_id].sequences):
+            msa_sequences[chain_id_to_idx[chain_id], i] = seq["res_start"]
+
+    max_residues_len = max(len(msa[chain_id].residues) for chain_id in chain_ids)
+    msa_residues = np.full((len(chain_ids), max_residues_len), -1, dtype=np.int64)
+    for chain_id in chain_ids:
+        residues = msa[chain_id].residues.astype(np.int64)
+        idxs = np.arange(len(residues))
+        chain_idx = chain_id_to_idx[chain_id]
+        msa_residues[chain_idx, idxs] = residues
+
+    deletions_dict = numba.typed.Dict.empty(
+        key_type=numba.types.Tuple(
+            [numba.types.int64, numba.types.int64, numba.types.int64]
+        ),
+        value_type=numba.types.int64,
+    )
+    deletions_dict.update(deletions)
+
+    return _prepare_msa_arrays_inner(
+        token_asym_ids_arr,
+        token_res_idxs_arr,
+        token_asym_ids_idx_arr,
+        pairing_arr,
+        is_paired_arr,
+        deletions_dict,
+        msa_sequences,
+        msa_residues,
+        const.token_ids["-"],
+    )
+
+
+deletions_dict_type = types.DictType(types.UniTuple(types.int64, 3), types.int64)
+
+
+@numba.njit(
+    [
+        types.Tuple(
+            (
+                types.int64[:, ::1],  # msa_data
+                types.int64[:, ::1],  # del_data
+                types.int64[:, ::1],  # paired_data
+            )
+        )(
+            types.int64[::1],  # token_asym_ids
+            types.int64[::1],  # token_res_idxs
+            types.int64[::1],  # token_asym_ids_idx
+            types.int64[:, ::1],  # pairing
+            types.int64[:, ::1],  # is_paired
+            deletions_dict_type,  # deletions
+            types.int64[:, ::1],  # msa_sequences
+            types.int64[:, ::1],  # msa_residues
+            types.int64,  # gap_token
+        )
+    ],
+    cache=True,
+)
+def _prepare_msa_arrays_inner(
+    token_asym_ids: npt.NDArray[np.int64],
+    token_res_idxs: npt.NDArray[np.int64],
+    token_asym_ids_idx: npt.NDArray[np.int64],
+    pairing: npt.NDArray[np.int64],
+    is_paired: npt.NDArray[np.int64],
+    deletions: dict[tuple[int, int, int], int],
+    msa_sequences: npt.NDArray[np.int64],
+    msa_residues: npt.NDArray[np.int64],
+    gap_token: int,
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+    n_tokens = len(token_asym_ids)
+    n_pairs = len(pairing)
+    msa_data = np.full((n_tokens, n_pairs), gap_token, dtype=np.int64)
+    paired_data = np.zeros((n_tokens, n_pairs), dtype=np.int64)
+    del_data = np.zeros((n_tokens, n_pairs), dtype=np.int64)
+
+    # Add all the token MSA data
+    for token_idx in range(n_tokens):
+        chain_id_idx = token_asym_ids_idx[token_idx]
+        chain_id = token_asym_ids[token_idx]
+        res_idx = token_res_idxs[token_idx]
+
+        for pair_idx in range(n_pairs):
+            seq_idx = pairing[pair_idx, chain_id_idx]
+            paired_data[token_idx, pair_idx] = is_paired[pair_idx, chain_id_idx]
+
+            # Add residue type
+            if seq_idx != -1:
+                res_start = msa_sequences[chain_id_idx, seq_idx]
+                res_type = msa_residues[chain_id_idx, res_start + res_idx]
+                k = (chain_id, seq_idx, res_idx)
+                if k in deletions:
+                    del_data[token_idx, pair_idx] = deletions[k]
+                msa_data[token_idx, pair_idx] = res_type
 
     return msa_data, del_data, paired_data
 
