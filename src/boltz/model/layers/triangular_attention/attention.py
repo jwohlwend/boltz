@@ -66,9 +66,10 @@ class TriangleAttention(nn.Module):
         use_memory_efficient_kernel: bool = False,
         use_deepspeed_evo_attention: bool = False,
         use_lma: bool = False,
+        use_trifast: bool = False,
         inplace_safe: bool = False,
     ) -> torch.Tensor:
-        "triangle! triangle!"
+        """triangle! triangle!"""
         mha_inputs = {
             "q_x": x,
             "kv_x": x,
@@ -81,6 +82,7 @@ class TriangleAttention(nn.Module):
                 use_memory_efficient_kernel=use_memory_efficient_kernel,
                 use_deepspeed_evo_attention=use_deepspeed_evo_attention,
                 use_lma=use_lma,
+                use_trifast=use_trifast,
             ),
             mha_inputs,
             chunk_size=chunk_size,
@@ -96,13 +98,16 @@ class TriangleAttention(nn.Module):
         use_memory_efficient_kernel: bool = False,
         use_deepspeed_evo_attention: bool = False,
         use_lma: bool = False,
+        use_trifast: bool = False,
         inplace_safe: bool = False,
     ) -> torch.Tensor:
         """
         Args:
             x:
                 [*, I, J, C_in] input tensor (e.g. the pair representation)
-        Returns:
+
+        Returns
+        -------
             [*, I, J, C_in] output tensor
         """
         if mask is None:
@@ -129,7 +134,7 @@ class TriangleAttention(nn.Module):
 
         biases = [mask_bias, triangle_bias]
 
-        if chunk_size is not None:
+        if chunk_size is not None and not use_trifast:
             x = self._chunk(
                 x,
                 biases,
@@ -137,16 +142,18 @@ class TriangleAttention(nn.Module):
                 use_memory_efficient_kernel=use_memory_efficient_kernel,
                 use_deepspeed_evo_attention=use_deepspeed_evo_attention,
                 use_lma=use_lma,
+                use_trifast=use_trifast,
                 inplace_safe=inplace_safe,
             )
         else:
             x = self.mha(
-                q_x=x,
-                kv_x=x,
-                biases=biases,
+                x,
+                x,
+                biases,
                 use_memory_efficient_kernel=use_memory_efficient_kernel,
                 use_deepspeed_evo_attention=use_deepspeed_evo_attention,
                 use_lma=use_lma,
+                use_trifast=use_trifast,
             )
 
         if not self.starting:
