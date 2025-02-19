@@ -2,7 +2,7 @@
 
 ## Download the pre-processed data
 
-To run training, you will need to download a a few pre-processed datasets. Note that you will need ~250G of storage for all the data. If instead you want to re-run the preprocessing pipeline or processed your own raw data for training, please see the [instructions](#processing-raw-data) at the bottom of this page.
+To run training, you will need to download a few pre-processed datasets. Note that you will need ~250G of storage for all the data. If instead you want to re-run the preprocessing pipeline or processed your own raw data for training, please see the [instructions](#processing-raw-data) at the bottom of this page.
 
 - The pre-processed RCSB (i.e PDB) structures:
 ```bash

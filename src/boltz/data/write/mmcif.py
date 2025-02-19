@@ -11,7 +11,6 @@ from torch import Tensor
 
 from boltz.data import const
 from boltz.data.types import Structure
-from boltz.data.write.utils import generate_tags
 
 
 def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # noqa: C901, PLR0915, PLR0912
@@ -97,12 +96,11 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
 
     # We don't assume that symmetry is perfect, so we dump everything
     # into the asymmetric unit, and produce just a single assembly
-    chain_tags = generate_tags()
     asym_unit_map = {}
     for chain in structure.chains:
         # Define the model assembly
         chain_idx = chain["asym_id"]
-        chain_tag = next(chain_tags)
+        chain_tag = str(chain["name"])
         asym = AsymUnit(
             entities_map[chain_idx],
             details="Model subunit %s" % chain_tag,
@@ -180,7 +178,7 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
                     self.qa_metrics.append(
                         _LocalPLDDT(
                             asym_unit_map[chain_idx].residue(residue_idx),
-                            plddts[res_num].item(),
+                            round(plddts[res_num].item() * 100, 2),
                         )
                     )
                     res_num += 1

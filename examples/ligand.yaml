@@ -9,4 +9,4 @@ sequences:
       ccd: SAH
   - ligand:
       id: [E, F]
-      smiles: N[C@@H](Cc1ccc(O)cc1)C(=O)O
+      smiles: 'N[C@@H](Cc1ccc(O)cc1)C(=O)O'

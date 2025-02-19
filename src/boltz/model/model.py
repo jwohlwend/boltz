@@ -1195,11 +1195,15 @@ class Boltz1(LightningModule):
             checkpoint["ema"] = self.ema.state_dict()
 
     def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
-        if self.use_ema and "ema" in checkpoint and self.ema.compatible(checkpoint["ema"]["shadow_params"]):
+        if self.use_ema and "ema" in checkpoint:
             self.ema = ExponentialMovingAverage(
                 parameters=self.parameters(), decay=self.ema_decay
             )
-            self.ema.load_state_dict(checkpoint["ema"], device=torch.device("cpu"))
+            if self.ema.compatible(checkpoint["ema"]["shadow_params"]):
+                self.ema.load_state_dict(checkpoint["ema"], device=torch.device("cpu"))
+            else:
+                self.ema = None
+                print("Warning: EMA state not loaded due to incompatible model parameters.")
 
     def on_train_start(self):
         if self.use_ema and self.ema is None:

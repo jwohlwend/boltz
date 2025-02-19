@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from itertools import product
 
 import numpy as np
 from scipy.spatial.distance import cdist
@@ -217,7 +218,7 @@ class ClashingChainsFilter(StaticFilter):
             return np.ones(num_chains, dtype=bool)
 
         # Get unique chain pairs
-        pairs = zip(range(num_chains), range(num_chains))
+        pairs = product(range(num_chains), range(num_chains))
         pairs = [(i, j) for i, j in pairs if i < j]
 
         # Compute clashes
@@ -240,9 +241,9 @@ class ClashingChainsFilter(StaticFilter):
 
             # Compute the number of clashes
             dists = cdist(atoms1["coords"], atoms2["coords"])
-            clashes = dists < self._dist
-            c1_clashes = np.any(clashes, axis=1).sum().item()
-            c2_clashes = np.any(clashes, axis=0).sum().item()
+            _clashes = dists < self._dist
+            c1_clashes = np.any(_clashes, axis=1).sum().item()
+            c2_clashes = np.any(_clashes, axis=0).sum().item()
 
             # Save results
             if (c1_clashes / len(atoms1)) > self._freq:

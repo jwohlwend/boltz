@@ -178,6 +178,7 @@ def train(raw_config: str, args: list[str]) -> None:  # noqa: C901, PLR0912, PLR
     loggers = []
     if wandb:
         wdb_logger = WandbLogger(
+            name=wandb["name"],
             group=wandb["name"],
             save_dir=cfg.output,
             project=wandb["project"],

@@ -29,7 +29,7 @@ sequences:
     - ENTITY_TYPE:
         id: CHAIN_ID 
         sequence: SEQUENCE    # only for protein, dna, rna
-        smiles: SMILES        # only for ligand, exclusive with ccd
+        smiles: 'SMILES'        # only for ligand, exclusive with ccd
         ccd: CCD              # only for ligand, exclusive with smiles
         msa: MSA_PATH         # only for protein
         modifications:
@@ -71,7 +71,7 @@ sequences:
       ccd: SAH
   - ligand:
       id: [E, F]
-      smiles: N[C@@H](Cc1ccc(O)cc1)C(=O)O
+      smiles: 'N[C@@H](Cc1ccc(O)cc1)C(=O)O'
 ```
 
 

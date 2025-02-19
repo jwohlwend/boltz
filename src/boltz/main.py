@@ -277,9 +277,13 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
 
         manifest: Manifest = Manifest.load(manifest_path)
         input_ids = [d.stem for d in data]
-        existing_records, processed_ids = zip(*[
-            (record, record.id) for record in manifest.records if record.id in input_ids
-        ])
+        existing_records, processed_ids = zip(
+            *[
+                (record, record.id)
+                for record in manifest.records
+                if record.id in input_ids
+            ]
+        )
 
         if isinstance(existing_records, tuple):
             existing_records = list(existing_records)
@@ -313,7 +317,7 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
     # Load CCD
     with ccd_path.open("rb") as file:
         ccd = pickle.load(file)  # noqa: S301
-    
+
     if existing_records is not None:
         click.echo(f"Found {len(existing_records)} records. Adding them to records")
 
