@@ -682,6 +682,8 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             if isinstance(ids, str):
                 ids = [ids]
             for chain_name in ids:
+                assert len(chain_name) <= 1, (f"Record {name}, Chain name '{chain_name}' is too long. "
+                                              f"Chain names must be a single character. ")
                 chains[chain_name] = parsed_chain
                 chain_to_msa[chain_name] = msa
 
