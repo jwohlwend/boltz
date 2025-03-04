@@ -110,7 +110,7 @@ def to_pdb(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # noq
                 continue
             atom1_idx = atom_reindex_ter[bond["atom_1"]]
             atom2_idx = atom_reindex_ter[bond["atom_2"]]
-            conect_line = f"CONECT{atom1_idx:>5}{atom2_idx:>5}"
+            conect_line = f"CONECT{atom1_idx:>5}" + f"{atom2_idx:>5}"*max(bond["type"]%4,1)
             pdb_lines.append(conect_line)
 
     pdb_lines.append("END")
