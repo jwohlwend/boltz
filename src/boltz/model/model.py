@@ -349,7 +349,7 @@ class Boltz1(LightningModule):
                     s=s.detach(),
                     z=z.detach(),
                     s_diffusion=(
-                        dict_out["diff_token_repr"]
+                        dict_out["diff_token_repr"].detach()
                         if self.confidence_module.use_s_diffusion
                         else None
                     ),
