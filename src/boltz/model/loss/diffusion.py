@@ -150,20 +150,15 @@ def smooth_lddt_loss(
     # Compute epsilon values
     eps = (
         (
-            (
-                F.sigmoid(0.5 - dist_diff)
-                + F.sigmoid(1.0 - dist_diff)
-                + F.sigmoid(2.0 - dist_diff)
-                + F.sigmoid(4.0 - dist_diff)
-            )
-            / 4.0
+            F.sigmoid(0.5 - dist_diff)
+            + F.sigmoid(1.0 - dist_diff)
+            + F.sigmoid(2.0 - dist_diff)
+            + F.sigmoid(4.0 - dist_diff)
         )
-        .view(multiplicity, B // multiplicity, N, N)
-        .mean(dim=0)
+        / 4.0
     )
 
     # Calculate masked averaging
-    eps = eps.repeat_interleave(multiplicity, 0)
     num = (eps * mask).sum(dim=(-1, -2))
     den = mask.sum(dim=(-1, -2)).clamp(min=1)
     lddt = num / den
