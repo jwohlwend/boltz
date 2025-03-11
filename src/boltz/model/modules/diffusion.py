@@ -225,7 +225,7 @@ class DiffusionModule(Module):
             model_cache=model_cache,
         )
 
-        return {"r_update": r_update, "token_a": a}
+        return {"r_update": r_update, "token_a": a.detach()}
 
 
 class OutTokenFeatUpdate(Module):

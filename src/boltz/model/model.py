@@ -1168,6 +1168,8 @@ class Boltz1(LightningModule):
         else:
             parameters = [
                 p for p in self.confidence_module.parameters() if p.requires_grad
+            ] + [
+                p for p in self.structure_module.out_token_feat_update.parameters() if p.requires_grad
             ]
 
         optimizer = torch.optim.Adam(
