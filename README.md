@@ -57,6 +57,12 @@ To encourage reproducibility and facilitate comparison with other models, we pro
 ![CASP15 set evaluations](docs/plot_casp.png)
 
 
+### Build easily with Gradio
+
+```
+python gradio_app.py
+```
+
 ## Training
 
 If you're interested in retraining the model, see our [training instructions](docs/training.md).
