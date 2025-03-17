@@ -237,6 +237,7 @@ class Boltz1(LightningModule):
                     token_s,
                     token_z,
                     compute_pae=alpha_pae > 0,
+                    pairformer_args=pairformer_args,
                     **confidence_model_args,
                 )
             if compile_confidence:
