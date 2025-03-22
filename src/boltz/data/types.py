@@ -119,6 +119,7 @@ Chain = [
     ("atom_num", np.dtype("i4")),
     ("res_idx", np.dtype("i4")),
     ("res_num", np.dtype("i4")),
+    ("is_cyclic", np.dtype("?")),
 ]
 
 Connection = [
@@ -469,6 +470,7 @@ Token = [
     ("disto_coords", np.dtype("3f4")),
     ("resolved_mask", np.dtype("?")),
     ("disto_mask", np.dtype("?")),
+    ("is_cyclic", np.dtype("?")),
 ]
 
 TokenBond = [

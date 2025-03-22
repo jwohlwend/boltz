@@ -64,6 +64,28 @@ class RelativePositionEncoder(Module):
         self.s_max = s_max
         self.linear_layer = LinearNoBias(4 * (r_max + 1) + 2 * (s_max + 1) + 1, token_z)
 
+    def cyclic_offset(self, residue_index: torch.Tensor) -> torch.Tensor:
+        """Calculate the cyclic offset for the given residue index.
+
+        Parameters
+        ----------
+        residue_index : torch.Tensor
+            The residue index tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            The cyclic offset tensor.
+        """
+        peptide_length = residue_index.shape[0]
+        cyclic_offset_array = torch.zeros((peptide_length, peptide_length))
+        cyc_row = torch.arange(0, -peptide_length, -1)
+        pc = int(torch.round(torch.tensor(peptide_length / 2)))  # Get centre
+        cyc_row[pc + 1 :] = torch.arange(len(cyc_row[pc + 1 :]), 0, -1)
+        for i in range(len(cyclic_offset_array)):
+            cyclic_offset_array[i] = torch.roll(cyc_row, i)
+        return cyclic_offset_array
+
     def forward(self, feats):
         b_same_chain = torch.eq(
             feats["asym_id"][:, :, None], feats["asym_id"][:, None, :]
@@ -74,14 +96,26 @@ class RelativePositionEncoder(Module):
         b_same_entity = torch.eq(
             feats["entity_id"][:, :, None], feats["entity_id"][:, None, :]
         )
+        rel_pos = (
+            feats["residue_index"][:, :, None] - feats["residue_index"][:, None, :]
+        )
+        if feats["cyclic_mask"].sum() != 0:
+            cyclic_rel_pos = self.cyclic_offset(
+                feats["residue_index"][feats["cyclic_mask"] == 1]
+            )
+            cyclic_count = -(feats["cyclic_mask"] == 1).sum()
+            rel_pos[
+                -1,
+                cyclic_count:,
+                cyclic_count:,
+            ] = cyclic_rel_pos
 
         d_residue = torch.clip(
-            feats["residue_index"][:, :, None]
-            - feats["residue_index"][:, None, :]
-            + self.r_max,
+            rel_pos + self.r_max,
             0,
             2 * self.r_max,
         )
+
         d_residue = torch.where(
             b_same_chain, d_residue, torch.zeros_like(d_residue) + 2 * self.r_max + 1
         )

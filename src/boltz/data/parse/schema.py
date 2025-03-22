@@ -74,6 +74,7 @@ class ParsedChain:
     entity: str
     type: str
     residues: list[ParsedResidue]
+    is_cyclic: bool
 
 
 ####################################################################################################
@@ -452,6 +453,7 @@ def parse_polymer(
         entity=entity,
         residues=parsed,
         type=chain_type,
+        is_cyclic=False,
     )
 
 
@@ -642,6 +644,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 entity=entity_id,
                 residues=residues,
                 type=const.chain_type_ids["NONPOLYMER"],
+                is_cyclic=False,
             )
         elif (entity_type == "ligand") and ("smiles" in items[0][entity_type]):
             seq = items[0][entity_type]["smiles"]
@@ -671,6 +674,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 entity=entity_id,
                 residues=[residue],
                 type=const.chain_type_ids["NONPOLYMER"],
+                is_cyclic=False,
             )
         else:
             msg = f"Invalid entity type: {entity_type}"
@@ -730,6 +734,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 atom_num,
                 res_idx,
                 res_num,
+                chain.is_cyclic,
             )
         )
         chain_to_idx[chain_name] = asym_id
@@ -788,7 +793,31 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     pocket_residues = []
     constraints = schema.get("constraints", [])
     for constraint in constraints:
-        if "bond" in constraint:
+        if "cyclic" in constraint:
+            sequence_items = schema.get("sequences", {}) # pretty sure this should be a dict but need to check yaml parsing
+            cyclic_chain_id = constraint["cyclic"]
+            if cyclic_chain_id not in list(chains.keys()):
+                msg = f"Invalid cyclic chain: {constraint['cyclic']}. Available chains: {list(chains.keys())}"
+                raise ValueError(msg)
+            
+            for sequence_item in sequence_items:
+                for sequence_type, sequence_data in sequence_item.items():
+                    if sequence_type!="protein" and cyclic_chain_id in sequence_data["id"] :
+                        msg = f"Cyclic constraints are supported only on proteins. Got {sequence_item}"
+                        raise ValueError(msg)
+
+            # flip the final flag (cyclic) for chain flagged as cyclic
+            for chain_dat_idx, chain_dat in enumerate(chain_data):
+                if chain_dat[0] == cyclic_chain_id:
+                    new_chain_dat = []
+                    for i, dat in enumerate(chain_dat):
+                        if i == len(chain_dat) - 1:
+                            # last element is the cyclic flag
+                            new_chain_dat.append(not dat)
+                        else:
+                            new_chain_dat.append(dat)
+                    chain_data[chain_dat_idx] = tuple(new_chain_dat)
+        elif "bond" in constraint:
             if "atom1" not in constraint["bond"] or "atom2" not in constraint["bond"]:
                 msg = f"Bond constraint was not properly specified"
                 raise ValueError(msg)
