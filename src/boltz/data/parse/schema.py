@@ -237,7 +237,7 @@ def parse_ccd_residue(
         pos = (0, 0, 0)
         ref_atom = ref_mol.GetAtoms()[0]
         chirality_type = const.chirality_type_ids.get(
-            ref_atom.GetChiralTag(), unk_chirality
+            str(ref_atom.GetChiralTag()), unk_chirality
         )
         atom = ParsedAtom(
             name=ref_atom.GetProp("name"),
@@ -279,7 +279,7 @@ def parse_ccd_residue(
         ref_coords = conformer.GetAtomPosition(atom.GetIdx())
         ref_coords = (ref_coords.x, ref_coords.y, ref_coords.z)
         chirality_type = const.chirality_type_ids.get(
-            atom.GetChiralTag(), unk_chirality
+            str(atom.GetChiralTag()), unk_chirality
         )
 
         # Get PDB coordinates, if any
@@ -425,7 +425,7 @@ def parse_polymer(
                     conformer=ref_coords,
                     is_present=atom_is_present,
                     chirality=const.chirality_type_ids.get(
-                        ref_atom.GetChiralTag(), unk_chirality
+                        str(ref_atom.GetChiralTag()), unk_chirality
                     ),
                 )
             )
