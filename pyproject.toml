@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "boltz"
 version = "0.4.1"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 description = "Boltz-1"
 readme = "README.md"
 dependencies = [
