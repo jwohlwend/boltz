@@ -514,19 +514,20 @@ def process_token_features(
 
     # Token core features
     token_index = torch.arange(len(token_data), dtype=torch.long)
-    residue_index = from_numpy(token_data["res_idx"]).long()
-    asym_id = from_numpy(token_data["asym_id"]).long()
-    entity_id = from_numpy(token_data["entity_id"]).long()
-    sym_id = from_numpy(token_data["sym_id"]).long()
-    mol_type = from_numpy(token_data["mol_type"]).long()
-    res_type = from_numpy(token_data["res_type"]).long()
+    residue_index = from_numpy(token_data["res_idx"].copy()).long()
+    asym_id = from_numpy(token_data["asym_id"].copy()).long()
+    entity_id = from_numpy(token_data["entity_id"].copy()).long()
+    sym_id = from_numpy(token_data["sym_id"].copy()).long()
+    mol_type = from_numpy(token_data["mol_type"].copy()).long()
+    res_type = from_numpy(token_data["res_type"].copy()).long()
     res_type = one_hot(res_type, num_classes=const.num_tokens)
-    disto_center = from_numpy(token_data["disto_coords"])
+    disto_center = from_numpy(token_data["disto_coords"].copy())
 
     # Token mask features
     pad_mask = torch.ones(len(token_data), dtype=torch.float)
-    resolved_mask = from_numpy(token_data["resolved_mask"]).float()
-    disto_mask = from_numpy(token_data["disto_mask"]).float()
+    resolved_mask = from_numpy(token_data["resolved_mask"].copy()).float()
+    disto_mask = from_numpy(token_data["disto_mask"].copy()).float()
+    cyclic_mask = from_numpy(token_data["is_cyclic"].copy()).float()
 
     # Token bond features
     if max_tokens is not None:
@@ -662,6 +663,7 @@ def process_token_features(
         "token_resolved_mask": resolved_mask,
         "token_disto_mask": disto_mask,
         "pocket_feature": pocket_feature,
+        "cyclic_mask": cyclic_mask,
     }
     return token_features
 
