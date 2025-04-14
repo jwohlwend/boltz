@@ -29,7 +29,7 @@ dependencies = [
     "biopython==1.84",
     "scipy==1.13.1",
     "tensorboard==2.19.0",
-    "numba==0.61.0",
+    "numba>=0.61.0",
 ]
 
 [project.scripts]
