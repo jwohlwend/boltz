@@ -21,7 +21,6 @@ dependencies = [
     "einops==0.8.0",
     "einx==0.3.0",
     "fairscale==0.4.13",
-    "llvmlite",
     "mashumaro==3.14",
     "modelcif==1.2",
     "wandb==0.18.7",
