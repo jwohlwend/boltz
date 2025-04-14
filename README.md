@@ -31,6 +31,22 @@ cd boltz; pip install -e .
 ```
 > Note: we recommend installing boltz in a fresh python environment
 
+## For Mac users
+
+Create a new conda environment for boltz with python 3.12:
+
+```
+conda create --name boltz python=3.12
+conda activate blotz
+```
+
+CLone this repository
+```
+git clone https://github.com/fnachon/boltz.git
+cd blotz
+pip install -e .
+```
+
 ## Inference
 
 You can run inference using Boltz-1 with:
@@ -64,6 +80,8 @@ If you're interested in retraining the model, see our [training instructions](do
 ## Contributing
 
 We welcome external contributions and are eager to engage with the community. Connect with us on our [Slack channel](https://join.slack.com/t/boltz-community/shared_invite/zt-2zj7e077b-D1R9S3JVOolhv_NaMELgjQ) to discuss advancements, share insights, and foster collaboration around Boltz-1.
+
+Boltz also runs on Tenstorrent hardware thanks to a [fork](https://github.com/moritztng/tt-boltz) by Moritz Thüning.
 
 ## License
 
