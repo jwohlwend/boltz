@@ -31,6 +31,22 @@ cd boltz; pip install -e .
 ```
 > Note: we recommend installing boltz in a fresh python environment
 
+## For Mac users
+
+Create a new conda environment for boltz with python 3.10 and numba:
+
+```
+conda create --name boltz python=3.10 numba
+conda activate boltz
+```
+
+Clone this repository
+```
+git clone https://github.com/fnachon/boltz.git
+cd boltz
+pip install -e .
+```
+
 ## Inference
 
 You can run inference using Boltz-1 with:
