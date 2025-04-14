@@ -1,4 +1,5 @@
 import pickle
+import os
 import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -84,6 +85,26 @@ def download(cache: Path) -> None:
             "change the cache directory with the --cache flag."
         )
         urllib.request.urlretrieve(MODEL_URL, str(model))  # noqa: S310
+
+
+def get_cache_path() -> str:
+    """Determine the cache path, prioritising the BOLTZ_CACHE environment variable.
+
+    Returns
+    -------
+    str: Path
+        Path to use for boltz cache location.
+   
+    """
+
+    env_cache = os.environ.get("BOLTZ_CACHE")
+    if env_cache:
+        resolved_cache = Path(env_cache).expanduser().resolve()
+        if not resolved_cache.is_absolute():
+            raise ValueError(f"BOLTZ_CACHE must be an absolute path, got: {env_cache}")
+        return str(resolved_cache)
+
+    return str(Path("~/.boltz").expanduser())
 
 
 def check_inputs(
@@ -275,16 +296,8 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
 
         manifest: Manifest = Manifest.load(manifest_path)
         input_ids = [d.stem for d in data]
-        existing_records, processed_ids = zip(
-            *[
-                (record, record.id)
-                for record in manifest.records
-                if record.id in input_ids
-            ]
-        )
-
-        if isinstance(existing_records, tuple):
-            existing_records = list(existing_records)
+        existing_records = [record for record in manifest.records if record.id in input_ids]
+        processed_ids = [record.id for record in existing_records]
 
         # Check how many examples need to be processed
         missing = len(input_ids) - len(processed_ids)
@@ -441,8 +454,8 @@ def cli() -> None:
 @click.option(
     "--cache",
     type=click.Path(exists=False),
-    help="The directory where to download the data and model. Default is ~/.boltz.",
-    default="~/.boltz",
+    help="The directory where to download the data and model. Default is ~/.boltz, or $BOLTZ_CACHE if set.",
+    default=get_cache_path,
 )
 @click.option(
     "--checkpoint",

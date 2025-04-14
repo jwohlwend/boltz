@@ -101,11 +101,20 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
         # Define the model assembly
         chain_idx = chain["asym_id"]
         chain_tag = str(chain["name"])
-        asym = AsymUnit(
-            entities_map[chain_idx],
-            details="Model subunit %s" % chain_tag,
-            id=chain_tag,
-        )
+        entity = entities_map[chain_idx]
+        if entity.type == 'water':
+            asym = ihm.WaterAsymUnit(
+                entity,
+                1,
+                details="Model subunit %s" % chain_tag,
+                id=chain_tag,
+            )
+        else:
+            asym = AsymUnit(
+                entity,
+                details="Model subunit %s" % chain_tag,
+                id=chain_tag,
+            )
         asym_unit_map[chain_idx] = asym
     modeled_assembly = Assembly(asym_unit_map.values(), name="Modeled assembly")
 

@@ -161,3 +161,8 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 .DS_Store
+
+
+# Boltz prediction outputs
+#   All result files generated from a boltz prediction call
+boltz_results_*/

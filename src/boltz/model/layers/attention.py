@@ -77,7 +77,7 @@ class AttentionPairBias(nn.Module):
         z : torch.Tensor
             The input pairwise tensor (B, N, N, D)
         mask : torch.Tensor
-            The pairwise mask tensor (B, N, N)
+            The pairwise mask tensor (B, N)
         multiplicity : int, optional
             The diffusion batch size, by default 1
 
@@ -120,6 +120,7 @@ class AttentionPairBias(nn.Module):
             # Compute attention weights
             attn = torch.einsum("bihd,bjhd->bhij", q.float(), k.float())
             attn = attn / (self.head_dim**0.5) + z.float()
+            # The pairwise mask tensor (B, N) is broadcasted to (B, 1, 1, N) and (B, H, N, N)
             attn = attn + (1 - mask[:, None, None].float()) * -self.inf
             attn = attn.softmax(dim=-1)
 
