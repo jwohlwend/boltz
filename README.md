@@ -33,17 +33,17 @@ cd boltz; pip install -e .
 
 ## For Mac users
 
-Create a new conda environment for boltz with python 3.12:
+Create a new conda environment for boltz with python 3.10 and numba:
 
 ```
-conda create --name boltz python=3.12
-conda activate blotz
+conda create --name boltz python=3.10 numba
+conda activate boltz
 ```
 
-CLone this repository
+Clone this repository
 ```
 git clone https://github.com/fnachon/boltz.git
-cd blotz
+cd boltz
 pip install -e .
 ```
 
