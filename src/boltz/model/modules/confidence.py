@@ -191,6 +191,10 @@ class ConfidenceModule(nn.Module):
         multiplicity=1,
         s_diffusion=None,
         run_sequentially=False,
+        chunk_size_transition_z: int = None,
+        chunk_size_transition_msa: int = None,
+        chunk_size_outer_product: int = None,
+        chunk_size_tri_attn: int = None,
     ):
         if run_sequentially and multiplicity > 1:
             assert z.shape[0] == 1, "Not supported with batch size > 1"
@@ -297,14 +301,23 @@ class ConfidenceModule(nn.Module):
         pair_mask = mask[:, :, None] * mask[:, None, :]
 
         if self.imitate_trunk:
-            z = z + self.msa_module(z, s_inputs, feats)
+            z = z + self.msa_module(z, s_inputs, feats,
+                    chunk_size_transition_z=chunk_size_transition_z, 
+                    chunk_size_transition_msa=chunk_size_transition_msa, 
+                    chunk_size_outer_product=chunk_size_outer_product, 
+                    chunk_size_tri_attn=chunk_size_tri_attn                                    
+                )
 
-            s, z = self.pairformer_module(s, z, mask=mask, pair_mask=pair_mask)
+            s, z = self.pairformer_module(s, z, mask=mask, pair_mask=pair_mask, 
+                        chunk_size_transition_z=chunk_size_transition_z, 
+                        chunk_size_tri_attn=chunk_size_tri_attn)
 
             s, z = self.final_s_norm(s), self.final_z_norm(z)
 
         else:
-            s_t, z_t = self.pairformer_stack(s, z, mask=mask, pair_mask=pair_mask)
+            s_t, z_t = self.pairformer_stack(s, z, mask=mask, pair_mask=pair_mask,
+                        chunk_size_transition_z=chunk_size_transition_z, 
+                        chunk_size_tri_attn=chunk_size_tri_attn)
 
             # AF3 has residual connections, we remove them
             s = s_t
