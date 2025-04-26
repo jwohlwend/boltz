@@ -519,7 +519,7 @@ class AtomDiffusion(Module):
                     )
 
             if self.alignment_reverse_diff:
-                with torch.autocast("cuda", enabled=False):
+                with torch.autocast(device_type=atom_coords.device.type, enabled=False):
                     atom_coords_noisy = weighted_rigid_align(
                         atom_coords_noisy.float(),
                         atom_coords_denoised.float(),
@@ -645,7 +645,7 @@ class AtomDiffusion(Module):
             * torch.eq(atom_type_mult, const.chain_type_ids["NONPOLYMER"]).float()
         )
 
-        with torch.no_grad(), torch.autocast("cuda", enabled=False):
+        with torch.no_grad(), torch.autocast(device_type=denoised_atom_coords.device.type , enabled=False):
             atom_coords = out_dict["aligned_true_atom_coords"]
             atom_coords_aligned_ground_truth = weighted_rigid_align(
                 atom_coords.detach().float(),
