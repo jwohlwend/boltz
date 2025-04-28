@@ -48,6 +48,16 @@ def randomly_rotate(coords, return_second_coords=False, second_coords=None):
     return torch.einsum("bmd,bds->bms", coords, R)
 
 
+def compute_random_augmentation(
+    multiplicity, s_trans=1.0, device=None, dtype=torch.float32
+):
+    R = random_rotations(multiplicity, dtype=dtype, device=device)
+    random_trans = (
+        torch.randn((multiplicity, 1, 3), dtype=dtype, device=device) * s_trans
+    )
+    return R, random_trans
+
+
 def center_random_augmentation(
     atom_coords,
     atom_mask,

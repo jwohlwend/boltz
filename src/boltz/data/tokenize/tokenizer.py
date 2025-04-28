@@ -12,7 +12,7 @@ class Tokenizer(ABC):
 
         Parameters
         ----------
-        data : Inpput
+        data : Input
             The input data.
 
         Returns

@@ -4,6 +4,7 @@ trainer:
   precision: 32
   gradient_clip_val: 10.0
   max_epochs: -1
+  accumulate_grad_batches: 128    # to adjust depending on the number of devices
 
 # Optional set wandb here
 # wandb:
@@ -18,7 +19,7 @@ resume: null
 disable_checkpoint: false
 matmul_precision: null
 save_top_k: -1
-load_confidence_from_trunk: true
+load_confidence_from_trunk: false  # should be set to true only when starting from scratch, not from a pretrained confidence model
 
 data:
   datasets:
@@ -75,7 +76,7 @@ data:
   atoms_per_window_queries: 32
 
 model:
-  _target_: boltz.model.models.boltz.BoltzPreview
+  _target_: boltz.model.model.Boltz1
   atom_s: 128
   atom_z: 16
   token_s: 384
@@ -125,12 +126,10 @@ model:
     offload_to_cpu: false
 
   structure_prediction_training: false
-  run_trunk_and_structure: true
   confidence_prediction: true
   alpha_pae: 1
   confidence_imitate_trunk: true
   confidence_model_args:
-    use_gaussian: false
     num_dist_bins: 64
     max_dist: 22
     add_s_to_z_prod: true
@@ -142,7 +141,6 @@ model:
       num_plddt_bins: 50
       num_pde_bins: 64
       num_pae_bins: 64
-      relative_confidence: none
 
   training_args:
     recycling_steps: 3
@@ -163,12 +161,14 @@ model:
     lr_decay_every_n_steps: 50000
     lr_decay_factor: 0.95
     symmetry_correction: true
+    run_confidence_sequentially: false
 
   validation_args:
     recycling_steps: 3
     sampling_steps: 200
     diffusion_samples: 5
     symmetry_correction: true
+    run_confidence_sequentially: true
 
   diffusion_process_args:
     sigma_min: 0.0004

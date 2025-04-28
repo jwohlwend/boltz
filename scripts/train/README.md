@@ -1,0 +1,1 @@
+Please see our [training instructions](../../docs/training.md).

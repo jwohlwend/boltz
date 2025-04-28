@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "boltz"
-version = "0.2.1"
-requires-python = ">=3.9"
+version = "1.0.0"
+requires-python = ">=3.10"
 description = "Boltz-1"
 readme = "README.md"
 dependencies = [
@@ -16,7 +16,7 @@ dependencies = [
     "rdkit>=2024.3.2",
     "dm-tree==0.1.8",
     "requests==2.32.3",
-    "pandas==2.2.3",
+    "pandas>=2.2.2",
     "types-requests",
     "einops==0.8.0",
     "einx==0.3.0",
@@ -28,6 +28,8 @@ dependencies = [
     "pyyaml==6.0.2",
     "biopython==1.84",
     "scipy==1.13.1",
+    "trifast>=0.1.11",
+    "numba==0.61.0",
 ]
 
 [project.scripts]
@@ -35,6 +37,7 @@ boltz = "boltz.main:cli"
 
 [project.optional-dependencies]
 lint = ["ruff"]
+test = ["pytest", "requests"]
 
 [tool.ruff]
 src = ["src"]
@@ -76,3 +79,9 @@ keep-runtime-typing = true
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "regression",
+]

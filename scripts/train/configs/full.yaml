@@ -1,0 +1,191 @@
+trainer:
+  accelerator: gpu
+  devices: 1
+  precision: 32
+  gradient_clip_val: 10.0
+  max_epochs: -1
+  accumulate_grad_batches: 128    # to adjust depending on the number of devices
+
+# Optional set wandb here
+# wandb:
+#   name: boltz
+#   project: boltz
+#   entity: boltz
+
+
+output: SET_PATH_HERE
+pretrained: PATH_TO_CHECKPOINT_FILE
+resume: null
+disable_checkpoint: false
+matmul_precision: null
+save_top_k: -1
+
+data:
+  datasets:
+    - _target_: boltz.data.module.training.DatasetConfig
+      target_dir: PATH_TO_TARGETS_DIR
+      msa_dir: PATH_TO_MSA_DIR
+      prob: 1.0
+      sampler:
+        _target_: boltz.data.sample.cluster.ClusterSampler
+      cropper:
+        _target_: boltz.data.crop.boltz.BoltzCropper
+        min_neighborhood: 0
+        max_neighborhood: 40
+      split: ./scripts/train/assets/validation_ids.txt
+
+  filters:
+    - _target_: boltz.data.filter.dynamic.size.SizeFilter
+      min_chains: 1
+      max_chains: 300
+    - _target_: boltz.data.filter.dynamic.date.DateFilter
+      date: "2021-09-30"
+      ref: released
+    - _target_: boltz.data.filter.dynamic.resolution.ResolutionFilter
+      resolution: 4.0
+
+  tokenizer:
+    _target_: boltz.data.tokenize.boltz.BoltzTokenizer
+  featurizer:
+    _target_: boltz.data.feature.featurizer.BoltzFeaturizer
+
+  symmetries: PATH_TO_SYMMETRY_FILE
+  max_tokens: 512
+  max_atoms: 4608
+  max_seqs: 2048
+  pad_to_max_tokens: true
+  pad_to_max_atoms: true
+  pad_to_max_seqs: true
+  samples_per_epoch: 100000
+  batch_size: 1
+  num_workers: 4
+  random_seed: 42
+  pin_memory: true
+  overfit: null
+  crop_validation: true
+  return_train_symmetries: true
+  return_val_symmetries: true
+  train_binder_pocket_conditioned_prop: 0.3
+  val_binder_pocket_conditioned_prop: 0.3
+  binder_pocket_cutoff: 6.0
+  binder_pocket_sampling_geometric_p: 0.3
+  min_dist: 2.0
+  max_dist: 22.0
+  num_bins: 64
+  atoms_per_window_queries: 32
+
+model:
+  _target_: boltz.model.model.Boltz1
+  atom_s: 128
+  atom_z: 16
+  token_s: 384
+  token_z: 128
+  num_bins: 64
+  atom_feature_dim: 389
+  atoms_per_window_queries: 32
+  atoms_per_window_keys: 128
+  compile_pairformer: false
+  nucleotide_rmsd_weight: 5.0
+  ligand_rmsd_weight: 10.0
+  ema: true
+  ema_decay: 0.999
+
+  embedder_args:
+    atom_encoder_depth: 3
+    atom_encoder_heads: 4
+
+  msa_args:
+    msa_s: 64
+    msa_blocks: 4
+    msa_dropout: 0.15
+    z_dropout: 0.25
+    pairwise_head_width: 32
+    pairwise_num_heads: 4
+    activation_checkpointing: true
+    offload_to_cpu: false
+
+  pairformer_args:
+    num_blocks: 48
+    num_heads: 16
+    dropout: 0.25
+    activation_checkpointing: true
+    offload_to_cpu: false
+
+  score_model_args:
+    sigma_data: 16
+    dim_fourier: 256
+    atom_encoder_depth: 3
+    atom_encoder_heads: 4
+    token_transformer_depth: 24
+    token_transformer_heads: 16
+    atom_decoder_depth: 3
+    atom_decoder_heads: 4
+    conditioning_transition_layers: 2
+    activation_checkpointing: true
+    offload_to_cpu: false
+
+  structure_prediction_training: true
+  confidence_prediction: true
+  alpha_pae: 1
+  confidence_imitate_trunk: true
+  confidence_model_args:
+    num_dist_bins: 64
+    max_dist: 22
+    add_s_to_z_prod: true
+    add_s_input_to_s: true
+    use_s_diffusion: true
+    add_z_input_to_z: true
+
+    confidence_args:
+      num_plddt_bins: 50
+      num_pde_bins: 64
+      num_pae_bins: 64
+
+  training_args:
+    recycling_steps: 3
+    sampling_steps: 200
+    diffusion_multiplicity: 16
+    diffusion_samples: 1
+    confidence_loss_weight: 3e-3
+    diffusion_loss_weight: 4.0
+    distogram_loss_weight: 3e-2
+    adam_beta_1: 0.9
+    adam_beta_2: 0.95
+    adam_eps: 0.00000001
+    lr_scheduler: af3
+    base_lr: 0.0
+    max_lr: 0.0018
+    lr_warmup_no_steps: 1000
+    lr_start_decay_after_n_steps: 50000
+    lr_decay_every_n_steps: 50000
+    lr_decay_factor: 0.95
+    symmetry_correction: true
+    run_confidence_sequentially: false
+
+  validation_args:
+    recycling_steps: 3
+    sampling_steps: 200
+    diffusion_samples: 5
+    symmetry_correction: true
+    run_confidence_sequentially: true
+
+  diffusion_process_args:
+    sigma_min: 0.0004
+    sigma_max: 160.0
+    sigma_data: 16.0
+    rho: 7
+    P_mean: -1.2
+    P_std: 1.5
+    gamma_0: 0.8
+    gamma_min: 1.0
+    noise_scale: 1.0
+    step_scale: 1.0
+    coordinate_augmentation: true
+    alignment_reverse_diff: true
+    synchronize_sigmas: true
+    use_inference_model_cache: true
+
+  diffusion_loss_args:
+    add_smooth_lddt_loss: true
+    nucleotide_loss_weight: 5.0
+    ligand_loss_weight: 10.0
