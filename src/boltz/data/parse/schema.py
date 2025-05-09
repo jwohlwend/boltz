@@ -944,7 +944,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 msg = f"Failed to compute 3D conformer for {seq}"
                 raise ValueError(msg)
 
-            mol_no_h = AllChem.RemoveHs(mol, sanitize=False)
+            mol_no_h = AllChem.RemoveHs(mol, sanitize=False) # 
     
             residue = parse_ccd_residue(
                 name="LIG",
