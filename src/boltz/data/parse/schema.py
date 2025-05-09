@@ -948,7 +948,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     
             residue = parse_ccd_residue(
                 name="LIG",
-                ref_mol=mol_no_h,
+                ref_mol=mol,
                 res_idx=0,
             )
             parsed_chain = ParsedChain(
