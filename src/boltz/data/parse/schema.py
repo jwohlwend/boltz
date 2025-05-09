@@ -268,6 +268,10 @@ def get_conformer(mol: Mol) -> Conformer:
 def compute_geometry_constraints(mol: Mol, idx_map):
     if mol.GetNumAtoms() <= 1:
         return []
+    
+    # Ensure RingInfo is initialized
+    mol.UpdatePropertyCache(strict=False)
+    Chem.GetSymmSSSR(mol)  # Compute ring information
 
     bounds = GetMoleculeBoundsMatrix(
         mol,
@@ -940,6 +944,8 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 msg = f"Failed to compute 3D conformer for {seq}"
                 raise ValueError(msg)
 
+            mol_no_h = AllChem.RemoveHs(mol, sanitize=False)
+    
             residue = parse_ccd_residue(
                 name="LIG",
                 ref_mol=mol,
