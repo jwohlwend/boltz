@@ -266,6 +266,10 @@ class Boltz1(LightningModule):
         multiplicity_diffusion_train: int = 1,
         diffusion_samples: int = 1,
         run_confidence_sequentially: bool = False,
+        chunk_size_transition_z: int = None,
+        chunk_size_transition_msa: int = None,
+        chunk_size_outer_product: int = None,
+        chunk_size_tri_attn: int = None,
     ) -> dict[str, Tensor]:
         dict_out = {}
 
@@ -309,7 +313,12 @@ class Boltz1(LightningModule):
 
                     # Compute pairwise stack
                     if not self.no_msa:
-                        z = z + self.msa_module(z, s_inputs, feats)
+                        z = z + self.msa_module(z, s_inputs, feats, 
+                                chunk_size_transition_z=chunk_size_transition_z, 
+                                chunk_size_transition_msa=chunk_size_transition_msa, 
+                                chunk_size_outer_product=chunk_size_outer_product, 
+                                chunk_size_tri_attn=chunk_size_tri_attn
+                            )
 
                     # Revert to uncompiled version for validation
                     if self.is_pairformer_compiled and not self.training:
@@ -317,7 +326,9 @@ class Boltz1(LightningModule):
                     else:
                         pairformer_module = self.pairformer_module
 
-                    s, z = pairformer_module(s, z, mask=mask, pair_mask=pair_mask)
+                    s, z = pairformer_module(s, z, mask=mask, pair_mask=pair_mask, 
+                                            chunk_size_transition_z=chunk_size_transition_z, 
+                                            chunk_size_tri_attn=chunk_size_tri_attn)
 
             pdistogram = self.distogram_module(z)
             dict_out = {"pdistogram": pdistogram}
@@ -367,6 +378,10 @@ class Boltz1(LightningModule):
                     pred_distogram_logits=dict_out["pdistogram"].detach(),
                     multiplicity=diffusion_samples,
                     run_sequentially=run_confidence_sequentially,
+                    chunk_size_transition_z=chunk_size_transition_z,
+                    chunk_size_transition_msa=chunk_size_transition_msa,
+                    chunk_size_outer_product=chunk_size_outer_product,
+                    chunk_size_tri_attn=chunk_size_tri_attn
                 )
             )
         if self.confidence_prediction and self.confidence_module.use_s_diffusion:
@@ -1132,6 +1147,10 @@ class Boltz1(LightningModule):
                 num_sampling_steps=self.predict_args["sampling_steps"],
                 diffusion_samples=self.predict_args["diffusion_samples"],
                 run_confidence_sequentially=True,
+                chunk_size_transition_z=self.predict_args["chunk_size_transition_z"],
+                chunk_size_transition_msa=self.predict_args["chunk_size_transition_msa"],
+                chunk_size_outer_product=self.predict_args["chunk_size_outer_product"],
+                chunk_size_tri_attn=self.predict_args["chunk_size_tri_attn"],            
             )
             pred_dict = {"exception": False}
             pred_dict["masks"] = batch["atom_pad_mask"]
