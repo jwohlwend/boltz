@@ -24,7 +24,7 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
     use_filter: bool = True,
     use_pairing: bool = False,
     pairing_strategy: str = "greedy",
-    host_url: str = "https://api.colabfold.com",
+    host_url: str = "http://ont-msa0:80",
 ) -> tuple[list[str], list[str]]:
     submission_endpoint = "ticket/pair" if use_pairing else "ticket/msa"
 

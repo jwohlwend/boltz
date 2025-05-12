@@ -1,3 +1,4 @@
+import os
 import pickle
 import urllib.request
 from dataclasses import asdict, dataclass
@@ -37,6 +38,34 @@ class BoltzProcessedInput:
     manifest: Manifest
     targets_dir: Path
     msa_dir: Path
+    constraints_dir: Optional[Path] = None
+
+
+@dataclass
+class PairformerArgs:
+    """Pairformer arguments."""
+
+    num_blocks: int = 48
+    num_heads: int = 16
+    dropout: float = 0.0
+    activation_checkpointing: bool = False
+    offload_to_cpu: bool = False
+    use_trifast: bool = True
+
+
+@dataclass
+class MSAModuleArgs:
+    """MSA module arguments."""
+
+    msa_s: int = 64
+    msa_blocks: int = 4
+    msa_dropout: float = 0.0
+    z_dropout: float = 0.0
+    pairwise_head_width: int = 32
+    pairwise_num_heads: int = 4
+    activation_checkpointing: bool = False
+    offload_to_cpu: bool = False
+    use_trifast: bool = True
 
 
 @dataclass
@@ -57,6 +86,18 @@ class BoltzDiffusionParams:
     alignment_reverse_diff: bool = True
     synchronize_sigmas: bool = True
     use_inference_model_cache: bool = True
+
+
+@dataclass
+class BoltzSteeringParams:
+    """Steering parameters."""
+
+    fk_steering: bool = True
+    num_particles: int = 3
+    fk_lambda: float = 4.0
+    fk_resampling_interval: int = 3
+    guidance_update: bool = True
+    num_gd_steps: int = 16
 
 
 @rank_zero_only
@@ -86,6 +127,25 @@ def download(cache: Path) -> None:
             "change the cache directory with the --cache flag."
         )
         urllib.request.urlretrieve(MODEL_URL, str(model))  # noqa: S310
+
+
+def get_cache_path() -> str:
+    """Determine the cache path, prioritising the BOLTZ_CACHE environment variable.
+
+    Returns
+    -------
+    str: Path
+        Path to use for boltz cache location.
+
+    """
+    env_cache = os.environ.get("BOLTZ_CACHE")
+    if env_cache:
+        resolved_cache = Path(env_cache).expanduser().resolve()
+        if not resolved_cache.is_absolute():
+            raise ValueError(f"BOLTZ_CACHE must be an absolute path, got: {env_cache}")
+        return str(resolved_cache)
+
+    return str(Path("~/.boltz").expanduser())
 
 
 def check_inputs(
@@ -277,16 +337,10 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
 
         manifest: Manifest = Manifest.load(manifest_path)
         input_ids = [d.stem for d in data]
-        existing_records, processed_ids = zip(
-            *[
-                (record, record.id)
-                for record in manifest.records
-                if record.id in input_ids
-            ]
-        )
-
-        if isinstance(existing_records, tuple):
-            existing_records = list(existing_records)
+        existing_records = [
+            record for record in manifest.records if record.id in input_ids
+        ]
+        processed_ids = [record.id for record in existing_records]
 
         # Check how many examples need to be processed
         missing = len(input_ids) - len(processed_ids)
@@ -306,12 +360,14 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
     msa_dir = out_dir / "msa"
     structure_dir = out_dir / "processed" / "structures"
     processed_msa_dir = out_dir / "processed" / "msa"
+    processed_constraints_dir = out_dir / "processed" / "constraints"
     predictions_dir = out_dir / "predictions"
 
     out_dir.mkdir(parents=True, exist_ok=True)
     msa_dir.mkdir(parents=True, exist_ok=True)
     structure_dir.mkdir(parents=True, exist_ok=True)
     processed_msa_dir.mkdir(parents=True, exist_ok=True)
+    processed_constraints_dir.mkdir(parents=True, exist_ok=True)
     predictions_dir.mkdir(parents=True, exist_ok=True)
 
     # Load CCD
@@ -415,6 +471,10 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
             struct_path = structure_dir / f"{target.record.id}.npz"
             target.structure.dump(struct_path)
 
+            # Dump constraints
+            constraints_path = processed_constraints_dir / f"{target.record.id}.npz"
+            target.residue_constraints.dump(constraints_path)
+
         except Exception as e:
             if len(data) > 1:
                 print(f"Failed to process {path}. Skipping. Error: {e}.")
@@ -443,8 +503,8 @@ def cli() -> None:
 @click.option(
     "--cache",
     type=click.Path(exists=False),
-    help="The directory where to download the data and model. Default is ~/.boltz.",
-    default="~/.boltz",
+    help="The directory where to download the data and model. Default is ~/.boltz, or $BOLTZ_CACHE if set.",
+    default=get_cache_path,
 )
 @click.option(
     "--checkpoint",
@@ -552,6 +612,11 @@ def cli() -> None:
     default=8,
     help="Number of cores for rosetta relaxation",
 )
+@click.option(
+    "--no_potentials",
+    is_flag=True,
+    help="Whether to not use potentials for steering. Default is False.",
+)
 def predict(
     data: str,
     out_dir: str,
@@ -574,6 +639,7 @@ def predict(
     msa_pairing_strategy: str = "greedy",
     rosetta_relax: bool = False,
     relax_cores: int = 8,
+    no_potentials: bool = False,
 ) -> None:
     """Run predictions with Boltz-1."""
     # If cpu, write a friendly warning
@@ -645,6 +711,9 @@ def predict(
         manifest=Manifest.load(processed_dir / "manifest.json"),
         targets_dir=processed_dir / "structures",
         msa_dir=processed_dir / "msa",
+        constraints_dir=(processed_dir / "constraints")
+        if (processed_dir / "constraints").exists()
+        else None,
     )
 
     # Create data module
@@ -653,6 +722,7 @@ def predict(
         target_dir=processed.targets_dir,
         msa_dir=processed.msa_dir,
         num_workers=num_workers,
+        constraints_dir=processed.constraints_dir,
     )
 
     # Load model
@@ -669,6 +739,15 @@ def predict(
     }
     diffusion_params = BoltzDiffusionParams()
     diffusion_params.step_scale = step_scale
+
+    pairformer_args = PairformerArgs(use_trifast=(accelerator != "cpu"))
+    msa_module_args = MSAModuleArgs(use_trifast=(accelerator != "cpu"))
+
+    steering_args = BoltzSteeringParams()
+    if no_potentials:
+        steering_args.fk_steering = False
+        steering_args.guidance_update = False
+
     model_module: Boltz1 = Boltz1.load_from_checkpoint(
         checkpoint,
         strict=True,
@@ -676,6 +755,9 @@ def predict(
         map_location="cpu",
         diffusion_process_args=asdict(diffusion_params),
         ema=False,
+        pairformer_args=asdict(pairformer_args),
+        msa_module_args=asdict(msa_module_args),
+        steering_args=asdict(steering_args),
     )
     model_module.eval()
 

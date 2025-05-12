@@ -129,6 +129,7 @@ class MSAModule(nn.Module):
         activation_checkpointing: bool = False,
         use_paired_feature: bool = False,
         offload_to_cpu: bool = False,
+        use_trifast: bool = False,
         **kwargs,
     ) -> None:
         """Initialize the MSA module.
@@ -183,6 +184,7 @@ class MSAModule(nn.Module):
                             z_dropout,
                             pairwise_head_width,
                             pairwise_num_heads,
+                            use_trifast=use_trifast,
                         ),
                         offload_to_cpu=offload_to_cpu,
                     )
@@ -196,6 +198,7 @@ class MSAModule(nn.Module):
                         z_dropout,
                         pairwise_head_width,
                         pairwise_num_heads,
+                        use_trifast=use_trifast,
                     )
                 )
 
@@ -289,6 +292,7 @@ class MSALayer(nn.Module):
         z_dropout: float,
         pairwise_head_width: int = 32,
         pairwise_num_heads: int = 4,
+        use_trifast: bool=False,
     ) -> None:
         """Initialize the MSA module.
 
@@ -310,6 +314,7 @@ class MSALayer(nn.Module):
 
         """
         super().__init__()
+        self.use_trifast = use_trifast
         self.msa_dropout = msa_dropout
         self.z_dropout = z_dropout
         self.msa_transition = Transition(dim=msa_s, hidden=msa_s * 4)
@@ -393,6 +398,7 @@ class MSALayer(nn.Module):
             z,
             mask=token_mask,
             chunk_size=chunk_size_tri_attn,
+            use_trifast=self.use_trifast,
         )
 
         dropout = get_dropout_mask(self.z_dropout, z, self.training, columnwise=True)
@@ -400,6 +406,7 @@ class MSALayer(nn.Module):
             z,
             mask=token_mask,
             chunk_size=chunk_size_tri_attn,
+            use_trifast=self.use_trifast,
         )
 
         z = z + self.z_transition(z, chunk_size_transition_z)
@@ -423,6 +430,7 @@ class PairformerModule(nn.Module):
         no_update_s: bool = False,
         no_update_z: bool = False,
         offload_to_cpu: bool = False,
+        use_trifast: bool = False,
         **kwargs,
     ) -> None:
         """Initialize the Pairformer module.
@@ -473,6 +481,7 @@ class PairformerModule(nn.Module):
                             pairwise_num_heads,
                             no_update_s,
                             False if i < num_blocks - 1 else no_update_z,
+                            use_trifast=use_trifast,
                         ),
                         offload_to_cpu=offload_to_cpu,
                     )
@@ -488,6 +497,7 @@ class PairformerModule(nn.Module):
                         pairwise_num_heads,
                         no_update_s,
                         False if i < num_blocks - 1 else no_update_z,
+                        use_trifast=use_trifast,
                     )
                 )
 
@@ -545,6 +555,7 @@ class PairformerLayer(nn.Module):
         pairwise_num_heads: int = 4,
         no_update_s: bool = False,
         no_update_z: bool = False,
+        use_trifast: bool = False,
     ) -> None:
         """Initialize the Pairformer module.
 
@@ -588,6 +599,8 @@ class PairformerLayer(nn.Module):
             self.transition_s = Transition(token_s, token_s * 4)
         self.transition_z = Transition(token_z, token_z * 4)
 
+        self.use_trifast = use_trifast
+
     def forward(
         self,
         s: Tensor,
@@ -609,6 +622,7 @@ class PairformerLayer(nn.Module):
             z,
             mask=pair_mask,
             chunk_size=chunk_size_tri_attn,
+            use_trifast=self.use_trifast,
         )
 
         dropout = get_dropout_mask(self.dropout, z, self.training, columnwise=True)
@@ -616,6 +630,7 @@ class PairformerLayer(nn.Module):
             z,
             mask=pair_mask,
             chunk_size=chunk_size_tri_attn,
+            use_trifast=self.use_trifast,
         )
 
         z = z + self.transition_z(z)

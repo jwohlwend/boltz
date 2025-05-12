@@ -1,6 +1,6 @@
 import gc
 import random
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import torch
 import torch._dynamo
@@ -38,6 +38,8 @@ from boltz.model.optim.scheduler import AlphaFoldLRScheduler
 
 
 class Boltz1(LightningModule):
+    """Boltz1 model."""
+
     def __init__(  # noqa: PLR0915, C901, PLR0912
         self,
         atom_s: int,
@@ -54,6 +56,7 @@ class Boltz1(LightningModule):
         diffusion_process_args: dict[str, Any],
         diffusion_loss_args: dict[str, Any],
         confidence_model_args: dict[str, Any],
+        steering_args: dict[str, Any],
         atom_feature_dim: int = 128,
         confidence_prediction: bool = False,
         confidence_imitate_trunk: bool = False,
@@ -134,6 +137,7 @@ class Boltz1(LightningModule):
         self.validation_args = validation_args
         self.diffusion_loss_args = diffusion_loss_args
         self.predict_args = predict_args
+        self.steering_args = steering_args
 
         self.nucleotide_rmsd_weight = nucleotide_rmsd_weight
         self.ligand_rmsd_weight = ligand_rmsd_weight
@@ -198,7 +202,11 @@ class Boltz1(LightningModule):
             )
 
         # Output modules
-        use_accumulate_token_repr = confidence_prediction and "use_s_diffusion" in confidence_model_args and confidence_model_args["use_s_diffusion"]
+        use_accumulate_token_repr = (
+            confidence_prediction
+            and "use_s_diffusion" in confidence_model_args
+            and confidence_model_args["use_s_diffusion"]
+        )
         self.structure_module = AtomDiffusion(
             score_model_args={
                 "token_z": token_z,
@@ -339,6 +347,7 @@ class Boltz1(LightningModule):
                     atom_mask=feats["atom_pad_mask"],
                     multiplicity=diffusion_samples,
                     train_accumulate_token_repr=self.training,
+                    steering_args=self.steering_args,
                 )
             )
 
@@ -1129,8 +1138,14 @@ class Boltz1(LightningModule):
             pred_dict["coords"] = out["sample_atom_coords"]
             if self.predict_args.get("write_confidence_summary", True):
                 pred_dict["confidence_score"] = (
-                    4 * out["complex_plddt"] +
-                    (out["iptm"] if not torch.allclose(out["iptm"], torch.zeros_like(out["iptm"])) else out["ptm"])
+                    4 * out["complex_plddt"]
+                    + (
+                        out["iptm"]
+                        if not torch.allclose(
+                            out["iptm"], torch.zeros_like(out["iptm"])
+                        )
+                        else out["ptm"]
+                    )
                 ) / 5
                 for key in [
                     "ptm",
@@ -1158,7 +1173,7 @@ class Boltz1(LightningModule):
                 gc.collect()
                 return {"exception": True}
             else:
-                raise {"exception": True}
+                raise
 
     def configure_optimizers(self):
         """Configure the optimizer."""
@@ -1169,7 +1184,9 @@ class Boltz1(LightningModule):
             parameters = [
                 p for p in self.confidence_module.parameters() if p.requires_grad
             ] + [
-                p for p in self.structure_module.out_token_feat_update.parameters() if p.requires_grad
+                p
+                for p in self.structure_module.out_token_feat_update.parameters()
+                if p.requires_grad
             ]
 
         optimizer = torch.optim.Adam(
@@ -1205,7 +1222,9 @@ class Boltz1(LightningModule):
                 self.ema.load_state_dict(checkpoint["ema"], device=torch.device("cpu"))
             else:
                 self.ema = None
-                print("Warning: EMA state not loaded due to incompatible model parameters.")
+                print(
+                    "Warning: EMA state not loaded due to incompatible model parameters."
+                )
 
     def on_train_start(self):
         if self.use_ema and self.ema is None:

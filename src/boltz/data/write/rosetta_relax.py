@@ -32,10 +32,13 @@ def get_rosetta_score(input_path):
     """
     ensure_pyrosetta_initialized()
 
-    pose = pose_from_file(str(input_path))
-    # Get the ref2015 score function
-    scorefxn = get_score_function()
-    return scorefxn(pose)
+    try:
+        pose = pose_from_file(str(input_path))
+        # Get the ref2015 score function
+        scorefxn = get_score_function()
+        return scorefxn(pose)
+    except:
+        raise RuntimeError(f"ERROR in {input_path}!")
 
 
 def repack_sidechains(input_path, out_path, **kwargs):

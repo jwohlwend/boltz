@@ -1,0 +1,7 @@
+version: 1  # Optional, defaults to 1
+sequences:
+  - protein:
+      id: A
+      sequence: QLEDSEVEAVAKG
+      cyclic: true
+

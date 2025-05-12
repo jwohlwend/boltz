@@ -8,7 +8,7 @@ To encourage reproducibility and facilitate comparison with other models, we pro
 
 ## Evaluation files
 
-You can download all the MSAs, input files, output files and evaluation outputs for Boltz-1, Chai-1, and AlphaFold3 from this [Google Drive folder](https://drive.google.com/file/d/1JvHlYUMINOaqPTunI9wBYrfYniKgVmxf/view?usp=sharing). 
+You can download all the MSAs, input files, output files and evaluation outputs for Boltz-1, Boltz-1x, Chai-1, and AlphaFold3 from this [Google Drive folder](https://drive.google.com/file/d/1JvHlYUMINOaqPTunI9wBYrfYniKgVmxf/view?usp=sharing). 
 
 The files are organized as follows:
 
@@ -18,6 +18,7 @@ boltz_results_final/
     ├── casp15/
         ├── af3
         ├── boltz
+        ├── boltzx
         ├── chai
         └── msa
     └── test/

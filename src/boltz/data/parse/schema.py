@@ -4,9 +4,11 @@ from typing import Optional
 
 import click
 import numpy as np
-from rdkit import rdBase, Chem
-from rdkit.Chem import AllChem
-from rdkit.Chem.rdchem import Conformer, Mol
+from rdkit import Chem, rdBase
+from rdkit.Chem import AllChem, HybridizationType
+from rdkit.Chem.rdchem import BondStereo, Conformer, Mol
+from rdkit.Chem.rdDistGeom import GetMoleculeBoundsMatrix
+from rdkit.Chem.rdMolDescriptors import CalcNumHeavyAtoms
 
 from boltz.data import const
 from boltz.data.types import (
@@ -14,11 +16,18 @@ from boltz.data.types import (
     Bond,
     Chain,
     ChainInfo,
+    ChiralAtomConstraint,
     Connection,
-    Interface,
     InferenceOptions,
+    Interface,
+    PlanarBondConstraint,
+    PlanarRing5Constraint,
+    PlanarRing6Constraint,
+    RDKitBoundsConstraint,
     Record,
     Residue,
+    ResidueConstraints,
+    StereoBondConstraint,
     Structure,
     StructureInfo,
     Target,
@@ -52,6 +61,56 @@ class ParsedBond:
 
 
 @dataclass(frozen=True)
+class ParsedRDKitBoundsConstraint:
+    """A parsed RDKit bounds constraint object."""
+
+    atom_idxs: tuple[int, int]
+    is_bond: bool
+    is_angle: bool
+    upper_bound: float
+    lower_bound: float
+
+
+@dataclass(frozen=True)
+class ParsedChiralAtomConstraint:
+    """A parsed chiral atom constraint object."""
+
+    atom_idxs: tuple[int, int, int, int]
+    is_reference: bool
+    is_r: bool
+
+
+@dataclass(frozen=True)
+class ParsedStereoBondConstraint:
+    """A parsed stereo bond constraint object."""
+
+    atom_idxs: tuple[int, int, int, int]
+    is_check: bool
+    is_e: bool
+
+
+@dataclass(frozen=True)
+class ParsedPlanarBondConstraint:
+    """A parsed planar bond constraint object."""
+
+    atom_idxs: tuple[int, int, int, int, int, int]
+
+
+@dataclass(frozen=True)
+class ParsedPlanarRing5Constraint:
+    """A parsed planar bond constraint object."""
+
+    atom_idxs: tuple[int, int, int, int, int]
+
+
+@dataclass(frozen=True)
+class ParsedPlanarRing6Constraint:
+    """A parsed planar bond constraint object."""
+
+    atom_idxs: tuple[int, int, int, int, int, int]
+
+
+@dataclass(frozen=True)
 class ParsedResidue:
     """A parsed residue object."""
 
@@ -65,6 +124,12 @@ class ParsedResidue:
     atom_disto: int
     is_standard: bool
     is_present: bool
+    rdkit_bounds_constraints: Optional[list[ParsedRDKitBoundsConstraint]] = None
+    chiral_atom_constraints: Optional[list[ParsedChiralAtomConstraint]] = None
+    stereo_bond_constraints: Optional[list[ParsedStereoBondConstraint]] = None
+    planar_bond_constraints: Optional[list[ParsedPlanarBondConstraint]] = None
+    planar_ring_5_constraints: Optional[list[ParsedPlanarRing5Constraint]] = None
+    planar_ring_6_constraints: Optional[list[ParsedPlanarRing6Constraint]] = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +139,7 @@ class ParsedChain:
     entity: str
     type: str
     residues: list[ParsedResidue]
+    cyclic_period: int
 
 
 ####################################################################################################
@@ -133,9 +199,11 @@ def compute_3d_conformer(mol: Mol, version: str = "v3") -> bool:
         conf_id = AllChem.EmbedMolecule(mol, options)
 
         if conf_id == -1:
-            print(f"WARNING: RDKit ETKDGv3 failed to generate a conformer for molecule "
-                  f"{Chem.MolToSmiles(AllChem.RemoveHs(mol))}, so the program will start with random coordinates. "
-                  f"Note that the performance of the model under this behaviour was not tested.")
+            print(
+                f"WARNING: RDKit ETKDGv3 failed to generate a conformer for molecule "
+                f"{Chem.MolToSmiles(AllChem.RemoveHs(mol))}, so the program will start with random coordinates. "
+                f"Note that the performance of the model under this behaviour was not tested."
+            )
             options.useRandomCoords = True
             conf_id = AllChem.EmbedMolecule(mol, options)
 
@@ -197,6 +265,183 @@ def get_conformer(mol: Mol) -> Conformer:
     raise ValueError(msg)
 
 
+def compute_geometry_constraints(mol: Mol, idx_map):
+    if mol.GetNumAtoms() <= 1:
+        return []
+
+    bounds = GetMoleculeBoundsMatrix(
+        mol,
+        set15bounds=True,
+        scaleVDW=True,
+        doTriangleSmoothing=True,
+        useMacrocycle14config=False,
+    )
+    bonds = set(
+        tuple(sorted(b)) for b in mol.GetSubstructMatches(Chem.MolFromSmarts("*~*"))
+    )
+    angles = set(
+        tuple(sorted([a[0], a[2]]))
+        for a in mol.GetSubstructMatches(Chem.MolFromSmarts("*~*~*"))
+    )
+
+    constraints = []
+    for i, j in zip(*np.triu_indices(mol.GetNumAtoms(), k=1)):
+        if i in idx_map and j in idx_map:
+            constraint = ParsedRDKitBoundsConstraint(
+                atom_idxs=(idx_map[i], idx_map[j]),
+                is_bond=tuple(sorted([i, j])) in bonds,
+                is_angle=tuple(sorted([i, j])) in angles,
+                upper_bound=bounds[i, j],
+                lower_bound=bounds[j, i],
+            )
+            constraints.append(constraint)
+    return constraints
+
+
+def compute_chiral_atom_constraints(mol, idx_map):
+    constraints = []
+    if all([atom.HasProp("_CIPRank") for atom in mol.GetAtoms()]):
+        for center_idx, orientation in Chem.FindMolChiralCenters(
+            mol, includeUnassigned=False
+        ):
+            center = mol.GetAtomWithIdx(center_idx)
+            neighbors = [
+                (neighbor.GetIdx(), int(neighbor.GetProp("_CIPRank")))
+                for neighbor in center.GetNeighbors()
+            ]
+            neighbors = sorted(
+                neighbors, key=lambda neighbor: neighbor[1], reverse=True
+            )
+            neighbors = tuple(neighbor[0] for neighbor in neighbors)
+            is_r = orientation == "R"
+
+            if len(neighbors) > 4 or center.GetHybridization() != HybridizationType.SP3:
+                continue
+
+            atom_idxs = (*neighbors[:3], center_idx)
+            if all(i in idx_map for i in atom_idxs):
+                constraints.append(
+                    ParsedChiralAtomConstraint(
+                        atom_idxs=tuple(idx_map[i] for i in atom_idxs),
+                        is_reference=True,
+                        is_r=is_r,
+                    )
+                )
+
+            if len(neighbors) == 4:
+                for skip_idx in range(3):
+                    chiral_set = neighbors[:skip_idx] + neighbors[skip_idx + 1 :]
+                    if skip_idx % 2 == 0:
+                        atom_idxs = chiral_set[::-1] + (center_idx,)
+                    else:
+                        atom_idxs = chiral_set + (center_idx,)
+                    if all(i in idx_map for i in atom_idxs):
+                        constraints.append(
+                            ParsedChiralAtomConstraint(
+                                atom_idxs=tuple(idx_map[i] for i in atom_idxs),
+                                is_reference=False,
+                                is_r=is_r,
+                            )
+                        )
+    return constraints
+
+
+def compute_stereo_bond_constraints(mol, idx_map):
+    constraints = []
+    if all([atom.HasProp("_CIPRank") for atom in mol.GetAtoms()]):
+        for bond in mol.GetBonds():
+            stereo = bond.GetStereo()
+            if stereo in {BondStereo.STEREOE, BondStereo.STEREOZ}:
+                start_atom_idx, end_atom_idx = (
+                    bond.GetBeginAtomIdx(),
+                    bond.GetEndAtomIdx(),
+                )
+                start_neighbors = [
+                    (neighbor.GetIdx(), int(neighbor.GetProp("_CIPRank")))
+                    for neighbor in mol.GetAtomWithIdx(start_atom_idx).GetNeighbors()
+                    if neighbor.GetIdx() != end_atom_idx
+                ]
+                start_neighbors = sorted(
+                    start_neighbors, key=lambda neighbor: neighbor[1], reverse=True
+                )
+                start_neighbors = [neighbor[0] for neighbor in start_neighbors]
+                end_neighbors = [
+                    (neighbor.GetIdx(), int(neighbor.GetProp("_CIPRank")))
+                    for neighbor in mol.GetAtomWithIdx(end_atom_idx).GetNeighbors()
+                    if neighbor.GetIdx() != start_atom_idx
+                ]
+                end_neighbors = sorted(
+                    end_neighbors, key=lambda neighbor: neighbor[1], reverse=True
+                )
+                end_neighbors = [neighbor[0] for neighbor in end_neighbors]
+                is_e = stereo == BondStereo.STEREOE
+
+                atom_idxs = (
+                    start_neighbors[0],
+                    start_atom_idx,
+                    end_atom_idx,
+                    end_neighbors[0],
+                )
+                if all(i in idx_map for i in atom_idxs):
+                    constraints.append(
+                        ParsedStereoBondConstraint(
+                            atom_idxs=tuple(idx_map[i] for i in atom_idxs),
+                            is_check=True,
+                            is_e=is_e,
+                        )
+                    )
+
+                if len(start_neighbors) == 2 and len(end_neighbors) == 2:
+                    atom_idxs = (
+                        start_neighbors[1],
+                        start_atom_idx,
+                        end_atom_idx,
+                        end_neighbors[1],
+                    )
+                    if all(i in idx_map for i in atom_idxs):
+                        constraints.append(
+                            ParsedStereoBondConstraint(
+                                atom_idxs=tuple(idx_map[i] for i in atom_idxs),
+                                is_check=False,
+                                is_e=is_e,
+                            )
+                        )
+    return constraints
+
+
+def compute_flatness_constraints(mol, idx_map):
+    planar_double_bond_smarts = Chem.MolFromSmarts("[C;X3;^2](*)(*)=[C;X3;^2](*)(*)")
+    aromatic_ring_5_smarts = Chem.MolFromSmarts("[ar5^2]1[ar5^2][ar5^2][ar5^2][ar5^2]1")
+    aromatic_ring_6_smarts = Chem.MolFromSmarts(
+        "[ar6^2]1[ar6^2][ar6^2][ar6^2][ar6^2][ar6^2]1"
+    )
+
+    planar_double_bond_constraints = []
+    aromatic_ring_5_constraints = []
+    aromatic_ring_6_constraints = []
+    for match in mol.GetSubstructMatches(planar_double_bond_smarts):
+        if all(i in idx_map for i in match):
+            planar_double_bond_constraints.append(
+                ParsedPlanarBondConstraint(atom_idxs=tuple(idx_map[i] for i in match))
+            )
+    for match in mol.GetSubstructMatches(aromatic_ring_5_smarts):
+        if all(i in idx_map for i in match):
+            aromatic_ring_5_constraints.append(
+                ParsedPlanarRing5Constraint(atom_idxs=tuple(idx_map[i] for i in match))
+            )
+    for match in mol.GetSubstructMatches(aromatic_ring_6_smarts):
+        if all(i in idx_map for i in match):
+            aromatic_ring_6_constraints.append(
+                ParsedPlanarRing6Constraint(atom_idxs=tuple(idx_map[i] for i in match))
+            )
+
+    return (
+        planar_double_bond_constraints,
+        aromatic_ring_5_constraints,
+        aromatic_ring_6_constraints,
+    )
+
+
 ####################################################################################################
 # PARSING
 ####################################################################################################
@@ -206,6 +451,7 @@ def parse_ccd_residue(
     name: str,
     ref_mol: Mol,
     res_idx: int,
+    remove_oxt_atom: bool = False
 ) -> Optional[ParsedResidue]:
     """Parse an MMCIF ligand.
 
@@ -229,15 +475,14 @@ def parse_ccd_residue(
     """
     unk_chirality = const.chirality_type_ids[const.unk_chirality_type]
 
-    # Remove hydrogens
-    ref_mol = AllChem.RemoveHs(ref_mol, sanitize=False)
-
     # Check if this is a single atom CCD residue
-    if ref_mol.GetNumAtoms() == 1:
+    if CalcNumHeavyAtoms(ref_mol) == 1:
+        # Remove hydrogens
+        ref_mol = AllChem.RemoveHs(ref_mol, sanitize=False)
         pos = (0, 0, 0)
         ref_atom = ref_mol.GetAtoms()[0]
         chirality_type = const.chirality_type_ids.get(
-            ref_atom.GetChiralTag(), unk_chirality
+            str(ref_atom.GetChiralTag()), unk_chirality
         )
         atom = ParsedAtom(
             name=ref_atom.GetProp("name"),
@@ -272,14 +517,23 @@ def parse_ccd_residue(
     idx_map = {}  # Used for bonds later
 
     for i, atom in enumerate(ref_mol.GetAtoms()):
+        # Ignore Hydrogen atoms
+        if atom.GetAtomicNum() == 1:
+            continue
+
         # Get atom name, charge, element and reference coordinates
         atom_name = atom.GetProp("name")
+
+        # Drop OXT atoms for non-canonical amino acids.
+        if remove_oxt_atom and atom_name == 'OXT':
+            continue
+
         charge = atom.GetFormalCharge()
         element = atom.GetAtomicNum()
         ref_coords = conformer.GetAtomPosition(atom.GetIdx())
         ref_coords = (ref_coords.x, ref_coords.y, ref_coords.z)
         chirality_type = const.chirality_type_ids.get(
-            atom.GetChiralTag(), unk_chirality
+            str(atom.GetChiralTag()), unk_chirality
         )
 
         # Get PDB coordinates, if any
@@ -320,6 +574,13 @@ def parse_ccd_residue(
         bond_type = const.bond_type_ids.get(bond_type, unk_bond)
         bonds.append(ParsedBond(start, end, bond_type))
 
+    rdkit_bounds_constraints = compute_geometry_constraints(ref_mol, idx_map)
+    chiral_atom_constraints = compute_chiral_atom_constraints(ref_mol, idx_map)
+    stereo_bond_constraints = compute_stereo_bond_constraints(ref_mol, idx_map)
+    planar_bond_constraints, planar_ring_5_constraints, planar_ring_6_constraints = (
+        compute_flatness_constraints(ref_mol, idx_map)
+    )
+
     unk_prot_id = const.unk_token_ids["PROTEIN"]
     return ParsedResidue(
         name=name,
@@ -332,6 +593,12 @@ def parse_ccd_residue(
         orig_idx=None,
         is_standard=False,
         is_present=True,
+        rdkit_bounds_constraints=rdkit_bounds_constraints,
+        chiral_atom_constraints=chiral_atom_constraints,
+        stereo_bond_constraints=stereo_bond_constraints,
+        planar_bond_constraints=planar_bond_constraints,
+        planar_ring_5_constraints=planar_ring_5_constraints,
+        planar_ring_6_constraints=planar_ring_6_constraints,
     )
 
 
@@ -340,6 +607,7 @@ def parse_polymer(
     entity: str,
     chain_type: str,
     components: dict[str, Mol],
+    cyclic: bool,
 ) -> Optional[ParsedChain]:
     """Process a sequence into a chain object.
 
@@ -386,6 +654,7 @@ def parse_polymer(
                 name=res_corrected,
                 ref_mol=ref_mol,
                 res_idx=res_idx,
+                remove_oxt_atom=True,
             )
             parsed.append(residue)
             continue
@@ -425,7 +694,7 @@ def parse_polymer(
                     conformer=ref_coords,
                     is_present=atom_is_present,
                     chirality=const.chirality_type_ids.get(
-                        ref_atom.GetChiralTag(), unk_chirality
+                        str(ref_atom.GetChiralTag()), unk_chirality
                     ),
                 )
             )
@@ -447,11 +716,17 @@ def parse_polymer(
             )
         )
 
+    if cyclic:
+        cyclic_period = len(sequence)
+    else:
+        cyclic_period = 0
+
     # Return polymer object
     return ParsedChain(
         entity=entity,
         residues=parsed,
         type=chain_type,
+        cyclic_period=cyclic_period,
     )
 
 
@@ -609,12 +884,15 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 idx = mod["position"] - 1  # 1-indexed
                 seq[idx] = code
 
+            cyclic = items[0][entity_type].get("cyclic", False)
+
             # Parse a polymer
             parsed_chain = parse_polymer(
                 sequence=seq,
                 entity=entity_id,
                 chain_type=chain_type,
                 components=ccd,
+                cyclic=cyclic,
             )
 
         # Parse a non-polymer
@@ -624,7 +902,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 seq = [seq]
 
             residues = []
-            for code in seq:
+            for res_idx, code in enumerate(seq):
                 if code not in ccd:
                     msg = f"CCD component {code} not found!"
                     raise ValueError(msg)
@@ -633,7 +911,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 residue = parse_ccd_residue(
                     name=code,
                     ref_mol=ccd[code],
-                    res_idx=0,
+                    res_idx=res_idx,
                 )
                 residues.append(residue)
 
@@ -642,7 +920,13 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 entity=entity_id,
                 residues=residues,
                 type=const.chain_type_ids["NONPOLYMER"],
+                cyclic_period=0,
             )
+
+            assert not items[0][entity_type].get(
+                "cyclic", False
+            ), "Cyclic flag is not supported for ligands"
+
         elif (entity_type == "ligand") and ("smiles" in items[0][entity_type]):
             seq = items[0][entity_type]["smiles"]
             mol = AllChem.MolFromSmiles(seq)
@@ -653,7 +937,9 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             for atom, can_idx in zip(mol.GetAtoms(), canonical_order):
                 atom_name = atom.GetSymbol().upper() + str(can_idx + 1)
                 if len(atom_name) > 4:
-                    raise ValueError(f"{seq} has an atom with a name longer than 4 characters: {atom_name}")
+                    raise ValueError(
+                        f"{seq} has an atom with a name longer than 4 characters: {atom_name}"
+                    )
                 atom.SetProp("name", atom_name)
 
             success = compute_3d_conformer(mol)
@@ -661,17 +947,22 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 msg = f"Failed to compute 3D conformer for {seq}"
                 raise ValueError(msg)
 
-            mol_no_h = AllChem.RemoveHs(mol)
             residue = parse_ccd_residue(
                 name="LIG",
-                ref_mol=mol_no_h,
+                ref_mol=mol,
                 res_idx=0,
             )
             parsed_chain = ParsedChain(
                 entity=entity_id,
                 residues=[residue],
                 type=const.chain_type_ids["NONPOLYMER"],
+                cyclic_period=0,
             )
+
+            assert not items[0][entity_type].get(
+                "cyclic", False
+            ), "Cyclic flag is not supported for ligands"
+
         else:
             msg = f"Invalid entity type: {entity_type}"
             raise ValueError(msg)
@@ -700,6 +991,13 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     bond_data = []
     res_data = []
     chain_data = []
+
+    rdkit_bounds_constraint_data = []
+    chiral_atom_constraint_data = []
+    stereo_bond_constraint_data = []
+    planar_bond_constraint_data = []
+    planar_ring_5_constraint_data = []
+    planar_ring_6_constraint_data = []
 
     # Convert parsed chains to tables
     atom_idx = 0
@@ -730,6 +1028,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 atom_num,
                 res_idx,
                 res_num,
+                chain.cyclic_period,
             )
         )
         chain_to_idx[chain_name] = asym_id
@@ -752,6 +1051,75 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                     res.is_present,
                 )
             )
+
+            if res.rdkit_bounds_constraints is not None:
+                for constraint in res.rdkit_bounds_constraints:
+                    rdkit_bounds_constraint_data.append(  # noqa: PERF401
+                        (
+                            tuple(
+                                c_atom_idx + atom_idx
+                                for c_atom_idx in constraint.atom_idxs
+                            ),
+                            constraint.is_bond,
+                            constraint.is_angle,
+                            constraint.upper_bound,
+                            constraint.lower_bound,
+                        )
+                    )
+            if res.chiral_atom_constraints is not None:
+                for constraint in res.chiral_atom_constraints:
+                    chiral_atom_constraint_data.append(  # noqa: PERF401
+                        (
+                            tuple(
+                                c_atom_idx + atom_idx
+                                for c_atom_idx in constraint.atom_idxs
+                            ),
+                            constraint.is_reference,
+                            constraint.is_r,
+                        )
+                    )
+            if res.stereo_bond_constraints is not None:
+                for constraint in res.stereo_bond_constraints:
+                    stereo_bond_constraint_data.append(  # noqa: PERF401
+                        (
+                            tuple(
+                                c_atom_idx + atom_idx
+                                for c_atom_idx in constraint.atom_idxs
+                            ),
+                            constraint.is_check,
+                            constraint.is_e,
+                        )
+                    )
+            if res.planar_bond_constraints is not None:
+                for constraint in res.planar_bond_constraints:
+                    planar_bond_constraint_data.append(  # noqa: PERF401
+                        (
+                            tuple(
+                                c_atom_idx + atom_idx
+                                for c_atom_idx in constraint.atom_idxs
+                            ),
+                        )
+                    )
+            if res.planar_ring_5_constraints is not None:
+                for constraint in res.planar_ring_5_constraints:
+                    planar_ring_5_constraint_data.append(  # noqa: PERF401
+                        (
+                            tuple(
+                                c_atom_idx + atom_idx
+                                for c_atom_idx in constraint.atom_idxs
+                            ),
+                        )
+                    )
+            if res.planar_ring_6_constraints is not None:
+                for constraint in res.planar_ring_6_constraints:
+                    planar_ring_6_constraint_data.append(  # noqa: PERF401
+                        (
+                            tuple(
+                                c_atom_idx + atom_idx
+                                for c_atom_idx in constraint.atom_idxs
+                            ),
+                        )
+                    )
 
             for bond in res.bonds:
                 atom_1 = atom_idx + bond.atom_1
@@ -799,7 +1167,10 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             c2, r2, a2 = atom_idx_map[(c2, r2 - 1, a2)]  # 1-indexed
             connections.append((c1, c2, r1, r2, a1, a2))
         elif "pocket" in constraint:
-            if "binder" not in constraint["pocket"] or "contacts" not in constraint["pocket"]:
+            if (
+                "binder" not in constraint["pocket"]
+                or "contacts" not in constraint["pocket"]
+            ):
                 msg = f"Pocket constraint was not properly specified"
                 raise ValueError(msg)
 
@@ -811,14 +1182,20 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                     msg = f"Only one pocket binders is supported!"
                     raise ValueError(msg)
                 else:
-                    pocket_residues[-1].extend([
-                        (chain_to_idx[chain_name], residue_index - 1) for chain_name, residue_index in contacts
-                    ])
+                    pocket_residues[-1].extend(
+                        [
+                            (chain_to_idx[chain_name], residue_index - 1)
+                            for chain_name, residue_index in contacts
+                        ]
+                    )
 
             else:
                 pocket_binders.append(chain_to_idx[binder])
                 pocket_residues.extend(
-                    [(chain_to_idx[chain_name],residue_index-1) for chain_name,residue_index in contacts]
+                    [
+                        (chain_to_idx[chain_name], residue_index - 1)
+                        for chain_name, residue_index in contacts
+                    ]
                 )
         else:
             msg = f"Invalid constraint: {constraint}"
@@ -832,6 +1209,24 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     interfaces = np.array([], dtype=Interface)
     connections = np.array(connections, dtype=Connection)
     mask = np.ones(len(chain_data), dtype=bool)
+    rdkit_bounds_constraints = np.array(
+        rdkit_bounds_constraint_data, dtype=RDKitBoundsConstraint
+    )
+    chiral_atom_constraints = np.array(
+        chiral_atom_constraint_data, dtype=ChiralAtomConstraint
+    )
+    stereo_bond_constraints = np.array(
+        stereo_bond_constraint_data, dtype=StereoBondConstraint
+    )
+    planar_bond_constraints = np.array(
+        planar_bond_constraint_data, dtype=PlanarBondConstraint
+    )
+    planar_ring_5_constraints = np.array(
+        planar_ring_5_constraint_data, dtype=PlanarRing5Constraint
+    )
+    planar_ring_6_constraints = np.array(
+        planar_ring_6_constraint_data, dtype=PlanarRing6Constraint
+    )
 
     data = Structure(
         atoms=atoms,
@@ -859,10 +1254,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         )
         chain_infos.append(chain_info)
 
-    options = InferenceOptions(
-        binders=pocket_binders,
-        pocket=pocket_residues
-    )
+    options = InferenceOptions(binders=pocket_binders, pocket=pocket_residues)
 
     record = Record(
         id=name,
@@ -871,8 +1263,19 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         interfaces=[],
         inference_options=options,
     )
+
+    residue_constraints = ResidueConstraints(
+        rdkit_bounds_constraints=rdkit_bounds_constraints,
+        chiral_atom_constraints=chiral_atom_constraints,
+        stereo_bond_constraints=stereo_bond_constraints,
+        planar_bond_constraints=planar_bond_constraints,
+        planar_ring_5_constraints=planar_ring_5_constraints,
+        planar_ring_6_constraints=planar_ring_6_constraints,
+    )
+
     return Target(
         record=record,
         structure=data,
         sequences=entity_to_seq,
+        residue_constraints=residue_constraints,
     )

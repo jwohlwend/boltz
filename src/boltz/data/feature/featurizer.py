@@ -296,7 +296,9 @@ def construct_paired_msa(  # noqa: C901, PLR0915, PLR0912
     if random_subset:
         num_seqs = len(pairing)
         if num_seqs > max_seqs:
-            indices = np.random.choice(list(range(1, num_seqs)), size=max_seqs-1, replace=False)  # noqa: NPY002
+            indices = np.random.choice(
+                list(range(1, num_seqs)), size=max_seqs - 1, replace=False
+            )  # noqa: NPY002
             pairing = [pairing[0]] + [pairing[i] for i in indices]
             is_paired = [is_paired[0]] + [is_paired[i] for i in indices]
     else:
@@ -514,19 +516,20 @@ def process_token_features(
 
     # Token core features
     token_index = torch.arange(len(token_data), dtype=torch.long)
-    residue_index = from_numpy(token_data["res_idx"]).long()
-    asym_id = from_numpy(token_data["asym_id"]).long()
-    entity_id = from_numpy(token_data["entity_id"]).long()
-    sym_id = from_numpy(token_data["sym_id"]).long()
-    mol_type = from_numpy(token_data["mol_type"]).long()
-    res_type = from_numpy(token_data["res_type"]).long()
+    residue_index = from_numpy(token_data["res_idx"].copy()).long()
+    asym_id = from_numpy(token_data["asym_id"].copy()).long()
+    entity_id = from_numpy(token_data["entity_id"].copy()).long()
+    sym_id = from_numpy(token_data["sym_id"].copy()).long()
+    mol_type = from_numpy(token_data["mol_type"].copy()).long()
+    res_type = from_numpy(token_data["res_type"].copy()).long()
     res_type = one_hot(res_type, num_classes=const.num_tokens)
-    disto_center = from_numpy(token_data["disto_coords"])
+    disto_center = from_numpy(token_data["disto_coords"].copy())
 
     # Token mask features
     pad_mask = torch.ones(len(token_data), dtype=torch.float)
-    resolved_mask = from_numpy(token_data["resolved_mask"]).float()
-    disto_mask = from_numpy(token_data["disto_mask"]).float()
+    resolved_mask = from_numpy(token_data["resolved_mask"].copy()).float()
+    disto_mask = from_numpy(token_data["disto_mask"].copy()).float()
+    cyclic_period = from_numpy(token_data["cyclic_period"].copy())
 
     # Token bond features
     if max_tokens is not None:
@@ -662,6 +665,7 @@ def process_token_features(
         "token_resolved_mask": resolved_mask,
         "token_disto_mask": disto_mask,
         "pocket_feature": pocket_feature,
+        "cyclic_period": cyclic_period,
     }
     return token_features
 
@@ -990,6 +994,136 @@ def process_symmetry_features(
     return features
 
 
+def process_residue_constraint_features(
+    data: Tokenized,
+) -> dict[str, Tensor]:
+    residue_constraints = data.residue_constraints
+    if residue_constraints is not None:
+        rdkit_bounds_constraints = residue_constraints.rdkit_bounds_constraints
+        chiral_atom_constraints = residue_constraints.chiral_atom_constraints
+        stereo_bond_constraints = residue_constraints.stereo_bond_constraints
+        planar_bond_constraints = residue_constraints.planar_bond_constraints
+        planar_ring_5_constraints = residue_constraints.planar_ring_5_constraints
+        planar_ring_6_constraints = residue_constraints.planar_ring_6_constraints
+
+        rdkit_bounds_index = torch.tensor(
+            rdkit_bounds_constraints["atom_idxs"].copy(), dtype=torch.long
+        ).T
+        rdkit_bounds_bond_mask = torch.tensor(
+            rdkit_bounds_constraints["is_bond"].copy(), dtype=torch.bool
+        )
+        rdkit_bounds_angle_mask = torch.tensor(
+            rdkit_bounds_constraints["is_angle"].copy(), dtype=torch.bool
+        )
+        rdkit_upper_bounds = torch.tensor(
+            rdkit_bounds_constraints["upper_bound"].copy(), dtype=torch.float
+        )
+        rdkit_lower_bounds = torch.tensor(
+            rdkit_bounds_constraints["lower_bound"].copy(), dtype=torch.float
+        )
+
+        chiral_atom_index = torch.tensor(
+            chiral_atom_constraints["atom_idxs"].copy(), dtype=torch.long
+        ).T
+        chiral_reference_mask = torch.tensor(
+            chiral_atom_constraints["is_reference"].copy(), dtype=torch.bool
+        )
+        chiral_atom_orientations = torch.tensor(
+            chiral_atom_constraints["is_r"].copy(), dtype=torch.bool
+        )
+
+        stereo_bond_index = torch.tensor(
+            stereo_bond_constraints["atom_idxs"].copy(), dtype=torch.long
+        ).T
+        stereo_reference_mask = torch.tensor(
+            stereo_bond_constraints["is_reference"].copy(), dtype=torch.bool
+        )
+        stereo_bond_orientations = torch.tensor(
+            stereo_bond_constraints["is_e"].copy(), dtype=torch.bool
+        )
+
+        planar_bond_index = torch.tensor(
+            planar_bond_constraints["atom_idxs"].copy(), dtype=torch.long
+        ).T
+        planar_ring_5_index = torch.tensor(
+            planar_ring_5_constraints["atom_idxs"].copy(), dtype=torch.long
+        ).T
+        planar_ring_6_index = torch.tensor(
+            planar_ring_6_constraints["atom_idxs"].copy(), dtype=torch.long
+        ).T
+    else:
+        rdkit_bounds_index = torch.empty((2, 0), dtype=torch.long)
+        rdkit_bounds_bond_mask = torch.empty((0,), dtype=torch.bool)
+        rdkit_bounds_angle_mask = torch.empty((0,), dtype=torch.bool)
+        rdkit_upper_bounds = torch.empty((0,), dtype=torch.float)
+        rdkit_lower_bounds = torch.empty((0,), dtype=torch.float)
+        chiral_atom_index = torch.empty(
+            (
+                4,
+                0,
+            ),
+            dtype=torch.long,
+        )
+        chiral_reference_mask = torch.empty((0,), dtype=torch.bool)
+        chiral_atom_orientations = torch.empty((0,), dtype=torch.bool)
+        stereo_bond_index = torch.empty((4, 0), dtype=torch.long)
+        stereo_reference_mask = torch.empty((0,), dtype=torch.bool)
+        stereo_bond_orientations = torch.empty((0,), dtype=torch.bool)
+        planar_bond_index = torch.empty((6, 0), dtype=torch.long)
+        planar_ring_5_index = torch.empty((5, 0), dtype=torch.long)
+        planar_ring_6_index = torch.empty((6, 0), dtype=torch.long)
+
+    return {
+        "rdkit_bounds_index": rdkit_bounds_index,
+        "rdkit_bounds_bond_mask": rdkit_bounds_bond_mask,
+        "rdkit_bounds_angle_mask": rdkit_bounds_angle_mask,
+        "rdkit_upper_bounds": rdkit_upper_bounds,
+        "rdkit_lower_bounds": rdkit_lower_bounds,
+        "chiral_atom_index": chiral_atom_index,
+        "chiral_reference_mask": chiral_reference_mask,
+        "chiral_atom_orientations": chiral_atom_orientations,
+        "stereo_bond_index": stereo_bond_index,
+        "stereo_reference_mask": stereo_reference_mask,
+        "stereo_bond_orientations": stereo_bond_orientations,
+        "planar_bond_index": planar_bond_index,
+        "planar_ring_5_index": planar_ring_5_index,
+        "planar_ring_6_index": planar_ring_6_index,
+    }
+
+
+def process_chain_feature_constraints(
+    data: Tokenized,
+) -> dict[str, Tensor]:
+    structure = data.structure
+    if structure.connections.shape[0] > 0:
+        connected_chain_index, connected_atom_index = [], []
+        for connection in structure.connections:
+            connected_chain_index.append([connection["chain_1"], connection["chain_2"]])
+            connected_atom_index.append([connection["atom_1"], connection["atom_2"]])
+        connected_chain_index = torch.tensor(connected_chain_index, dtype=torch.long).T
+        connected_atom_index = torch.tensor(connected_atom_index, dtype=torch.long).T
+    else:
+        connected_chain_index = torch.empty((2, 0), dtype=torch.long)
+        connected_atom_index = torch.empty((2, 0), dtype=torch.long)
+
+    symmetric_chain_index = []
+    for i, chain_i in enumerate(structure.chains):
+        for j, chain_j in enumerate(structure.chains):
+            if j <= i:
+                continue
+            if chain_i["entity_id"] == chain_j["entity_id"]:
+                symmetric_chain_index.append([i, j])
+    if len(symmetric_chain_index) > 0:
+        symmetric_chain_index = torch.tensor(symmetric_chain_index, dtype=torch.long).T
+    else:
+        symmetric_chain_index = torch.empty((2, 0), dtype=torch.long)
+    return {
+        "connected_chain_index": connected_chain_index,
+        "connected_atom_index": connected_atom_index,
+        "symmetric_chain_index": symmetric_chain_index,
+    }
+
+
 class BoltzFeaturizer:
     """Boltz featurizer."""
 
@@ -1013,6 +1147,7 @@ class BoltzFeaturizer:
         only_ligand_binder_pocket: Optional[bool] = False,
         inference_binder: Optional[int] = None,
         inference_pocket: Optional[list[tuple[int, int]]] = None,
+        compute_constraint_features: bool = False,
     ) -> dict[str, Tensor]:
         """Compute features.
 
@@ -1078,9 +1213,18 @@ class BoltzFeaturizer:
         if compute_symmetries:
             symmetry_features = process_symmetry_features(data, symmetries)
 
+        # Compute residue constraint features
+        residue_constraint_features = {}
+        chain_constraint_features = {}
+        if compute_constraint_features:
+            residue_constraint_features = process_residue_constraint_features(data)
+            chain_constraint_features = process_chain_feature_constraints(data)
+
         return {
             **token_features,
             **atom_features,
             **msa_features,
             **symmetry_features,
+            **residue_constraint_features,
+            **chain_constraint_features,
         }

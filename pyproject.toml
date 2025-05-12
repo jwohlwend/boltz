@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "boltz"
-version = "0.4.1"
-requires-python = ">=3.9"
+version = "1.0.0"
+requires-python = ">=3.10"
 description = "Boltz-1"
 readme = "README.md"
 dependencies = [
@@ -28,6 +28,7 @@ dependencies = [
     "pyyaml==6.0.2",
     "biopython==1.84",
     "scipy==1.13.1",
+    "trifast>=0.1.11",
     "numba==0.61.0",
 ]
 

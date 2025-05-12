@@ -3,7 +3,7 @@
   <img src="docs/boltz_title.png" width="400"/>
 
 [Paper](https://doi.org/10.1101/2024.11.19.624167) |
-[Slack](https://join.slack.com/t/boltz-community/shared_invite/zt-2zj7e077b-D1R9S3JVOolhv_NaMELgjQ) <br> <br>
+[Slack](https://join.slack.com/t/boltz-community/shared_invite/zt-34qg8uink-V1LGdRRUf3avAUVaRvv93w) <br> <br>
 </div>
 
 
@@ -12,9 +12,9 @@
 
 ## Introduction
 
-Boltz-1 is the state-of-the-art open-source model to predict biomolecular structures containing combinations of proteins, RNA, DNA, and other molecules. It also supports modified residues, covalent ligands and glycans, as well as conditioning the prediction on specified interaction pockets or contacts. 
+Boltz-1 and Boltz-1x are state-of-the-art open-source models to predict biomolecular structures containing combinations of proteins, RNA, DNA, and other molecules. They also support modified residues, covalent ligands and glycans, as well as conditioning the prediction on specified interaction pockets or contacts. 
 
-All the code and weights are provided under MIT license, making them freely available for both academic and commercial uses. For more information about the model, see our [technical report](https://doi.org/10.1101/2024.11.19.624167). To discuss updates, tools and applications join our [Slack channel](https://join.slack.com/t/boltz-community/shared_invite/zt-2zj7e077b-D1R9S3JVOolhv_NaMELgjQ).
+All the code and weights are provided under MIT license, making them freely available for both academic and commercial uses. For more information about the model, see our [technical report](https://doi.org/10.1101/2024.11.19.624167). To discuss updates, tools and applications join our [Slack channel](https://join.slack.com/t/boltz-community/shared_invite/zt-34qg8uink-V1LGdRRUf3avAUVaRvv93w).
 
 ## Installation
 Install boltz with PyPI (recommended):
@@ -33,7 +33,7 @@ cd boltz; pip install -e .
 
 ## Inference
 
-You can run inference using Boltz-1 with:
+You can run inference using Boltz-1x with:
 
 ```
 boltz predict input_path --use_msa_server
@@ -51,7 +51,7 @@ To see all available options: `boltz predict --help` and for more information on
 
 ## Evaluation
 
-To encourage reproducibility and facilitate comparison with other models, we provide the evaluation scripts and predictions for Boltz-1, Chai-1 and AlphaFold3 on our test benchmark dataset as well as CASP15. These datasets are created to contain biomolecules different from the training data and to benchmark the performance of these models we run them with the same input MSAs and same number  of recycling and diffusion steps. More details on these evaluations can be found in our [evaluation instructions](docs/evaluation.md).
+To encourage reproducibility and facilitate comparison with other models, we provide the evaluation scripts and predictions for Boltz-1, Boltz-1x, Chai-1 and AlphaFold3 on our test benchmark dataset as well as CASP15. These datasets are created to contain biomolecules different from the training data and to benchmark the performance of these models we run them with the same input MSAs and same number  of recycling and diffusion steps. More details on these evaluations can be found in our [evaluation instructions](docs/evaluation.md).
 
 ![Test set evaluations](docs/plot_test.png)
 ![CASP15 set evaluations](docs/plot_casp.png)
@@ -63,7 +63,9 @@ If you're interested in retraining the model, see our [training instructions](do
 
 ## Contributing
 
-We welcome external contributions and are eager to engage with the community. Connect with us on our [Slack channel](https://join.slack.com/t/boltz-community/shared_invite/zt-2zj7e077b-D1R9S3JVOolhv_NaMELgjQ) to discuss advancements, share insights, and foster collaboration around Boltz-1.
+We welcome external contributions and are eager to engage with the community. Connect with us on our [Slack channel](https://join.slack.com/t/boltz-community/shared_invite/zt-34qg8uink-V1LGdRRUf3avAUVaRvv93w) to discuss advancements, share insights, and foster collaboration around Boltz-1.
+
+Boltz also runs on Tenstorrent hardware thanks to a [fork](https://github.com/moritztng/tt-boltz) by Moritz Thüning.
 
 ## License
 
@@ -76,7 +78,7 @@ If you use this code or the models in your research, please cite the following p
 
 ```bibtex
 @article{wohlwend2024boltz1,
-  author = {Wohlwend, Jeremy and Corso, Gabriele and Passaro, Saro and Reveiz, Mateo and Leidal, Ken and Swiderski, Wojtek and Portnoi, Tally and Chinn, Itamar and Silterra, Jacob and Jaakkola, Tommi and Barzilay, Regina},
+  author = {Wohlwend, Jeremy and Corso, Gabriele and Passaro, Saro and Getz, Noah and Reveiz, Mateo and Leidal, Ken and Swiderski, Wojtek and Atkinson, Liam and Portnoi, Tally and Chinn, Itamar and Silterra, Jacob and Jaakkola, Tommi and Barzilay, Regina},
   title = {Boltz-1: Democratizing Biomolecular Interaction Modeling},
   year = {2024},
   doi = {10.1101/2024.11.19.624167},
