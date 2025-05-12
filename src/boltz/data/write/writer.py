@@ -17,7 +17,6 @@ from boltz.data.types import (
 from boltz.data.write.mmcif import to_mmcif
 from boltz.data.write.pdb import to_pdb
 
-
 class BoltzWriter(BasePredictionWriter):
     """Custom writer for predictions."""
 
@@ -43,6 +42,7 @@ class BoltzWriter(BasePredictionWriter):
         self.data_dir = Path(data_dir)
         self.output_dir = Path(output_dir)
         self.output_format = output_format
+        self.paths_to_relax = []
         self.failed = 0
 
         # Create the output directories
@@ -149,10 +149,12 @@ class BoltzWriter(BasePredictionWriter):
                     path = struct_dir / f"{outname}.pdb"
                     with path.open("w") as f:
                         f.write(to_pdb(new_structure, plddts=plddts))
+                        self.paths_to_relax.append(Path(path).resolve())
                 elif self.output_format == "mmcif":
                     path = struct_dir / f"{outname}.cif"
                     with path.open("w") as f:
                         f.write(to_mmcif(new_structure, plddts=plddts))
+                        self.paths_to_relax.append(Path(path).resolve())
                 else:
                     path = struct_dir / f"{outname}.npz"
                     np.savez_compressed(path, **asdict(new_structure))
@@ -229,5 +231,7 @@ class BoltzWriter(BasePredictionWriter):
         pl_module: LightningModule,  # noqa: ARG002
     ) -> None:
         """Print the number of failed examples."""
-        # Print number of failed examples
-        print(f"Number of failed examples: {self.failed}")  # noqa: T201
+        print(f"\nNumber of failed examples: {self.failed}")  # noqa: T201
+
+    def get_paths_to_relax(self):
+        return self.paths_to_relax
