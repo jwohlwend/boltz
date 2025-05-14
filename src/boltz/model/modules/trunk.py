@@ -207,6 +207,10 @@ class MSAModule(nn.Module):
         z: Tensor,
         emb: Tensor,
         feats: Dict[str, Tensor],
+        chunk_size_transition_z: int = 64,
+        chunk_size_transition_msa: int = 32,
+        chunk_size_outer_product: int = 4,
+        chunk_size_tri_attn: int = 128
     ) -> Tensor:
         """Perform the forward pass.
 
@@ -229,10 +233,10 @@ class MSAModule(nn.Module):
         if not self.training:
             if z.shape[1] > const.chunk_size_threshold:
                 chunk_heads_pwa = True
-                chunk_size_transition_z = 64
-                chunk_size_transition_msa = 32
-                chunk_size_outer_product = 4
-                chunk_size_tri_attn = 128
+                chunk_size_transition_z = chunk_size_transition_z
+                chunk_size_transition_msa = chunk_size_transition_msa
+                chunk_size_outer_product = chunk_size_outer_product
+                chunk_size_tri_attn = chunk_size_tri_attn
             else:
                 chunk_heads_pwa = False
                 chunk_size_transition_z = None
@@ -507,7 +511,8 @@ class PairformerModule(nn.Module):
         z: Tensor,
         mask: Tensor,
         pair_mask: Tensor,
-        chunk_size_tri_attn: int = None,
+        chunk_size_transition_z: int = None,
+        chunk_size_tri_attn: int = 128,
     ) -> Tuple[Tensor, Tensor]:
         """Perform the forward pass.
 
@@ -531,14 +536,17 @@ class PairformerModule(nn.Module):
         """
         if not self.training:
             if z.shape[1] > const.chunk_size_threshold:
-                chunk_size_tri_attn = 128
+                chunk_size_tri_attn = chunk_size_tri_attn
+                chunk_size_transition_z = chunk_size_transition_z
             else:
                 chunk_size_tri_attn = 512
+                chunk_size_transition_z = None
         else:
             chunk_size_tri_attn = None
+            chunk_size_transition_z = None
 
         for layer in self.layers:
-            s, z = layer(s, z, mask, pair_mask, chunk_size_tri_attn)
+            s, z = layer(s, z, mask, pair_mask, chunk_size_transition_z, chunk_size_tri_attn)
         return s, z
 
 
@@ -607,6 +615,7 @@ class PairformerLayer(nn.Module):
         z: Tensor,
         mask: Tensor,
         pair_mask: Tensor,
+        chunk_size_transition_z: int = None,
         chunk_size_tri_attn: int = None,
     ) -> Tuple[Tensor, Tensor]:
         """Perform the forward pass."""
@@ -633,7 +642,7 @@ class PairformerLayer(nn.Module):
             use_trifast=self.use_trifast,
         )
 
-        z = z + self.transition_z(z)
+        z = z + self.transition_z(z, chunk_size_transition_z)
 
         # Compute sequence stack
         if not self.no_update_s:

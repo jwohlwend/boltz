@@ -560,6 +560,30 @@ def cli() -> None:
     help="Whether to dump the pde into a npz file. Default is False.",
 )
 @click.option(
+    "--chunk_size_transition_z",
+    type=int,
+    help="Transition Z chunk size. Default is 64.",
+    default=64,
+)
+@click.option(
+    "--chunk_size_transition_msa",
+    type=int,
+    help="Transition MSA chunk size. Default is 32.",
+    default=32,
+)
+@click.option(
+    "--chunk_size_outer_product",
+    type=int,
+    help="Outer product chunk size. Default is 4.",
+    default=4,
+)
+@click.option(
+    "--chunk_size_tri_attn",
+    type=int,
+    help="Triangle attention chunk size. Default is 128.",
+    default=128,
+)
+@click.option(
     "--output_format",
     type=click.Choice(["pdb", "mmcif"]),
     help="The output format to use for the predictions. Default is mmcif.",
@@ -617,6 +641,10 @@ def predict(
     step_scale: float = 1.638,
     write_full_pae: bool = False,
     write_full_pde: bool = False,
+    chunk_size_transition_z: int = 64,
+    chunk_size_transition_msa: int = 32,
+    chunk_size_outer_product: int = 4,
+    chunk_size_tri_attn: int = 128,
     output_format: Literal["pdb", "mmcif"] = "mmcif",
     num_workers: int = 2,
     override: bool = False,
@@ -720,6 +748,10 @@ def predict(
         "write_confidence_summary": True,
         "write_full_pae": write_full_pae,
         "write_full_pde": write_full_pde,
+        "chunk_size_transition_z": chunk_size_transition_z,
+        "chunk_size_transition_msa": chunk_size_transition_msa,
+        "chunk_size_outer_product": chunk_size_outer_product,
+        "chunk_size_tri_attn": chunk_size_tri_attn
     }
     diffusion_params = BoltzDiffusionParams()
     diffusion_params.step_scale = step_scale
