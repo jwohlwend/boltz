@@ -566,6 +566,12 @@ def cli() -> None:
     default="mmcif",
 )
 @click.option(
+    "--ligand_sdf",
+    type=bool,
+    is_flag=True,
+    help="Whether to additionally output ligand(s) to separate SDF file(s)."
+)
+@click.option(
     "--num_workers",
     type=int,
     help="The number of dataloader workers to use for prediction. Default is 2.",
@@ -618,6 +624,7 @@ def predict(
     write_full_pae: bool = False,
     write_full_pde: bool = False,
     output_format: Literal["pdb", "mmcif"] = "mmcif",
+    ligand_sdf: bool = False,
     num_workers: int = 2,
     override: bool = False,
     seed: Optional[int] = None,
@@ -750,6 +757,7 @@ def predict(
         data_dir=processed.targets_dir,
         output_dir=out_dir / "predictions",
         output_format=output_format,
+        ligand_sdf=ligand_sdf,
     )
 
     trainer = Trainer(
