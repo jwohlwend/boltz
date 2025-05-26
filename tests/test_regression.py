@@ -37,7 +37,7 @@ class RegressionTester(unittest.TestCase):
             regression_feats_url = "https://www.dropbox.com/scl/fi/1avbcvoor5jcnvpt07tp6/ligand_regression_feats.pkl?rlkey=iwtm9gpxgrbp51jbizq937pqf&st=jnbky253&dl=1"
             test_utils.download_file(regression_feats_url, regression_feats_path)
 
-        regression_feats = torch.load(regression_feats_path, map_location=device)
+        regression_feats = torch.load(regression_feats_path, map_location=device, weights_only=False)
         model_module: nn.Module = Boltz1.load_from_checkpoint(checkpoint, map_location=device)
         model_module.to(device)
         model_module.eval()
@@ -66,7 +66,7 @@ class RegressionTester(unittest.TestCase):
 
         assert torch.allclose(exp_rel_pos_encoding, act_rel_pos_encoding, atol=1e-5)
 
-    @pytest.mark.slow
+    # @pytest.mark.slow
     def test_structure_output(self):
         exp_structure_output = self.regression_feats["structure_output"]
         s = self.regression_feats["s"]
