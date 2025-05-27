@@ -725,7 +725,7 @@ def predict(
     diffusion_params.step_scale = step_scale
 
     from sys import platform
-    use_trifast = (platform == 'linux' && accelerator != "cpu")
+    use_trifast = (platform == 'linux' and accelerator != "cpu")
     pairformer_args = PairformerArgs(use_trifast=use_trifast)
     msa_module_args = MSAModuleArgs(use_trifast=use_trifast)
 
