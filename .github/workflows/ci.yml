@@ -29,4 +29,4 @@ jobs:
         pip install .[test]      
 
     - name: Run unit tests
-      run: pytest -m "not slow" --cov=src/boltz --cov-report=term-missing 
+      run: pytest -m "not slow and not gpu" --cov=src/boltz --cov-report=term-missing 

@@ -11,9 +11,11 @@ import unittest
 
 from lightning_fabric import seed_everything
 
-from boltz.main import MODEL_URL
-from boltz.model.model import Boltz1
 
+if not torch.cuda.is_available():
+    pytest.skip("no GPU available, skipping GPU-only tests", allow_module_level=True)
+from boltz.model.model import Boltz1
+from boltz.main import MODEL_URL
 import test_utils
 
 tests_dir = os.path.dirname(os.path.abspath(__file__))
@@ -66,7 +68,7 @@ class RegressionTester(unittest.TestCase):
 
         assert torch.allclose(exp_rel_pos_encoding, act_rel_pos_encoding, atol=1e-5)
 
-    # @pytest.mark.slow
+    @pytest.mark.slow
     def test_structure_output(self):
         exp_structure_output = self.regression_feats["structure_output"]
         s = self.regression_feats["s"]
