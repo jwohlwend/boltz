@@ -251,6 +251,8 @@ def compute_msa(
             list(data.values()),
             msa_dir / f"{target_id}_paired_tmp",
             use_env=True,
+            use_omg=True, # not supported in pairing mode yet
+            use_envhog=True, # not supported in pairing mode yet
             use_pairing=True,
             host_url=msa_server_url,
             pairing_strategy=msa_pairing_strategy,
@@ -262,6 +264,8 @@ def compute_msa(
         list(data.values()),
         msa_dir / f"{target_id}_unpaired_tmp",
         use_env=True,
+        use_omg=True,
+        use_envhog=True,
         use_pairing=False,
         host_url=msa_server_url,
         pairing_strategy=msa_pairing_strategy,
