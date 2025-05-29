@@ -4,6 +4,7 @@ trainer:
   precision: 32
   gradient_clip_val: 10.0
   max_epochs: -1
+  accumulate_grad_batches: 128    # to adjust depending on the number of devices
 
 # Optional set wandb here
 # wandb:
@@ -12,7 +13,8 @@ trainer:
 #   entity: boltz
 
 output: SET_PATH_HERE
-resume: PATH_TO_CHECKPOINT_FILE
+pretrained: PATH_TO_CHECKPOINT_FILE
+resume: null
 disable_checkpoint: false
 matmul_precision: null
 save_top_k: -1
@@ -123,7 +125,6 @@ model:
 
   confidence_prediction: false
   confidence_model_args:
-    use_gaussian: false
     num_dist_bins: 64
     max_dist: 22
     add_s_to_z_prod: true
@@ -135,7 +136,6 @@ model:
       num_plddt_bins: 50
       num_pde_bins: 64
       num_pae_bins: 64
-      relative_confidence: none
 
   training_args:
     recycling_steps: 3
@@ -161,6 +161,7 @@ model:
     sampling_steps: 200
     diffusion_samples: 5
     symmetry_correction: true
+    run_confidence_sequentially: false
 
   diffusion_process_args:
     sigma_min: 0.0004
@@ -182,3 +183,11 @@ model:
     add_smooth_lddt_loss: true
     nucleotide_loss_weight: 5.0
     ligand_loss_weight: 10.0
+
+  steering_args:
+    fk_steering: False
+    num_particles: 3
+    fk_lambda: 4.0
+    fk_resampling_interval: 3
+    guidance_update: False
+    num_gd_steps: 16 

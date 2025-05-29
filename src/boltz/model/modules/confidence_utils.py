@@ -157,4 +157,25 @@ def compute_ptms(logits, x_preds, feats, multiplicity):
         dim=1,
     ).values
 
-    return ptm, iptm, ligand_iptm, protein_iptm
+    # Compute pair chain ipTM
+    chain_pair_iptm = {}
+    asym_ids_list = torch.unique(asym_id).tolist()
+    for idx1 in asym_ids_list:
+        chain_iptm = {}
+        for idx2 in asym_ids_list:
+            mask_pair_chain = (
+                maski[:, :, None]
+                * (asym_id[:, None, :] == idx1)
+                * (asym_id[:, :, None] == idx2)
+                * mask_pad[:, None, :]
+                * mask_pad[:, :, None]
+            )
+
+            chain_iptm[idx2] = torch.max(
+                torch.sum(tm_expected_value * mask_pair_chain, dim=-1)
+                / (torch.sum(mask_pair_chain, dim=-1) + 1e-5),
+                dim=1,
+            ).values
+        chain_pair_iptm[idx1] = chain_iptm
+
+    return ptm, iptm, ligand_iptm, protein_iptm, chain_pair_iptm
