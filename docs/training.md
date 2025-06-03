@@ -70,7 +70,7 @@ Here is an example of how to set multiple dataset sources like the PDB and OpenF
 
 ```yaml
   datasets:
-    - _target_: foldeverything.task.train.data.DatasetConfig
+    - _target_: boltz.data.module.training.DatasetConfig
       target_dir: PATH_TO_PDB_TARGETS_DIR
       msa_dir: PATH_TO_PDB_MSA_DIR
       prob: 0.5
@@ -81,7 +81,7 @@ Here is an example of how to set multiple dataset sources like the PDB and OpenF
         min_neighborhood: 0
         max_neighborhood: 40
       split: ./scripts/train/assets/validation_ids.txt
-    - _target_: foldeverything.task.train.data.DatasetConfig
+    - _target_: boltz.data.module.training.DatasetConfig
       target_dir: PATH_TO_DISTILLATION_TARGETS_DIR
       msa_dir: PATH_TO_DISTILLATION_MSA_DIR
       prob: 0.5

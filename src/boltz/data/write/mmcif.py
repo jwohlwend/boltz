@@ -125,14 +125,27 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
 
     class _MyModel(AbInitioModel):
         def get_atoms(self) -> Iterator[Atom]:
-            # Add all atom sites.
+            # Index into plddt tensor for current residue.
             res_num = 0
+            # Tracks non-ligand plddt tensor indices,
+            # Initializing to -1 handles case where ligand is resnum 0
+            prev_polymer_resnum = -1
+            # Tracks ligand indices.
+            ligand_index_offset = 0
+
+            # Add all atom sites.
             for chain in structure.chains:
                 # We rename the chains in alphabetical order
                 het = chain["mol_type"] == const.chain_type_ids["NONPOLYMER"]
                 chain_idx = chain["asym_id"]
                 res_start = chain["res_idx"]
                 res_end = chain["res_idx"] + chain["res_num"]
+
+                record_type = (
+                    "ATOM"
+                    if chain["mol_type"] != const.chain_type_ids["NONPOLYMER"]
+                    else "HETATM"
+                )
 
                 residues = structure.residues[res_start:res_end]
                 for residue in residues:
@@ -154,11 +167,24 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
                         element = element.upper()
                         residue_index = residue["res_idx"] + 1
                         pos = atom_coords[i]
-                        biso = (
-                            100.00
-                            if plddts is None
-                            else round(plddts[res_num].item() * 100, 2)
-                        )
+
+                        if record_type != 'HETATM':
+                            # The current residue plddt is stored at the res_num index unless a ligand has previouly been added.
+                            biso = (
+                                100.00
+                                if plddts is None
+                                else round(plddts[res_num + ligand_index_offset].item() * 100, 3)
+                            )
+                            prev_polymer_resnum = res_num
+                        else:
+                            # If not a polymer resnum, we can get index into plddts by adding offset relative to previous polymer resnum.
+                            ligand_index_offset += 1
+                            biso = (
+                                100.00
+                                if plddts is None
+                                else round(plddts[prev_polymer_resnum + ligand_index_offset].item() * 100, 3)
+                            )
+
                         yield Atom(
                             asym_unit=asym_unit_map[chain_idx],
                             type_symbol=element,
@@ -172,25 +198,56 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
                             occupancy=1,
                         )
 
-                    res_num += 1
+                    if record_type != 'HETATM':
+                        res_num += 1
 
         def add_plddt(self, plddts):
             res_num = 0
+            prev_polymer_resnum = -1 # -1 handles case where ligand is the first residue
+            ligand_index_offset = 0
             for chain in structure.chains:
                 chain_idx = chain["asym_id"]
                 res_start = chain["res_idx"]
                 res_end = chain["res_idx"] + chain["res_num"]
                 residues = structure.residues[res_start:res_end]
+
+                record_type = (
+                    "ATOM"
+                    if chain['mol_type'] != const.chain_type_ids["NONPOLYMER"]
+                    else "HETATM"
+                )
+
                 # We rename the chains in alphabetical order
                 for residue in residues:
                     residue_idx = residue["res_idx"] + 1
-                    self.qa_metrics.append(
-                        _LocalPLDDT(
-                            asym_unit_map[chain_idx].residue(residue_idx),
-                            round(plddts[res_num].item() * 100, 2),
+
+                    atom_start = residue["atom_idx"]
+                    atom_end = residue["atom_idx"] + residue['atom_num']
+
+                    if record_type != 'HETATM':
+                        # The current residue plddt is stored at the res_num index unless a ligand has previouly been added.
+                        self.qa_metrics.append(
+                            _LocalPLDDT(
+                                asym_unit_map[chain_idx].residue(residue_idx),
+                                round(plddts[res_num + ligand_index_offset].item() * 100, 3),
+                            )
                         )
-                    )
-                    res_num += 1
+                        prev_polymer_resnum = res_num
+                    else:
+                        # If not a polymer resnum, we can get index into plddts by adding offset relative to previous polymer resnum.
+                        self.qa_metrics.append(
+                            _LocalPLDDT(
+                                asym_unit_map[chain_idx].residue(residue_idx),
+                                round(plddts[
+                                    prev_polymer_resnum + ligand_index_offset + 1: 
+                                    prev_polymer_resnum + ligand_index_offset + residue["atom_num"] + 1
+                                ].mean().item() * 100, 2),
+                            )
+                        )
+                        ligand_index_offset += residue['atom_num']
+                        
+                    if record_type != 'HETATM':
+                        res_num += 1
 
     # Add the model and modeling protocol to the file and write them out:
     model = _MyModel(assembly=modeled_assembly, name="Model")

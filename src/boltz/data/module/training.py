@@ -101,11 +101,29 @@ def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
     """
     # Load the structure
     structure = np.load(target_dir / "structures" / f"{record.id}.npz")
+
+    # In order to add cyclic_period to chains if it does not exist
+    # Extract the chains array
+    chains = structure["chains"]
+    # Check if the field exists
+    if "cyclic_period" not in chains.dtype.names:
+        # Create a new dtype with the additional field
+        new_dtype = chains.dtype.descr + [("cyclic_period", "i4")]
+        # Create a new array with the new dtype
+        new_chains = np.empty(chains.shape, dtype=new_dtype)
+        # Copy over existing fields
+        for name in chains.dtype.names:
+            new_chains[name] = chains[name]
+        # Set the new field to 0
+        new_chains["cyclic_period"] = 0
+        # Replace old chains array with new one
+        chains = new_chains
+
     structure = Structure(
         atoms=structure["atoms"],
         bonds=structure["bonds"],
         residues=structure["residues"],
-        chains=structure["chains"],
+        chains=chains, # chains var accounting for missing cyclic_period
         connections=structure["connections"].astype(Connection),
         interfaces=structure["interfaces"],
         mask=structure["mask"],
@@ -188,6 +206,7 @@ class TrainingDataset(torch.utils.data.Dataset):
         binder_pocket_cutoff: Optional[float] = 6.0,
         binder_pocket_sampling_geometric_p: Optional[float] = 0.0,
         return_symmetries: Optional[bool] = False,
+        compute_constraint_features: bool = False,
     ) -> None:
         """Initialize the training dataset."""
         super().__init__()
@@ -209,6 +228,7 @@ class TrainingDataset(torch.utils.data.Dataset):
         self.binder_pocket_cutoff = binder_pocket_cutoff
         self.binder_pocket_sampling_geometric_p = binder_pocket_sampling_geometric_p
         self.return_symmetries = return_symmetries
+        self.compute_constraint_features = compute_constraint_features
         self.samples = []
         for dataset in datasets:
             records = dataset.manifest.records
@@ -295,6 +315,7 @@ class TrainingDataset(torch.utils.data.Dataset):
                 binder_pocket_conditioned_prop=self.binder_pocket_conditioned_prop,
                 binder_pocket_cutoff=self.binder_pocket_cutoff,
                 binder_pocket_sampling_geometric_p=self.binder_pocket_sampling_geometric_p,
+                compute_constraint_features=self.compute_constraint_features,
             )
         except Exception as e:
             print(f"Featurizer failed on {sample.record.id} with error {e}. Skipping.")
@@ -337,6 +358,7 @@ class ValidationDataset(torch.utils.data.Dataset):
         return_symmetries: Optional[bool] = False,
         binder_pocket_conditioned_prop: Optional[float] = 0.0,
         binder_pocket_cutoff: Optional[float] = 6.0,
+        compute_constraint_features: bool = False,
     ) -> None:
         """Initialize the validation dataset."""
         super().__init__()
@@ -359,6 +381,7 @@ class ValidationDataset(torch.utils.data.Dataset):
         self.return_symmetries = return_symmetries
         self.binder_pocket_conditioned_prop = binder_pocket_conditioned_prop
         self.binder_pocket_cutoff = binder_pocket_cutoff
+        self.compute_constraint_features = compute_constraint_features
 
     def __getitem__(self, idx: int) -> dict[str, Tensor]:
         """Get an item from the dataset.
@@ -440,6 +463,7 @@ class ValidationDataset(torch.utils.data.Dataset):
                 binder_pocket_cutoff=self.binder_pocket_cutoff,
                 binder_pocket_sampling_geometric_p=1.0,  # this will only sample a single pocket token
                 only_ligand_binder_pocket=True,
+                compute_constraint_features=self.compute_constraint_features,
             )
         except Exception as e:
             print(f"Featurizer failed on {record.id} with error {e}. Skipping.")

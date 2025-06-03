@@ -29,8 +29,15 @@ def to_pdb(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # noq
     # Load periodic table for element mapping
     periodic_table = Chem.GetPeriodicTable()
 
-    # Add all atom sites.
+    # Index into plddt tensor for current residue.
     res_num = 0
+    # Tracks non-ligand plddt tensor indices,
+    # Initializing to -1 handles case where ligand is resnum 0
+    prev_polymer_resnum = -1 
+    # Tracks ligand indices.
+    ligand_index_offset = 0
+
+    # Add all atom sites.
     for chain in structure.chains:
         # We rename the chains in alphabetical order
         chain_idx = chain["asym_id"]
@@ -70,9 +77,19 @@ def to_pdb(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # noq
                 res_name_3 = (
                     "LIG" if record_type == "HETATM" else str(residue["name"][:3])
                 )
-                b_factor = (
-                    100.00 if plddts is None else round(plddts[res_num].item() * 100, 2)
-                )
+
+                if record_type != 'HETATM':
+                    # The current residue plddt is stored at the res_num index unless a ligand has previouly been added.
+                    b_factor = (
+                        100.00 if plddts is None else round(plddts[res_num + ligand_index_offset].item() * 100, 2)
+                    )
+                    prev_polymer_resnum = res_num
+                else:
+                    # If not a polymer resnum, we can get index into plddts by adding offset relative to previous polymer resnum.
+                    ligand_index_offset += 1
+                    b_factor = (
+                        100.00 if plddts is None else round(plddts[prev_polymer_resnum + ligand_index_offset].item() * 100, 2)
+                    )
 
                 # PDB is a columnar format, every space matters here!
                 atom_line = (
@@ -87,7 +104,8 @@ def to_pdb(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # noq
                 atom_reindex_ter.append(atom_index)
                 atom_index += 1
 
-            res_num += 1
+            if record_type != 'HETATM':
+                res_num += 1
 
         should_terminate = chain_idx < (len(structure.chains) - 1)
         if should_terminate:

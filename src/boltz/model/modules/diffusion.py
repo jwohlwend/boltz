@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 from math import sqrt
-import random
 
-from einops import rearrange
 import torch
+import torch.nn.functional as F
+from einops import rearrange
 from torch import nn
 from torch.nn import Module
-import torch.nn.functional as F
 
-from boltz.data import const
 import boltz.model.layers.initialize as init
+from boltz.data import const
 from boltz.model.loss.diffusion import (
     smooth_lddt_loss,
     weighted_rigid_align,
@@ -30,10 +29,12 @@ from boltz.model.modules.transformers import (
 )
 from boltz.model.modules.utils import (
     LinearNoBias,
+    compute_random_augmentation,
     center_random_augmentation,
     default,
     log,
 )
+from boltz.model.potentials.potentials import get_potentials
 
 
 class DiffusionModule(Module):
@@ -451,8 +452,23 @@ class AtomDiffusion(Module):
         num_sampling_steps=None,
         multiplicity=1,
         train_accumulate_token_repr=False,
+        steering_args=None,
         **network_condition_kwargs,
     ):
+        potentials = get_potentials()
+        if steering_args["fk_steering"]:
+            multiplicity = multiplicity * steering_args["num_particles"]
+            energy_traj = torch.empty((multiplicity, 0), device=self.device)
+            resample_weights = torch.ones(multiplicity, device=self.device).reshape(
+                -1, steering_args["num_particles"]
+            )
+        if steering_args["guidance_update"]:
+            scaled_guidance_update = torch.zeros(
+                (multiplicity, *atom_mask.shape[1:], 3),
+                dtype=torch.float32,
+                device=self.device,
+            )
+
         num_sampling_steps = default(num_sampling_steps, self.num_sampling_steps)
         atom_mask = atom_mask.repeat_interleave(multiplicity, 0)
 
@@ -473,23 +489,31 @@ class AtomDiffusion(Module):
         token_a = None
 
         # gradually denoise
-        for sigma_tm, sigma_t, gamma in sigmas_and_gammas:
-            atom_coords, atom_coords_denoised = center_random_augmentation(
-                atom_coords,
-                atom_mask,
-                augmentation=True,
-                return_second_coords=True,
-                second_coords=atom_coords_denoised,
+        for step_idx, (sigma_tm, sigma_t, gamma) in enumerate(sigmas_and_gammas):
+            random_R, random_tr = compute_random_augmentation(
+                multiplicity, device=atom_coords.device, dtype=atom_coords.dtype
             )
+            atom_coords = atom_coords - atom_coords.mean(dim=-2, keepdims=True)
+            atom_coords = (
+                torch.einsum("bmd,bds->bms", atom_coords, random_R) + random_tr
+            )
+            if atom_coords_denoised is not None:
+                atom_coords_denoised -= atom_coords_denoised.mean(dim=-2, keepdims=True)
+                atom_coords_denoised = (
+                    torch.einsum("bmd,bds->bms", atom_coords_denoised, random_R)
+                    + random_tr
+                )
+            if steering_args["guidance_update"] and scaled_guidance_update is not None:
+                scaled_guidance_update = torch.einsum(
+                    "bmd,bds->bms", scaled_guidance_update, random_R
+                )
 
             sigma_tm, sigma_t, gamma = sigma_tm.item(), sigma_t.item(), gamma.item()
 
             t_hat = sigma_tm * (1 + gamma)
-            eps = (
-                self.noise_scale
-                * sqrt(t_hat**2 - sigma_tm**2)
-                * torch.randn(shape, device=self.device)
-            )
+            steering_t = 1.0 - (step_idx / num_sampling_steps)
+            noise_var = self.noise_scale**2 * (t_hat**2 - sigma_tm**2)
+            eps = sqrt(noise_var) * torch.randn(shape, device=self.device)
             atom_coords_noisy = atom_coords + eps
 
             with torch.no_grad():
@@ -503,6 +527,116 @@ class AtomDiffusion(Module):
                         **network_condition_kwargs,
                     ),
                 )
+
+                if steering_args["fk_steering"] and (
+                    (
+                        step_idx % steering_args["fk_resampling_interval"] == 0
+                        and noise_var > 0
+                    )
+                    or step_idx == num_sampling_steps - 1
+                ):
+                    # Compute energy of x_0 prediction
+                    energy = torch.zeros(multiplicity, device=self.device)
+                    for potential in potentials:
+                        parameters = potential.compute_parameters(steering_t)
+                        if parameters["resampling_weight"] > 0:
+                            component_energy = potential.compute(
+                                atom_coords_denoised,
+                                network_condition_kwargs["feats"],
+                                parameters,
+                            )
+                            energy += parameters["resampling_weight"] * component_energy
+                    energy_traj = torch.cat((energy_traj, energy.unsqueeze(1)), dim=1)
+
+                    # Compute log G values
+                    if step_idx == 0:
+                        log_G = -1 * energy
+                    else:
+                        log_G = energy_traj[:, -2] - energy_traj[:, -1]
+
+                    # Compute ll difference between guided and unguided transition distribution
+                    if steering_args["guidance_update"] and noise_var > 0:
+                        ll_difference = (
+                            eps**2 - (eps + scaled_guidance_update) ** 2
+                        ).sum(dim=(-1, -2)) / (2 * noise_var)
+                    else:
+                        ll_difference = torch.zeros_like(energy)
+
+                    # Compute resampling weights
+                    resample_weights = F.softmax(
+                        (ll_difference + steering_args["fk_lambda"] * log_G).reshape(
+                            -1, steering_args["num_particles"]
+                        ),
+                        dim=1,
+                    )
+
+                # Compute guidance update to x_0 prediction
+                if (
+                    steering_args["guidance_update"]
+                    and step_idx < num_sampling_steps - 1
+                ):
+                    guidance_update = torch.zeros_like(atom_coords_denoised)
+                    for guidance_step in range(steering_args["num_gd_steps"]):
+                        energy_gradient = torch.zeros_like(atom_coords_denoised)
+                        for potential in potentials:
+                            parameters = potential.compute_parameters(steering_t)
+                            if (
+                                parameters["guidance_weight"] > 0
+                                and (guidance_step) % parameters["guidance_interval"]
+                                == 0
+                            ):
+                                energy_gradient += parameters[
+                                    "guidance_weight"
+                                ] * potential.compute_gradient(
+                                    atom_coords_denoised + guidance_update,
+                                    network_condition_kwargs["feats"],
+                                    parameters,
+                                )
+                        guidance_update -= energy_gradient
+                    atom_coords_denoised += guidance_update
+                    scaled_guidance_update = (
+                        guidance_update
+                        * -1
+                        * self.step_scale
+                        * (sigma_t - t_hat)
+                        / t_hat
+                    )
+
+                if steering_args["fk_steering"] and (
+                    (
+                        step_idx % steering_args["fk_resampling_interval"] == 0
+                        and noise_var > 0
+                    )
+                    or step_idx == num_sampling_steps - 1
+                ):
+                    resample_indices = (
+                        torch.multinomial(
+                            resample_weights,
+                            resample_weights.shape[1]
+                            if step_idx < num_sampling_steps - 1
+                            else 1,
+                            replacement=True,
+                        )
+                        + resample_weights.shape[1]
+                        * torch.arange(
+                            resample_weights.shape[0], device=resample_weights.device
+                        ).unsqueeze(-1)
+                    ).flatten()
+
+                    atom_coords = atom_coords[resample_indices]
+                    atom_coords_noisy = atom_coords_noisy[resample_indices]
+                    atom_mask = atom_mask[resample_indices]
+                    if atom_coords_denoised is not None:
+                        atom_coords_denoised = atom_coords_denoised[resample_indices]
+                    energy_traj = energy_traj[resample_indices]
+                    if steering_args["guidance_update"]:
+                        scaled_guidance_update = scaled_guidance_update[
+                            resample_indices
+                        ]
+                    if token_repr is not None:
+                        token_repr = token_repr[resample_indices]
+                    if token_a is not None:
+                        token_a = token_a[resample_indices]
 
             if self.accumulate_token_repr:
                 if token_repr is None:
