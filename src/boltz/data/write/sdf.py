@@ -1,9 +1,11 @@
+import warnings
 import numpy as np
 from pathlib import Path
 from rdkit import Chem
 from rdkit.Geometry import Point3D
-from boltz.data.types import Structure, Chain
+from boltz.data.types import Chain
 from boltz.data import const
+from rdkit.Chem.rdchem import KekulizeException
 
 def write_ligand_sdf(chain: Chain, atoms: np.ndarray, bonds: np.ndarray, output_path: Path) -> None:
     """Write a ligand chain into an SDF file.
@@ -55,4 +57,8 @@ def write_ligand_sdf(chain: Chain, atoms: np.ndarray, bonds: np.ndarray, output_
     mol.AddConformer(conf, assignId=True)
 
     # Write the SDF file
-    Chem.MolToMolFile(mol, str(output_path))
+    try:
+        Chem.MolToMolFile(mol, str(output_path))  # kekulize=True by default
+    except KekulizeException as e:
+        warnings.warn(f"Kekulization failed: {e}. Writing SDF with kekulize=False.", UserWarning)
+        Chem.MolToMolFile(mol, str(output_path), kekulize=False)
