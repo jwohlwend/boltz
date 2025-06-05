@@ -727,7 +727,7 @@ def predict(
         sample_ligand = processed.manifest.records[0].sample_ligand_conformation
 
     diffusion_params = asdict(BoltzDiffusionParams(sample_ligand_conformation=sample_ligand))
-    diffusion_params.step_scale = step_scale
+    diffusion_params['step_scale'] = step_scale
 
     pairformer_args = PairformerArgs(use_trifast=(accelerator != "cpu"))
     msa_module_args = MSAModuleArgs(use_trifast=(accelerator != "cpu"))

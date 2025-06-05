@@ -870,11 +870,13 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         if entity_type in {"protein", "dna", "rna"}:
             seq = str(item[entity_type]["sequence"])
         elif entity_type == "ligand":
-            assert "smiles" in item[entity_type] or "ccd" in item[entity_type] 
+            assert "smiles" in item[entity_type] or "ccd" in item[entity_type] or "conformer" in item[entity_type]
             if "smiles" in item[entity_type]:
                 seq = str(item[entity_type]["smiles"])
             elif "ccd" in item[entity_type]:
                 seq = str(item[entity_type]["ccd"])
+            elif "conformer" in item[entity_type]:
+                seq = str(item[entity_type]["conformer"])
             else:
                 msg = f"Invalid ligand type: {item[entity_type]}"
                 raise ValueError(msg)
@@ -1015,6 +1017,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 entity=entity_id,
                 residues=[residue],
                 type=const.chain_type_ids["NONPOLYMER"],
+                cyclic_period=0
             )
 
             assert not items[0][entity_type].get(
