@@ -50,7 +50,7 @@ def parse_fasta(path: Path, ccd: Mapping[str, Mol]) -> Target:  # noqa: C901
         assert len(header) >= 2, f"Invalid record id: {seq_record.id}"
 
         chain_id, entity_type = header[:2]
-        if entity_type.lower() not in {"protein", "dna", "rna", "ccd", "smiles"}:
+        if entity_type.lower() not in {"protein", "dna", "rna", "ccd", "smiles","conformer"}:
             msg = f"Invalid entity type: {entity_type}"
             raise ValueError(msg)
         if chain_id == "":
@@ -104,6 +104,7 @@ def parse_fasta(path: Path, ccd: Mapping[str, Mol]) -> Target:  # noqa: C901
                 "ligand": {
                     "id": chain_id,
                     "ccd": seq,
+                    "conformer": supp_file if len(header) == 3 else None,
                 }
             }
         elif entity_type.upper() == "SMILES":
