@@ -52,6 +52,7 @@ class BoltzDiffusionParams:
     alignment_reverse_diff: bool = True
     synchronize_sigmas: bool = True
     use_inference_model_cache: bool = True
+    sample_ligand_conformation: bool = True
 
 
 @rank_zero_only
@@ -475,12 +476,18 @@ def predict(
         "sampling_steps": sampling_steps,
         "diffusion_samples": diffusion_samples,
     }
+    sample_ligand = True
+    if processed.manifest.records:
+        sample_ligand = processed.manifest.records[0].sample_ligand_conformation
+
+    diffusion_params = asdict(BoltzDiffusionParams(sample_ligand_conformation=sample_ligand))
+
     model_module: Boltz1 = Boltz1.load_from_checkpoint(
         checkpoint,
         strict=True,
         predict_args=predict_args,
         map_location="cpu",
-        diffusion_process_args=asdict(BoltzDiffusionParams()),
+        diffusion_process_args=diffusion_params,
     )
     model_module.eval()
 

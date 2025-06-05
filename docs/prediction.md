@@ -31,6 +31,7 @@ sequences:
         sequence: SEQUENCE    # only for protein, dna, rna
         smiles: SMILES        # only for ligand, exclusive with ccd
         ccd: CCD              # only for ligand, exclusive with smiles
+        conformer: PATH       # optional ligand conformer file (SDF, MOL2 or PDB)
         msa: MSA_PATH         # only for protein
         modifications:
           - position: RES_IDX   # index of residue, starting from 1
@@ -46,8 +47,9 @@ constraints:
     - pocket:
         binder: CHAIN_ID
         contacts: [[CHAIN_ID, RES_IDX], [CHAIN_ID, RES_IDX]]
+sample_ligand_conformation: true   # optional, set to false to keep ligand fixed
 ```
-`sequences` has one entry for every unique chain/molecule in the input. Each polymer entity as a `ENTITY_TYPE`  either `protein`, `dna` or`rna` and have a `sequence` attribute. Non-polymer entities are indicated by `ENTITY_TYPE` equal to `ligand` and have a `smiles` or `ccd` attribute. `CHAIN_ID` is the unique identifier for each chain/molecule, and it should be set as a list in case of multiple identical entities in the structure. For proteins, the `msa` key is required by default but can be ommited by passing the `--use_msa_server` flag which will auto-generate the MSA using the mmseqs2 server. If you wish to use a precomputed MSA, use the `msa` attribute with `MSA_PATH` indicating the path to the `.a3m` file containing the MSA for that protein. If you wish to explicitly run single sequence mode (which is generally advised against as it will hurt model performance), you may do so by using the special keyword `empty` for that protein (ex: `msa: empty`).
+`sequences` has one entry for every unique chain/molecule in the input. Each polymer entity as a `ENTITY_TYPE`  either `protein`, `dna` or `rna` and have a `sequence` attribute. Non-polymer entities are indicated by `ENTITY_TYPE` equal to `ligand` and have a `smiles`, `ccd` or `conformer` attribute. `CHAIN_ID` is the unique identifier for each chain/molecule, and it should be set as a list in case of multiple identical entities in the structure. For proteins, the `msa` key is required by default but can be ommited by passing the `--use_msa_server` flag which will auto-generate the MSA using the mmseqs2 server. If you wish to use a precomputed MSA, use the `msa` attribute with `MSA_PATH` indicating the path to the `.a3m` file containing the MSA for that protein. If you wish to explicitly run single sequence mode (which is generally advised against as it will hurt model performance), you may do so by using the special keyword `empty` for that protein (ex: `msa: empty`).
 
 The `modifications` field is an optional field that allows you to specify modified residues in the polymer (`protein`, `dna` or`rna`). The `position` field specifies the index (starting from 1) of the residue, and `ccd` is the CCD code of the modified residue. This field is currently only supported for CCD ligands.
 
@@ -67,7 +69,8 @@ sequences:
       ccd: SAH
   - ligand:
       id: [E, F]
-      smiles: N[C@@H](Cc1ccc(O)cc1)C(=O)O
+      conformer: ./ligand.sdf
+sample_ligand_conformation: false
 ```
 
 

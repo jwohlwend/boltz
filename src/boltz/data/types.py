@@ -372,6 +372,7 @@ class Record(JSONSerializable):
     structure: StructureInfo
     chains: list[ChainInfo]
     interfaces: list[InterfaceInfo]
+    sample_ligand_conformation: bool = True
 
 
 ####################################################################################################

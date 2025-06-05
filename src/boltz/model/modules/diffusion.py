@@ -303,6 +303,7 @@ class AtomDiffusion(Module):
         synchronize_sigmas=False,
         use_inference_model_cache=False,
         accumulate_token_repr=False,
+        sample_ligand_conformation=True,
         **kwargs,
     ):
         """Initialize the atom diffusion module.
@@ -345,6 +346,8 @@ class AtomDiffusion(Module):
             Whether to use the inference model cache, by default False.
         accumulate_token_repr : bool, optional
             Whether to accumulate the token representation, by default False.
+        sample_ligand_conformation : bool, optional
+            Whether to sample ligand conformations during diffusion, by default True.
 
         """
         super().__init__()
@@ -372,6 +375,7 @@ class AtomDiffusion(Module):
         self.alignment_reverse_diff = alignment_reverse_diff
         self.synchronize_sigmas = synchronize_sigmas
         self.use_inference_model_cache = use_inference_model_cache
+        self.sample_ligand_conformation = sample_ligand_conformation
 
         self.accumulate_token_repr = accumulate_token_repr
         self.token_s = score_model_args["token_s"]
@@ -465,7 +469,29 @@ class AtomDiffusion(Module):
 
         # atom position is noise at the beginning
         init_sigma = sigmas[0]
-        atom_coords = init_sigma * torch.randn(shape, device=self.device)
+
+        feats = network_condition_kwargs.get("feats")
+        ligand_mask = None
+        if (not self.sample_ligand_conformation) and (feats is not None):
+            orig_coords = feats["coords"]
+            B, N, L = orig_coords.shape[0:3]
+            orig_coords = orig_coords.reshape(B * N, L, 3)
+            orig_coords = orig_coords.repeat_interleave(multiplicity // N, 0)
+            ligand_mask = (
+                torch.bmm(
+                    feats["atom_to_token"].float(),
+                    feats["mol_type"].unsqueeze(-1).float(),
+                )
+                .squeeze(-1)
+                .long()
+            )
+            ligand_mask = ligand_mask == const.chain_type_ids["NONPOLYMER"]
+            ligand_mask = ligand_mask.repeat_interleave(multiplicity, 0)
+
+            atom_coords = init_sigma * torch.randn(shape, device=self.device)
+            atom_coords = atom_coords * (~ligand_mask.unsqueeze(-1)) + orig_coords * ligand_mask.unsqueeze(-1)
+        else:
+            atom_coords = init_sigma * torch.randn(shape, device=self.device)
         atom_coords_denoised = None
         model_cache = {} if self.use_inference_model_cache else None
 
@@ -490,6 +516,8 @@ class AtomDiffusion(Module):
                 * sqrt(t_hat**2 - sigma_tm**2)
                 * torch.randn(shape, device=self.device)
             )
+            if (ligand_mask is not None) and (not self.sample_ligand_conformation):
+                eps = eps * (~ligand_mask.unsqueeze(-1))
             atom_coords_noisy = atom_coords + eps
 
             with torch.no_grad():
@@ -534,6 +562,9 @@ class AtomDiffusion(Module):
                 atom_coords_noisy
                 + self.step_scale * (sigma_t - t_hat) * denoised_over_sigma
             )
+
+            if (ligand_mask is not None) and (not self.sample_ligand_conformation):
+                atom_coords_next = atom_coords_next * (~ligand_mask.unsqueeze(-1)) + atom_coords * ligand_mask.unsqueeze(-1)
 
             atom_coords = atom_coords_next
 
