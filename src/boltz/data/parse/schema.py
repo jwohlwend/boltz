@@ -776,10 +776,10 @@ def align_conf_to_mol(mol: Mol, conf_mol: Mol) -> None:
         The conformer to align.
 
     """
-    if not mol.HasSubstructMatch(conf_mol):
+    if not mol.HasSubstructMatch(conf_mol, useChirality=True):
         msg = "Conformer does not match molecule!"
         raise ValueError(msg)
-    match = mol.GetSubstructMatch(conf_mol)
+    match = mol.GetSubstructMatch(conf_mol,useChirality=True)
     for idx, atom in enumerate(conf_mol.GetAtoms()):
         smiles_atom = mol.GetAtomWithIdx(match[idx])
         assert atom.GetProp("name") == smiles_atom.GetProp("name")
