@@ -11,7 +11,7 @@ from rdkit import Chem, rdBase
 from rdkit.Chem import AllChem, HybridizationType
 from rdkit.Chem.rdDistGeom import GetMoleculeBoundsMatrix
 from rdkit.Chem.rdMolDescriptors import CalcNumHeavyAtoms
-
+from rdkit.Chem import rdmolops
 from boltz.data import const
 from boltz.data.types import (
     Atom,
@@ -763,6 +763,10 @@ def parse_conformer_file(path: str) -> None:
         raise ValueError(msg)
     for conf in mol.GetConformers():
         conf.SetProp("name", "File")
+    try:
+        rdmolops.AssignAtomChiralTagsFromStructure(mol)
+    except Exception:  # noqa: BLE001
+        pass
     return mol
 
 def align_conf_to_mol(mol: Mol, conf_mol: Mol) -> None:
@@ -776,10 +780,11 @@ def align_conf_to_mol(mol: Mol, conf_mol: Mol) -> None:
         The conformer to align.
 
     """
-    if not mol.HasSubstructMatch(conf_mol):
+    # Ensure we preserve stereochemistry when matching atoms
+    if not mol.HasSubstructMatch(conf_mol, useChirality=True):
         msg = "Conformer does not match molecule!"
         raise ValueError(msg)
-    match = mol.GetSubstructMatch(conf_mol)
+    match = mol.GetSubstructMatch(conf_mol, useChirality=True)
     for idx, atom in enumerate(conf_mol.GetAtoms()):
         smiles_atom = mol.GetAtomWithIdx(match[idx])
         assert atom.GetProp("name") == smiles_atom.GetProp("name")
@@ -846,6 +851,8 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     if version != 1:
         msg = f"Invalid version {version} in input!"
         raise ValueError(msg)
+
+    sample_ligand_conformation = schema.get("sample_ligand_conformation", True)
 
     # Disable rdkit warnings
     blocker = rdBase.BlockLogs()  # noqa: F841
@@ -985,6 +992,30 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 type=const.chain_type_ids["NONPOLYMER"],
                 cyclic_period=0,
             )
+        elif (
+            entity_type == "ligand"
+        ) and ("conformer" in items[0][entity_type]) and (
+            "smiles" not in items[0][entity_type]
+        ):
+            conf_mol = parse_conformer_file(items[0][entity_type]["conformer"])
+            conf_mol = AllChem.AddHs(conf_mol)
+
+            can_order = AllChem.CanonicalRankAtoms(conf_mol)
+            for atom, can_idx in zip(conf_mol.GetAtoms(), can_order):
+                atom.SetProp("name", atom.GetSymbol().upper() + str(can_idx + 1))
+
+            mol_no_h = AllChem.RemoveHs(conf_mol)
+            seq = AllChem.MolToSmiles(mol_no_h)
+            residue = parse_ccd_residue(
+                name="LIG",
+                ref_mol=mol_no_h,
+                res_idx=0,
+            )
+            parsed_chain = ParsedChain(
+                entity=entity_id,
+                residues=[residue],
+                type=const.chain_type_ids["NONPOLYMER"],
+            )
 
             assert not items[0][entity_type].get(
                 "cyclic", False
@@ -998,6 +1029,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             # Set atom names
             canonical_order = AllChem.CanonicalRankAtoms(mol)
             for atom, can_idx in zip(mol.GetAtoms(), canonical_order):
+
                 atom_name = atom.GetSymbol().upper() + str(can_idx + 1)
                 if len(atom_name) > 4:
                     raise ValueError(
@@ -1335,7 +1367,8 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         structure=struct_info,
         chains=chain_infos,
         interfaces=[],
-        inference_options=options,
+        sample_ligand_conformation=sample_ligand_conformation,
+        inference_options=options
     )
 
     residue_constraints = ResidueConstraints(

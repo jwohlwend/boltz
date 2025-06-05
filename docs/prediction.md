@@ -1,7 +1,6 @@
 # Prediction
 
 Once you have installed `boltz`, you can start making predictions by simply running:
-
 `boltz predict <INPUT_PATH> --use_msa_server`
 
 where `<INPUT_PATH>` is a path to the input file or a directory. The input file can either be in fasta (enough for most use cases) or YAML  format (for more complex inputs). If you specify a directory, `boltz` will run predictions on each `.yaml` or `.fasta` file in the directory. Passing the `--use_msa_server` flag will auto-generate the MSA using the mmseqs2 server, otherwise you can provide a precomputed MSA. 
@@ -33,6 +32,7 @@ sequences:
         sequence: SEQUENCE    # only for protein, dna, rna
         smiles: 'SMILES'        # only for ligand, exclusive with ccd
         ccd: CCD              # only for ligand, exclusive with smiles
+        conformer: PATH       # optional ligand conformer file (SDF, MOL2 or PDB)
         msa: MSA_PATH         # only for protein
         modifications:
           - position: RES_IDX   # index of residue, starting from 1
@@ -49,13 +49,13 @@ constraints:
     - pocket:
         binder: CHAIN_ID
         contacts: [[CHAIN_ID, RES_IDX], [CHAIN_ID, RES_IDX]]
+sample_ligand_conformation: true   # optional, set to false to keep ligand fixed
 ```
 `sequences` has one entry for every unique chain/molecule in the input. Each polymer entity as a `ENTITY_TYPE`  either `protein`, `dna` or `rna` and have a `sequence` attribute. Non-polymer entities are indicated by `ENTITY_TYPE` equal to `ligand` and have a `smiles` or `ccd` attribute. `CHAIN_ID` is the unique identifier for each chain/molecule, and it should be set as a list in case of multiple identical entities in the structure. For proteins, the `msa` key is required by default but can be omited by passing the `--use_msa_server` flag which will auto-generate the MSA using the mmseqs2 server. If you wish to use a precomputed MSA, use the `msa` attribute with `MSA_PATH` indicating the path to the `.a3m` file containing the MSA for that protein. If you wish to explicitly run single sequence mode (which is generally advised against as it will hurt model performance), you may do so by using the special keyword `empty` for that protein (ex: `msa: empty`). For custom MSA, you may wish to indicate pairing keys to the model. You can do so by using a CSV format instead of a3m with two columns: `sequence` with the protein sequences and `key` which is a unique identifier indicating matching rows across CSV files of each protein chain.
 
 The `modifications` field is an optional field that allows you to specify modified residues in the polymer (`protein`, `dna` or`rna`). The `position` field specifies the index (starting from 1) of the residue, and `ccd` is the CCD code of the modified residue. This field is currently only supported for CCD ligands. The `cyclic` flag should be used to specify polymer chains (not ligands) that are cyclic. 
 
 `constraints` is an optional field that allows you to specify additional information about the input structure. 
-
 
 * The `bond` constraint specifies covalent bonds between two atoms (`atom1` and `atom2`). It is currently only supported for CCD ligands and canonical residues, `CHAIN_ID` refers to the id of the residue set above, `RES_IDX` is the index (starting from 1) of the residue (1 for ligands), and `ATOM_NAME` is the standardized atom name (can be verified in CIF file of that component on the RCSB website).
 
@@ -75,6 +75,10 @@ sequences:
       ccd: SAH
   - ligand:
       id: [E, F]
+      conformer: ./ligand.sdf
+      sample_ligand_conformation: false
+  - ligand:
+      id: [G,H]
       smiles: 'N[C@@H](Cc1ccc(O)cc1)C(=O)O'
 ```
 
