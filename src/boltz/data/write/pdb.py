@@ -1,11 +1,13 @@
+from typing import Optional
+
 from rdkit import Chem
+from torch import Tensor
 
 from boltz.data import const
 from boltz.data.types import Structure
-from boltz.data.write.utils import generate_tags
 
 
-def to_pdb(structure: Structure) -> str:  # noqa: PLR0915
+def to_pdb(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # noqa: PLR0915
     """Write a structure into a PDB file.
 
     Parameters
@@ -23,16 +25,23 @@ def to_pdb(structure: Structure) -> str:  # noqa: PLR0915
 
     atom_index = 1
     atom_reindex_ter = []
-    chain_tags = generate_tags()
 
     # Load periodic table for element mapping
     periodic_table = Chem.GetPeriodicTable()
+
+    # Index into plddt tensor for current residue.
+    res_num = 0
+    # Tracks non-ligand plddt tensor indices,
+    # Initializing to -1 handles case where ligand is resnum 0
+    prev_polymer_resnum = -1 
+    # Tracks ligand indices.
+    ligand_index_offset = 0
 
     # Add all atom sites.
     for chain in structure.chains:
         # We rename the chains in alphabetical order
         chain_idx = chain["asym_id"]
-        chain_tag = next(chain_tags)
+        chain_tag = chain["name"]
 
         res_start = chain["res_idx"]
         res_end = chain["res_idx"] + chain["res_num"]
@@ -68,7 +77,19 @@ def to_pdb(structure: Structure) -> str:  # noqa: PLR0915
                 res_name_3 = (
                     "LIG" if record_type == "HETATM" else str(residue["name"][:3])
                 )
-                b_factor = 1.00
+
+                if record_type != 'HETATM':
+                    # The current residue plddt is stored at the res_num index unless a ligand has previouly been added.
+                    b_factor = (
+                        100.00 if plddts is None else round(plddts[res_num + ligand_index_offset].item() * 100, 2)
+                    )
+                    prev_polymer_resnum = res_num
+                else:
+                    # If not a polymer resnum, we can get index into plddts by adding offset relative to previous polymer resnum.
+                    ligand_index_offset += 1
+                    b_factor = (
+                        100.00 if plddts is None else round(plddts[prev_polymer_resnum + ligand_index_offset].item() * 100, 2)
+                    )
 
                 # PDB is a columnar format, every space matters here!
                 atom_line = (
@@ -82,6 +103,9 @@ def to_pdb(structure: Structure) -> str:  # noqa: PLR0915
                 pdb_lines.append(atom_line)
                 atom_reindex_ter.append(atom_index)
                 atom_index += 1
+
+            if record_type != 'HETATM':
+                res_num += 1
 
         should_terminate = chain_idx < (len(structure.chains) - 1)
         if should_terminate:
