@@ -285,6 +285,13 @@ class ConfidenceModule(nn.Module):
         if len(x_pred.shape) == 4:
             B, mult, N, _ = x_pred.shape
             x_pred = x_pred.reshape(B * mult, N, -1)
+        # In some cases x_pred may already be repeated over the diffusion
+        # multiplicity while the features are not. Adjust the features so that
+        # both tensors have matching batch dimensions before the batched matrix
+        # multiplication.
+        if token_to_rep_atom.shape[0] != x_pred.shape[0]:
+            repeat_factor = x_pred.shape[0] // token_to_rep_atom.shape[0]
+            token_to_rep_atom = token_to_rep_atom.repeat(repeat_factor, 1, 1)
         x_pred_repr = torch.bmm(token_to_rep_atom.float(), x_pred)
         d = torch.cdist(x_pred_repr, x_pred_repr)
 
