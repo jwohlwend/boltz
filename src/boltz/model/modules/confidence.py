@@ -290,7 +290,8 @@ class ConfidenceModule(nn.Module):
         # both tensors have matching batch dimensions before the batched matrix
         # multiplication.
         if token_to_rep_atom.shape[0] != x_pred.shape[0]:
-            token_to_rep_atom = token_to_rep_atom.repeat(x_pred.shape[0], 1, 1)
+            repeat_factor = x_pred.shape[0] // token_to_rep_atom.shape[0]
+            token_to_rep_atom = token_to_rep_atom.repeat(repeat_factor, 1, 1)
         x_pred_repr = torch.bmm(token_to_rep_atom.float(), x_pred)
         d = torch.cdist(x_pred_repr, x_pred_repr)
 
