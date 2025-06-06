@@ -17,6 +17,7 @@ from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.utilities import rank_zero_only
 from rdkit import Chem
 from tqdm import tqdm
+from numpy.random import default_rng
 
 from boltz.data import const
 from boltz.data.module.inference import BoltzInferenceDataModule
@@ -102,6 +103,9 @@ class MSAModuleArgs:
     offload_to_cpu: bool = False
     subsample_msa: bool = False
     num_subsampled_msa: int = 1024
+    mask_msa: bool = False
+    mask_rate_msa: float = 0.1
+    mask_seed_msa: int = 42
 
 
 @dataclass
@@ -936,6 +940,23 @@ def cli() -> None:
     is_flag=True,
     help="Whether to not use trifast kernels for triangular updates. Default False",
 )
+@click.option(
+    "--mask_msa",
+    is_flag=True,
+    help="Whether to use MSA masking. Default is False.",
+)
+@click.option(
+    "--mask_rate_msa",
+    type=click.FloatRange(0.0, 1.0),
+    default=0.1,
+    help="The masking rate for MSA sequences (replace with X). Default is 0.1.",
+)
+@click.option(
+    "--mask_seed_msa",
+    type=int,
+    default=42,
+    help="The seed to use for MSA masking. Default is 42.",
+)
 def predict(  # noqa: C901, PLR0915, PLR0912
     data: str,
     out_dir: str,
@@ -969,6 +990,9 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     subsample_msa: bool = True,
     num_subsampled_msa: int = 1024,
     no_trifast: bool = False,
+    mask_msa: bool = False,
+    mask_rate_msa: float = 0.1,
+    mask_seed_msa: int = 42,
 ) -> None:
     """Run predictions with Boltz."""
     # If cpu, write a friendly warning
@@ -1104,6 +1128,9 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         subsample_msa=subsample_msa,
         num_subsampled_msa=num_subsampled_msa,
         use_paired_feature=model == "boltz2",
+        mask_msa=mask_msa,
+        mask_rate_msa=mask_rate_msa,
+        mask_seed_msa=mask_seed_msa
     )
 
     # Create prediction writer

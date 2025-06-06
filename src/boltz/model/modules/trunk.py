@@ -131,6 +131,9 @@ class MSAModule(nn.Module):
         offload_to_cpu: bool = False,
         subsample_msa: bool = False,
         num_subsampled_msa: int = 1024,
+        mask_msa: bool = True,
+        mask_rate_msa: float = 0.1,
+        mask_seed_msa: int = 42,
         **kwargs,
     ) -> None:
         """Initialize the MSA module.
@@ -168,6 +171,9 @@ class MSAModule(nn.Module):
         self.use_paired_feature = use_paired_feature
         self.subsample_msa = subsample_msa
         self.num_subsampled_msa = num_subsampled_msa
+        self.mask_msa = mask_msa
+        self.mask_rate_msa = mask_rate_msa
+        self.mask_seed_msa = mask_seed_msa
 
         self.s_proj = nn.Linear(s_input_dim, msa_s, bias=False)
         self.msa_proj = nn.Linear(
@@ -262,11 +268,21 @@ class MSAModule(nn.Module):
             m = torch.cat([msa, has_deletion, deletion_value, is_paired], dim=-1)
         else:
             m = torch.cat([msa, has_deletion, deletion_value], dim=-1)
-
+        
+        # Subsample the MSA
         if self.subsample_msa:
             msa_indices = torch.randperm(m.shape[1])[: self.num_subsampled_msa]
             m = m[:, msa_indices]
             msa_mask = msa_mask[:, msa_indices]
+
+        # AF-sample2 MSA masking
+        if self.mask_msa and self.mask_rate_msa > 0.0:
+            g = torch.Generator(device=msa.device)
+            g.manual_seed(self.mask_seed_msa)
+            rand = torch.rand(msa.shape, generator=g, device=msa.device)
+            mask = (rand < self.mask_rate_msa) & (msa != const.token_ids["UNK"])
+            mask[:, 0, :] = False
+            msa = torch.where(mask, torch.full_like(msa, const.token_ids["UNK"]), msa)
 
         # Compute input projections
         m = self.msa_proj(m)
