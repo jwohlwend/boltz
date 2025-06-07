@@ -1,7 +1,7 @@
-from typing import Dict, Tuple
+from typing import Optional
 
-from fairscale.nn.checkpoint.checkpoint_activations import checkpoint_wrapper
 import torch
+from fairscale.nn.checkpoint.checkpoint_activations import checkpoint_wrapper
 from torch import Tensor, nn
 
 from boltz.data import const
@@ -81,7 +81,7 @@ class InputEmbedder(nn.Module):
                 structure_prediction=False,
             )
 
-    def forward(self, feats: Dict[str, Tensor]) -> Tensor:
+    def forward(self, feats: dict[str, Tensor]) -> Tensor:
         """Perform the forward pass.
 
         Parameters
@@ -129,7 +129,8 @@ class MSAModule(nn.Module):
         activation_checkpointing: bool = False,
         use_paired_feature: bool = False,
         offload_to_cpu: bool = False,
-        use_trifast: bool = False,
+        subsample_msa: bool = False,
+        num_subsampled_msa: int = 1024,
         **kwargs,
     ) -> None:
         """Initialize the MSA module.
@@ -165,6 +166,8 @@ class MSAModule(nn.Module):
         self.msa_dropout = msa_dropout
         self.z_dropout = z_dropout
         self.use_paired_feature = use_paired_feature
+        self.subsample_msa = subsample_msa
+        self.num_subsampled_msa = num_subsampled_msa
 
         self.s_proj = nn.Linear(s_input_dim, msa_s, bias=False)
         self.msa_proj = nn.Linear(
@@ -184,7 +187,6 @@ class MSAModule(nn.Module):
                             z_dropout,
                             pairwise_head_width,
                             pairwise_num_heads,
-                            use_trifast=use_trifast,
                         ),
                         offload_to_cpu=offload_to_cpu,
                     )
@@ -198,7 +200,6 @@ class MSAModule(nn.Module):
                         z_dropout,
                         pairwise_head_width,
                         pairwise_num_heads,
-                        use_trifast=use_trifast,
                     )
                 )
 
@@ -206,7 +207,8 @@ class MSAModule(nn.Module):
         self,
         z: Tensor,
         emb: Tensor,
-        feats: Dict[str, Tensor],
+        feats: dict[str, Tensor],
+        use_trifast: bool = False,
     ) -> Tensor:
         """Perform the forward pass.
 
@@ -216,7 +218,7 @@ class MSAModule(nn.Module):
             The pairwise embeddings
         emb : Tensor
             The input embeddings
-        feats : Dict[str, Tensor]
+        feats : dict[str, Tensor]
             Input features
 
         Returns
@@ -261,6 +263,11 @@ class MSAModule(nn.Module):
         else:
             m = torch.cat([msa, has_deletion, deletion_value], dim=-1)
 
+        if self.subsample_msa:
+            msa_indices = torch.randperm(m.shape[1])[: self.num_subsampled_msa]
+            m = m[:, msa_indices]
+            msa_mask = msa_mask[:, msa_indices]
+
         # Compute input projections
         m = self.msa_proj(m)
         m = m + self.s_proj(emb).unsqueeze(1)
@@ -277,6 +284,7 @@ class MSAModule(nn.Module):
                 chunk_size_transition_msa,
                 chunk_size_outer_product,
                 chunk_size_tri_attn,
+                use_trifast=use_trifast,
             )
         return z
 
@@ -292,7 +300,6 @@ class MSALayer(nn.Module):
         z_dropout: float,
         pairwise_head_width: int = 32,
         pairwise_num_heads: int = 4,
-        use_trifast: bool=False,
     ) -> None:
         """Initialize the MSA module.
 
@@ -314,7 +321,6 @@ class MSALayer(nn.Module):
 
         """
         super().__init__()
-        self.use_trifast = use_trifast
         self.msa_dropout = msa_dropout
         self.z_dropout = z_dropout
         self.msa_transition = Transition(dim=msa_s, hidden=msa_s * 4)
@@ -354,7 +360,8 @@ class MSALayer(nn.Module):
         chunk_size_transition_msa: int = None,
         chunk_size_outer_product: int = None,
         chunk_size_tri_attn: int = None,
-    ) -> Tuple[Tensor, Tensor]:
+        use_trifast: bool = False,
+    ) -> tuple[Tensor, Tensor]:
         """Perform the forward pass.
 
         Parameters
@@ -398,7 +405,7 @@ class MSALayer(nn.Module):
             z,
             mask=token_mask,
             chunk_size=chunk_size_tri_attn,
-            use_trifast=self.use_trifast,
+            use_trifast=use_trifast,
         )
 
         dropout = get_dropout_mask(self.z_dropout, z, self.training, columnwise=True)
@@ -406,7 +413,7 @@ class MSALayer(nn.Module):
             z,
             mask=token_mask,
             chunk_size=chunk_size_tri_attn,
-            use_trifast=self.use_trifast,
+            use_trifast=use_trifast,
         )
 
         z = z + self.z_transition(z, chunk_size_transition_z)
@@ -430,7 +437,6 @@ class PairformerModule(nn.Module):
         no_update_s: bool = False,
         no_update_z: bool = False,
         offload_to_cpu: bool = False,
-        use_trifast: bool = False,
         **kwargs,
     ) -> None:
         """Initialize the Pairformer module.
@@ -481,7 +487,6 @@ class PairformerModule(nn.Module):
                             pairwise_num_heads,
                             no_update_s,
                             False if i < num_blocks - 1 else no_update_z,
-                            use_trifast=use_trifast,
                         ),
                         offload_to_cpu=offload_to_cpu,
                     )
@@ -497,7 +502,6 @@ class PairformerModule(nn.Module):
                         pairwise_num_heads,
                         no_update_s,
                         False if i < num_blocks - 1 else no_update_z,
-                        use_trifast=use_trifast,
                     )
                 )
 
@@ -507,8 +511,9 @@ class PairformerModule(nn.Module):
         z: Tensor,
         mask: Tensor,
         pair_mask: Tensor,
-        chunk_size_tri_attn: int = None,
-    ) -> Tuple[Tensor, Tensor]:
+        chunk_size_tri_attn: Optional[int] = None,
+        use_trifast: bool = False,
+    ) -> tuple[Tensor, Tensor]:
         """Perform the forward pass.
 
         Parameters
@@ -538,7 +543,9 @@ class PairformerModule(nn.Module):
             chunk_size_tri_attn = None
 
         for layer in self.layers:
-            s, z = layer(s, z, mask, pair_mask, chunk_size_tri_attn)
+            s, z = layer(
+                s, z, mask, pair_mask, chunk_size_tri_attn, use_trifast=use_trifast
+            )
         return s, z
 
 
@@ -555,7 +562,6 @@ class PairformerLayer(nn.Module):
         pairwise_num_heads: int = 4,
         no_update_s: bool = False,
         no_update_z: bool = False,
-        use_trifast: bool = False,
     ) -> None:
         """Initialize the Pairformer module.
 
@@ -599,16 +605,15 @@ class PairformerLayer(nn.Module):
             self.transition_s = Transition(token_s, token_s * 4)
         self.transition_z = Transition(token_z, token_z * 4)
 
-        self.use_trifast = use_trifast
-
     def forward(
         self,
         s: Tensor,
         z: Tensor,
         mask: Tensor,
         pair_mask: Tensor,
-        chunk_size_tri_attn: int = None,
-    ) -> Tuple[Tensor, Tensor]:
+        chunk_size_tri_attn: Optional[int] = None,
+        use_trifast: bool = False,
+    ) -> tuple[Tensor, Tensor]:
         """Perform the forward pass."""
         # Compute pairwise stack
         dropout = get_dropout_mask(self.dropout, z, self.training)
@@ -622,7 +627,7 @@ class PairformerLayer(nn.Module):
             z,
             mask=pair_mask,
             chunk_size=chunk_size_tri_attn,
-            use_trifast=self.use_trifast,
+            use_trifast=use_trifast,
         )
 
         dropout = get_dropout_mask(self.dropout, z, self.training, columnwise=True)
@@ -630,7 +635,7 @@ class PairformerLayer(nn.Module):
             z,
             mask=pair_mask,
             chunk_size=chunk_size_tri_attn,
-            use_trifast=self.use_trifast,
+            use_trifast=use_trifast,
         )
 
         z = z + self.transition_z(z)

@@ -17,7 +17,9 @@ import importlib
 import math
 from typing import Callable, List, Optional, Tuple
 
+import torch
 from einops import rearrange
+from torch import nn
 
 from boltz.model.layers import initialize
 from boltz.model.layers.triangular_attention.utils import (
@@ -42,13 +44,6 @@ if fa_is_installed:
     from flash_attn.bert_padding import unpad_input
     from flash_attn.flash_attn_interface import flash_attn_unpadded_kvpacked_func
 
-
-trifast_is_installed = importlib.util.find_spec("trifast") is not None
-if trifast_is_installed:
-    from trifast import triangle_attention
-
-import torch
-from torch import nn
 
 DEFAULT_LMA_Q_CHUNK_SIZE = 1024
 DEFAULT_LMA_KV_CHUNK_SIZE = 4096
@@ -488,6 +483,7 @@ class Attention(nn.Module):
         if is_fp16_enabled():
             use_memory_efficient_kernel = False
 
+        trifast_is_usable = importlib.util.find_spec("trifast") is not None
         if use_memory_efficient_kernel:
             if len(biases) > 2:
                 raise ValueError(
@@ -512,8 +508,7 @@ class Attention(nn.Module):
             o = o.transpose(-2, -3)
         elif use_flash:
             o = _flash_attn(q, k, v, flash_mask)
-
-        elif use_trifast:
+        elif use_trifast and trifast_is_usable:
             o = _trifast_attn(q, k, v, biases)
 
         else:
@@ -685,6 +680,9 @@ def _trifast_attn(q, k, v, biases):
 
     # Make mask the right shape.
     mask = rearrange(mask, "b i () () j -> b i j").bool()
+
+    # Delay import to here to avoid initializing cuda too early
+    from trifast import triangle_attention
 
     o = triangle_attention(q, k, v, b, mask)
     o = rearrange(o, "b h i j d -> b i j h d")

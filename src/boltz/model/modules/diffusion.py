@@ -16,6 +16,7 @@ from boltz.model.loss.diffusion import (
     smooth_lddt_loss,
     weighted_rigid_align,
 )
+from boltz.model.modules.utils import center_random_augmentation
 from boltz.model.modules.encoders import (
     AtomAttentionDecoder,
     AtomAttentionEncoder,
@@ -104,7 +105,6 @@ class DiffusionModule(Module):
             Whether to offload the activations to CPU, by default False.
 
         """
-
         super().__init__()
 
         self.atoms_per_window_queries = atoms_per_window_queries
@@ -451,18 +451,20 @@ class AtomDiffusion(Module):
         atom_mask,
         num_sampling_steps=None,
         multiplicity=1,
+        max_parallel_samples=None,
         train_accumulate_token_repr=False,
         steering_args=None,
         **network_condition_kwargs,
     ):
-        potentials = get_potentials()
-        if steering_args["fk_steering"]:
+        if steering_args is not None and (steering_args["fk_steering"] or steering_args["guidance_update"]):
+            potentials = get_potentials()
+        if steering_args is not None and steering_args["fk_steering"]:
             multiplicity = multiplicity * steering_args["num_particles"]
             energy_traj = torch.empty((multiplicity, 0), device=self.device)
             resample_weights = torch.ones(multiplicity, device=self.device).reshape(
                 -1, steering_args["num_particles"]
             )
-        if steering_args["guidance_update"]:
+        if steering_args is not None and steering_args["guidance_update"]:
             scaled_guidance_update = torch.zeros(
                 (multiplicity, *atom_mask.shape[1:], 3),
                 dtype=torch.float32,
@@ -473,6 +475,7 @@ class AtomDiffusion(Module):
         atom_mask = atom_mask.repeat_interleave(multiplicity, 0)
 
         shape = (*atom_mask.shape, 3)
+        token_repr_shape = (multiplicity, network_condition_kwargs['feats']['token_index'].shape[1], 2 * self.token_s)
 
         # get the schedule, which is returned as (sigma, gamma) tuple, and pair up with the next sigma and gamma
         sigmas = self.sample_schedule(num_sampling_steps)
@@ -503,7 +506,7 @@ class AtomDiffusion(Module):
                     torch.einsum("bmd,bds->bms", atom_coords_denoised, random_R)
                     + random_tr
                 )
-            if steering_args["guidance_update"] and scaled_guidance_update is not None:
+            if steering_args is not None and steering_args["guidance_update"] and scaled_guidance_update is not None:
                 scaled_guidance_update = torch.einsum(
                     "bmd,bds->bms", scaled_guidance_update, random_R
                 )
@@ -517,18 +520,29 @@ class AtomDiffusion(Module):
             atom_coords_noisy = atom_coords + eps
 
             with torch.no_grad():
-                atom_coords_denoised, token_a = self.preconditioned_network_forward(
-                    atom_coords_noisy,
-                    t_hat,
-                    training=False,
-                    network_condition_kwargs=dict(
-                        multiplicity=multiplicity,
-                        model_cache=model_cache,
-                        **network_condition_kwargs,
-                    ),
-                )
+                atom_coords_denoised = torch.zeros_like(atom_coords_noisy)
+                token_a = torch.zeros(token_repr_shape).to(atom_coords_noisy)
 
-                if steering_args["fk_steering"] and (
+                sample_ids = torch.arange(multiplicity).to(atom_coords_noisy.device)
+                sample_ids_chunks = sample_ids.chunk(
+                    multiplicity % max_parallel_samples + 1
+                )
+                for sample_ids_chunk in sample_ids_chunks:
+                    atom_coords_denoised_chunk, token_a_chunk = \
+                          self.preconditioned_network_forward(
+                              atom_coords_noisy[sample_ids_chunk],
+                              t_hat,
+                              training=False,
+                              network_condition_kwargs=dict(
+                                multiplicity=sample_ids_chunk.numel(),
+                                model_cache=model_cache,
+                                **network_condition_kwargs,
+                            ),
+                        )
+                    atom_coords_denoised[sample_ids_chunk] = atom_coords_denoised_chunk
+                    token_a[sample_ids_chunk] = token_a_chunk
+
+                if steering_args is not None and steering_args["fk_steering"] and (
                     (
                         step_idx % steering_args["fk_resampling_interval"] == 0
                         and noise_var > 0
@@ -572,6 +586,7 @@ class AtomDiffusion(Module):
 
                 # Compute guidance update to x_0 prediction
                 if (
+                    steering_args is not None and 
                     steering_args["guidance_update"]
                     and step_idx < num_sampling_steps - 1
                 ):
@@ -602,7 +617,7 @@ class AtomDiffusion(Module):
                         / t_hat
                     )
 
-                if steering_args["fk_steering"] and (
+                if steering_args is not None and steering_args["fk_steering"] and (
                     (
                         step_idx % steering_args["fk_resampling_interval"] == 0
                         and noise_var > 0

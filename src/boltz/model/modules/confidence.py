@@ -1,9 +1,9 @@
 import torch
-from torch import nn
 import torch.nn.functional as F
+from torch import nn
 
-from boltz.data import const
 import boltz.model.layers.initialize as init
+from boltz.data import const
 from boltz.model.modules.confidence_utils import (
     compute_aggregated_metric,
     compute_ptms,
@@ -191,6 +191,7 @@ class ConfidenceModule(nn.Module):
         multiplicity=1,
         s_diffusion=None,
         run_sequentially=False,
+        use_trifast: bool = False,
     ):
         if run_sequentially and multiplicity > 1:
             assert z.shape[0] == 1, "Not supported with batch size > 1"
@@ -209,6 +210,7 @@ class ConfidenceModule(nn.Module):
                         if s_diffusion is not None
                         else None,
                         run_sequentially=False,
+                        use_trifast=use_trifast,
                     )
                 )
 
@@ -297,14 +299,18 @@ class ConfidenceModule(nn.Module):
         pair_mask = mask[:, :, None] * mask[:, None, :]
 
         if self.imitate_trunk:
-            z = z + self.msa_module(z, s_inputs, feats)
+            z = z + self.msa_module(z, s_inputs, feats, use_trifast=use_trifast)
 
-            s, z = self.pairformer_module(s, z, mask=mask, pair_mask=pair_mask)
+            s, z = self.pairformer_module(
+                s, z, mask=mask, pair_mask=pair_mask, use_trifast=use_trifast
+            )
 
             s, z = self.final_s_norm(s), self.final_z_norm(z)
 
         else:
-            s_t, z_t = self.pairformer_stack(s, z, mask=mask, pair_mask=pair_mask)
+            s_t, z_t = self.pairformer_stack(
+                s, z, mask=mask, pair_mask=pair_mask, use_trifast=use_trifast
+            )
 
             # AF3 has residual connections, we remove them
             s = s_t
@@ -356,8 +362,8 @@ class ConfidenceHeads(nn.Module):
             The number of pae bins, by default 64.
         compute_pae : bool
             Whether to compute pae, by default False
-        """
 
+        """
         super().__init__()
         self.max_num_atoms_per_token = 23
         self.to_pde_logits = LinearNoBias(token_z, num_pde_bins)

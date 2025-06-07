@@ -10,9 +10,9 @@ from torch.utils.data import DataLoader
 
 from boltz.data.crop.cropper import Cropper
 from boltz.data.feature.featurizer import BoltzFeaturizer
-from boltz.data.feature.pad import pad_to_max
 from boltz.data.feature.symmetry import get_symmetries
 from boltz.data.filter.dynamic.filter import DynamicFilter
+from boltz.data.pad import pad_to_max
 from boltz.data.sample.sampler import Sample, Sampler
 from boltz.data.tokenize.tokenizer import Tokenizer
 from boltz.data.types import MSA, Connection, Input, Manifest, Record, Structure

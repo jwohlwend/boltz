@@ -1,23 +1,36 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 import click
 import numpy as np
+from Bio import Align
+from chembl_structure_pipeline.exclude_flag import exclude_flag
+from chembl_structure_pipeline.standardizer import standardize_mol
 from rdkit import Chem, rdBase
 from rdkit.Chem import AllChem, HybridizationType
+from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.rdchem import BondStereo, Conformer, Mol
 from rdkit.Chem.rdDistGeom import GetMoleculeBoundsMatrix
 from rdkit.Chem.rdMolDescriptors import CalcNumHeavyAtoms
+from scipy.optimize import linear_sum_assignment
 
 from boltz.data import const
+from boltz.data.mol import load_molecules
+from boltz.data.parse.mmcif import parse_mmcif
 from boltz.data.types import (
+    AffinityInfo,
     Atom,
+    AtomV2,
     Bond,
+    BondV2,
     Chain,
     ChainInfo,
     ChiralAtomConstraint,
     Connection,
+    Coords,
+    Ensemble,
     InferenceOptions,
     Interface,
     PlanarBondConstraint,
@@ -30,7 +43,9 @@ from boltz.data.types import (
     StereoBondConstraint,
     Structure,
     StructureInfo,
+    StructureV2,
     Target,
+    TemplateInfo,
 )
 
 ####################################################################################################
@@ -137,9 +152,22 @@ class ParsedChain:
     """A parsed chain object."""
 
     entity: str
-    type: str
+    type: int
     residues: list[ParsedResidue]
     cyclic_period: int
+    sequence: Optional[str] = None
+    affinity: Optional[bool] = False
+    affinity_mw: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class Alignment:
+    """A parsed alignment object."""
+
+    query_st: int
+    query_en: int
+    template_st: int
+    template_en: int
 
 
 ####################################################################################################
@@ -261,6 +289,13 @@ def get_conformer(mol: Mol) -> Conformer:
         except KeyError:  # noqa: PERF203
             pass
 
+    # Fallback to boltz2 format
+    conf_ids = [int(conf.GetId()) for conf in mol.GetConformers()]
+    if len(conf_ids) > 0:
+        conf_id = conf_ids[0]
+        conformer = mol.GetConformer(conf_id)
+        return conformer
+
     msg = "Conformer does not exist."
     raise ValueError(msg)
 
@@ -268,6 +303,10 @@ def get_conformer(mol: Mol) -> Conformer:
 def compute_geometry_constraints(mol: Mol, idx_map):
     if mol.GetNumAtoms() <= 1:
         return []
+
+    # Ensure RingInfo is initialized
+    mol.UpdatePropertyCache(strict=False)
+    Chem.GetSymmSSSR(mol)  # Compute ring information
 
     bounds = GetMoleculeBoundsMatrix(
         mol,
@@ -442,16 +481,159 @@ def compute_flatness_constraints(mol, idx_map):
     )
 
 
+def get_global_alignment_score(query: str, template: str) -> float:
+    """Align a sequence to a template.
+
+    Parameters
+    ----------
+    query : str
+        The query sequence.
+    template : str
+        The template sequence.
+
+    Returns
+    -------
+    float
+        The global alignment score.
+
+    """
+    aligner = Align.PairwiseAligner(scoring="blastp")
+    aligner.mode = "global"
+    score = aligner.align(query, template)[0].score
+    return score
+
+
+def get_local_alignments(query: str, template: str) -> list[Alignment]:
+    """Align a sequence to a template.
+
+    Parameters
+    ----------
+    query : str
+        The query sequence.
+    template : str
+        The template sequence.
+
+    Returns
+    -------
+    Alignment
+        The alignment between the query and template.
+
+    """
+    aligner = Align.PairwiseAligner(scoring="blastp")
+    aligner.mode = "local"
+    aligner.open_gap_score = -1000
+    aligner.extend_gap_score = -1000
+
+    alignments = []
+    for result in aligner.align(query, template):
+        coordinates = result.coordinates
+        alignment = Alignment(
+            query_st=int(coordinates[0][0]),
+            query_en=int(coordinates[0][1]),
+            template_st=int(coordinates[1][0]),
+            template_en=int(coordinates[1][1]),
+        )
+        alignments.append(alignment)
+
+    return alignments
+
+
+def get_template_records_from_search(
+    template_id: str,
+    chain_ids: list[str],
+    sequences: dict[str, str],
+    template_chain_ids: list[str],
+    template_sequences: dict[str, str],
+) -> list[TemplateInfo]:
+    """Get template records from an alignment."""
+    # Compute pairwise scores
+    score_matrix = []
+    for chain_id in chain_ids:
+        row = []
+        for template_chain_id in template_chain_ids:
+            chain_seq = sequences[chain_id]
+            template_seq = template_sequences[template_chain_id]
+            score = get_global_alignment_score(chain_seq, template_seq)
+            row.append(score)
+        score_matrix.append(row)
+
+    # Find optimal mapping
+    row_ind, col_ind = linear_sum_assignment(score_matrix, maximize=True)
+
+    # Get alignment records
+    template_records = []
+
+    for row_idx, col_idx in zip(row_ind, col_ind):
+        chain_id = chain_ids[row_idx]
+        template_chain_id = template_chain_ids[col_idx]
+        chain_seq = sequences[chain_id]
+        template_seq = template_sequences[template_chain_id]
+        alignments = get_local_alignments(chain_seq, template_seq)
+
+        for alignment in alignments:
+            template_record = TemplateInfo(
+                name=template_id,
+                query_chain=chain_id,
+                query_st=alignment.query_st,
+                query_en=alignment.query_en,
+                template_chain=template_chain_id,
+                template_st=alignment.template_st,
+                template_en=alignment.template_en,
+            )
+            template_records.append(template_record)
+
+    return template_records
+
+
+def get_template_records_from_matching(
+    template_id: str,
+    chain_ids: list[str],
+    sequences: dict[str, str],
+    template_chain_ids: list[str],
+    template_sequences: dict[str, str],
+) -> list[TemplateInfo]:
+    """Get template records from a given matching."""
+    template_records = []
+
+    for chain_id, template_chain_id in zip(chain_ids, template_chain_ids):
+        # Align the sequences
+        chain_seq = sequences[chain_id]
+        template_seq = template_sequences[template_chain_id]
+        alignments = get_local_alignments(chain_seq, template_seq)
+        for alignment in alignments:
+            template_record = TemplateInfo(
+                name=template_id,
+                query_chain=chain_id,
+                query_st=alignment.query_st,
+                query_en=alignment.query_en,
+                template_chain=template_chain_id,
+                template_st=alignment.template_st,
+                template_en=alignment.template_en,
+            )
+            template_records.append(template_record)
+
+    return template_records
+
+
+def get_mol(ccd: str, mols: dict, moldir: str) -> Mol:
+    """Get mol from CCD code.
+
+    Return mol with ccd from mols if it is in mols. Otherwise load it from moldir,
+    add it to mols, and return the mol.
+    """
+    mol = mols.get(ccd)
+    if mol is None:
+        mol = load_molecules(moldir, [ccd])[ccd]
+    return mol
+
+
 ####################################################################################################
 # PARSING
 ####################################################################################################
 
 
 def parse_ccd_residue(
-    name: str,
-    ref_mol: Mol,
-    res_idx: int,
-    remove_oxt_atom: bool = False
+    name: str, ref_mol: Mol, res_idx: int, remove_oxt_atom: bool = False
 ) -> Optional[ParsedResidue]:
     """Parse an MMCIF ligand.
 
@@ -475,10 +657,11 @@ def parse_ccd_residue(
     """
     unk_chirality = const.chirality_type_ids[const.unk_chirality_type]
 
-    # Check if this is a single atom CCD residue
+    # Check if this is a single heavy atom CCD residue
     if CalcNumHeavyAtoms(ref_mol) == 1:
         # Remove hydrogens
         ref_mol = AllChem.RemoveHs(ref_mol, sanitize=False)
+
         pos = (0, 0, 0)
         ref_atom = ref_mol.GetAtoms()[0]
         chirality_type = const.chirality_type_ids.get(
@@ -525,7 +708,7 @@ def parse_ccd_residue(
         atom_name = atom.GetProp("name")
 
         # Drop OXT atoms for non-canonical amino acids.
-        if remove_oxt_atom and atom_name == 'OXT':
+        if remove_oxt_atom and atom_name == "OXT":
             continue
 
         charge = atom.GetFormalCharge()
@@ -553,7 +736,7 @@ def parse_ccd_residue(
             )
         )
         idx_map[i] = atom_idx
-        atom_idx += 1  # noqa: SIM113
+        atom_idx += 1
 
     # Load bonds
     bonds = []
@@ -604,10 +787,12 @@ def parse_ccd_residue(
 
 def parse_polymer(
     sequence: list[str],
+    raw_sequence: str,
     entity: str,
     chain_type: str,
     components: dict[str, Mol],
     cyclic: bool,
+    mol_dir: Path,
 ) -> Optional[ParsedChain]:
     """Process a sequence into a chain object.
 
@@ -649,7 +834,7 @@ def parse_polymer(
 
         # Handle non-standard residues
         if res_corrected not in ref_res:
-            ref_mol = components[res_corrected]
+            ref_mol = get_mol(res_corrected, components, mol_dir)
             residue = parse_ccd_residue(
                 name=res_corrected,
                 ref_mol=ref_mol,
@@ -660,7 +845,7 @@ def parse_polymer(
             continue
 
         # Load ref residue
-        ref_mol = components[res_corrected]
+        ref_mol = get_mol(res_corrected, components, mol_dir)
         ref_mol = AllChem.RemoveHs(ref_mol, sanitize=False)
         ref_conformer = get_conformer(ref_mol)
 
@@ -727,13 +912,29 @@ def parse_polymer(
         residues=parsed,
         type=chain_type,
         cyclic_period=cyclic_period,
+        sequence=raw_sequence,
     )
+
+
+def token_spec_to_ids(
+    chain_name, residue_index_or_atom_name, chain_to_idx, atom_idx_map, chains
+):
+    # TODO: unfinished
+    if chains[chain_name].type == const.chain_type_ids["NONPOLYMER"]:
+        # Non-polymer chains are indexed by atom name
+        _, _, atom_idx = atom_idx_map[(chain_name, 0, residue_index_or_atom_name)]
+        return (chain_to_idx[chain_name], atom_idx)
+    else:
+        # Polymer chains are indexed by residue index
+        contacts.append((chain_to_idx[chain_name], residue_index_or_atom_name - 1))
 
 
 def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     name: str,
     schema: dict,
     ccd: Mapping[str, Mol],
+    mol_dir: Optional[Path] = None,
+    boltz_2: bool = False,
 ) -> Target:
     """Parse a Boltz input yaml / json.
 
@@ -755,9 +956,6 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         - ligand:
             id: E
             smiles: "CC1=CC=CC=C1"
-        - ligand:
-            id: [F, G]
-            ccd: []
     constraints:
         - bond:
             atom1: [A, 1, CA]
@@ -765,6 +963,16 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         - pocket:
             binder: E
             contacts: [[B, 1], [B, 2]]
+            max_distance: 6
+        - contact:
+            token1: [A, 1]
+            token2: [B, 1]
+            max_distance: 6
+    templates:
+        - cif: path/to/template.cif
+    properties:
+        - affinity:
+            binder: E
 
     Parameters
     ----------
@@ -774,6 +982,10 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         The input schema.
     components : dict
         Dictionary of CCD components.
+    mol_dir: Path
+        Path to the directory containing the molecules.
+    boltz2: bool
+        Whether to parse the input for Boltz2.
 
     Returns
     -------
@@ -792,6 +1004,8 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
 
     # First group items that have the same type, sequence and modifications
     items_to_group = {}
+    chain_name_to_entity_type = {}
+
     for item in schema["sequences"]:
         # Get entity type
         entity_type = next(iter(item.keys())).lower()
@@ -809,17 +1023,78 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 seq = str(item[entity_type]["smiles"])
             else:
                 seq = str(item[entity_type]["ccd"])
+
+        # Group items by entity
         items_to_group.setdefault((entity_type, seq), []).append(item)
 
+        # Map chain names to entity types
+        chain_names = item[entity_type]["id"]
+        chain_names = [chain_names] if isinstance(chain_names, str) else chain_names
+        for chain_name in chain_names:
+            chain_name_to_entity_type[chain_name] = entity_type
+
+    # Check if any affinity ligand is present
+    affinity_ligands = set()
+    properties = schema.get("properties", [])
+    if properties and not boltz_2:
+        msg = "Affinity prediction is only supported for Boltz2!"
+        raise ValueError(msg)
+
+    for prop in properties:
+        prop_type = next(iter(prop.keys())).lower()
+        if prop_type == "affinity":
+            binder = prop["affinity"]["binder"]
+            if not isinstance(binder, str):
+                # TODO: support multi residue ligands and ccd's
+                msg = "Binder must be a single chain."
+                raise ValueError(msg)
+
+            if binder not in chain_name_to_entity_type:
+                msg = f"Could not find binder with name {binder} in the input!"
+                raise ValueError(msg)
+
+            if chain_name_to_entity_type[binder] != "ligand":
+                msg = (
+                    f"Chain {binder} is not a ligand! "
+                    "Affinity is currently only supported for ligands."
+                )
+                raise ValueError(msg)
+
+            affinity_ligands.add(binder)
+
+    # Check only one affinity ligand is present
+    if len(affinity_ligands) > 1:
+        msg = "Only one affinity ligand is currently supported!"
+        raise ValueError(msg)
+
     # Go through entities and parse them
+    extra_mols: dict[str, Mol] = {}
     chains: dict[str, ParsedChain] = {}
     chain_to_msa: dict[str, str] = {}
     entity_to_seq: dict[str, str] = {}
     is_msa_custom = False
     is_msa_auto = False
+    ligand_id = 1
     for entity_id, items in enumerate(items_to_group.values()):
         # Get entity type and sequence
         entity_type = next(iter(items[0].keys())).lower()
+
+        # Get ids
+        ids = []
+        for item in items:
+            if isinstance(item[entity_type]["id"], str):
+                ids.append(item[entity_type]["id"])
+            elif isinstance(item[entity_type]["id"], list):
+                ids.extend(item[entity_type]["id"])
+
+        # Check if any affinity ligand is present
+        if len(ids) == 1:
+            affinity = ids[0] in affinity_ligands
+        elif (len(ids) > 1) and any(x in affinity_ligands for x in ids):
+            msg = "Cannot compute affinity for a ligand that has multiple copies!"
+            raise ValueError(msg)
+        else:
+            affinity = False
 
         # Ensure all the items share the same msa
         msa = -1
@@ -872,11 +1147,11 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             unk_token = const.unk_token[entity_type.upper()]
 
             # Extract sequence
-            seq = items[0][entity_type]["sequence"]
-            entity_to_seq[entity_id] = seq
+            raw_seq = items[0][entity_type]["sequence"]
+            entity_to_seq[entity_id] = raw_seq
 
             # Convert sequence to tokens
-            seq = [token_map.get(c, unk_token) for c in list(seq)]
+            seq = [token_map.get(c, unk_token) for c in list(raw_seq)]
 
             # Apply modifications
             for mod in items[0][entity_type].get("modifications", []):
@@ -889,28 +1164,38 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             # Parse a polymer
             parsed_chain = parse_polymer(
                 sequence=seq,
+                raw_sequence=raw_seq,
                 entity=entity_id,
                 chain_type=chain_type,
                 components=ccd,
                 cyclic=cyclic,
+                mol_dir=mol_dir,
             )
 
         # Parse a non-polymer
         elif (entity_type == "ligand") and "ccd" in (items[0][entity_type]):
             seq = items[0][entity_type]["ccd"]
+
             if isinstance(seq, str):
                 seq = [seq]
 
+            if affinity and len(seq) > 1:
+                msg = "Cannot compute affinity for multi residue ligands!"
+                raise ValueError(msg)
+
             residues = []
+            affinity_mw = None
             for res_idx, code in enumerate(seq):
-                if code not in ccd:
-                    msg = f"CCD component {code} not found!"
-                    raise ValueError(msg)
+                # Get mol
+                ref_mol = get_mol(code, ccd, mol_dir)
+
+                if affinity:
+                    affinity_mw = AllChem.Descriptors.MolWt(ref_mol)
 
                 # Parse residue
                 residue = parse_ccd_residue(
                     name=code,
-                    ref_mol=ccd[code],
+                    ref_mol=ref_mol,
                     res_idx=res_idx,
                 )
                 residues.append(residue)
@@ -921,6 +1206,9 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 residues=residues,
                 type=const.chain_type_ids["NONPOLYMER"],
                 cyclic_period=0,
+                sequence=None,
+                affinity=affinity,
+                affinity_mw=affinity_mw,
             )
 
             assert not items[0][entity_type].get(
@@ -929,6 +1217,10 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
 
         elif (entity_type == "ligand") and ("smiles" in items[0][entity_type]):
             seq = items[0][entity_type]["smiles"]
+
+            if affinity:
+                seq = standardize(seq)
+
             mol = AllChem.MolFromSmiles(seq)
             mol = AllChem.AddHs(mol)
 
@@ -937,9 +1229,11 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             for atom, can_idx in zip(mol.GetAtoms(), canonical_order):
                 atom_name = atom.GetSymbol().upper() + str(can_idx + 1)
                 if len(atom_name) > 4:
-                    raise ValueError(
-                        f"{seq} has an atom with a name longer than 4 characters: {atom_name}"
+                    msg = (
+                        f"{seq} has an atom with a name longer than "
+                        f"4 characters: {atom_name}."
                     )
+                    raise ValueError(msg)
                 atom.SetProp("name", atom_name)
 
             success = compute_3d_conformer(mol)
@@ -947,16 +1241,24 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 msg = f"Failed to compute 3D conformer for {seq}"
                 raise ValueError(msg)
 
+            mol_no_h = AllChem.RemoveHs(mol, sanitize=False)
+            affinity_mw = AllChem.Descriptors.MolWt(mol_no_h) if affinity else None
+            extra_mols[f"LIG{ligand_id}"] = mol_no_h
             residue = parse_ccd_residue(
-                name="LIG",
+                name=f"LIG{ligand_id}",
                 ref_mol=mol,
                 res_idx=0,
             )
+
+            ligand_id += 1
             parsed_chain = ParsedChain(
                 entity=entity_id,
                 residues=[residue],
                 type=const.chain_type_ids["NONPOLYMER"],
                 cyclic_period=0,
+                sequence=None,
+                affinity=affinity,
+                affinity_mw=affinity_mw,
             )
 
             assert not items[0][entity_type].get(
@@ -991,6 +1293,8 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     bond_data = []
     res_data = []
     chain_data = []
+    protein_chains = set()
+    affinity_info = None
 
     rdkit_bounds_constraint_data = []
     chiral_atom_constraint_data = []
@@ -1013,6 +1317,21 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         # Compute number of atoms and residues
         res_num = len(chain.residues)
         atom_num = sum(len(res.atoms) for res in chain.residues)
+
+        # Save protein chains for later
+        if chain.type == const.chain_type_ids["PROTEIN"]:
+            protein_chains.add(chain_name)
+
+        # Add affinity info
+        if chain.affinity and affinity_info is not None:
+            msg = "Cannot compute affinity for multiple ligands!"
+            raise ValueError(msg)
+
+        if chain.affinity:
+            affinity_info = AffinityInfo(
+                chain_id=asym_id,
+                mw=chain.affinity_mw,
+            )
 
         # Find all copies of this chain in the assembly
         entity_id = int(chain.entity)
@@ -1124,7 +1443,17 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             for bond in res.bonds:
                 atom_1 = atom_idx + bond.atom_1
                 atom_2 = atom_idx + bond.atom_2
-                bond_data.append((atom_1, atom_2, bond.type))
+                bond_data.append(
+                    (
+                        asym_id,
+                        asym_id,
+                        res_idx,
+                        res_idx,
+                        atom_1,
+                        atom_2,
+                        bond.type,
+                    )
+                )
 
             for atom in res.atoms:
                 # Add atom to map
@@ -1137,7 +1466,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 # Add atom to data
                 atom_data.append(
                     (
-                        convert_atom_name(atom.name),
+                        atom.name,
                         atom.element,
                         atom.charge,
                         atom.coords,
@@ -1152,8 +1481,8 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
 
     # Parse constraints
     connections = []
-    pocket_binders = []
-    pocket_residues = []
+    pocket_constraints = []
+    contact_constraints = []
     constraints = schema.get("constraints", [])
     for constraint in constraints:
         if "bond" in constraint:
@@ -1174,40 +1503,170 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 msg = f"Pocket constraint was not properly specified"
                 raise ValueError(msg)
 
+            if len(pocket_constraints) > 0 and not boltz_2:
+                msg = f"Only one pocket binders is supported in Boltz-1!"
+                raise ValueError(msg)
+
+            max_distance = constraint["pocket"].get("max_distance", 6.0)
+            if max_distance != 6.0 and not boltz_2:
+                msg = f"Max distance != 6.0 is not supported in Boltz-1!"
+                raise ValueError(msg)
+
             binder = constraint["pocket"]["binder"]
-            contacts = constraint["pocket"]["contacts"]
+            binder = chain_to_idx[binder]
 
-            if len(pocket_binders) > 0:
-                if pocket_binders[-1] != chain_to_idx[binder]:
-                    msg = f"Only one pocket binders is supported!"
-                    raise ValueError(msg)
-                else:
-                    pocket_residues[-1].extend(
-                        [
-                            (chain_to_idx[chain_name], residue_index - 1)
-                            for chain_name, residue_index in contacts
-                        ]
-                    )
-
-            else:
-                pocket_binders.append(chain_to_idx[binder])
-                pocket_residues.extend(
-                    [
-                        (chain_to_idx[chain_name], residue_index - 1)
-                        for chain_name, residue_index in contacts
+            contacts = []
+            for chain_name, residue_index_or_atom_name in constraint["pocket"][
+                "contacts"
+            ]:
+                if chains[chain_name].type == const.chain_type_ids["NONPOLYMER"]:
+                    # Non-polymer chains are indexed by atom name
+                    _, _, atom_idx = atom_idx_map[
+                        (chain_name, 0, residue_index_or_atom_name)
                     ]
-                )
+                    contact = (chain_to_idx[chain_name], atom_idx)
+                else:
+                    # Polymer chains are indexed by residue index
+                    contact = (chain_to_idx[chain_name], residue_index_or_atom_name - 1)
+                contacts.append(contact)
+
+            pocket_constraints.append((binder, contacts, max_distance))
+        elif "contact" in constraint:
+            if (
+                "token1" not in constraint["contact"]
+                or "token2" not in constraint["contact"]
+            ):
+                msg = f"Contact constraint was not properly specified"
+                raise ValueError(msg)
+
+            if not boltz_2:
+                msg = f"Contact constraint is not supported in Boltz-1!"
+                raise ValueError(msg)
+
+            max_distance = constraint["contact"].get("max_distance", 6.0)
+
+            chain_name1, residue_index_or_atom_name1 = constraint["contact"]["token1"]
+            if chains[chain_name1].type == const.chain_type_ids["NONPOLYMER"]:
+                # Non-polymer chains are indexed by atom name
+                _, _, atom_idx = atom_idx_map[
+                    (chain_name1, 0, residue_index_or_atom_name1)
+                ]
+                token1 = (chain_to_idx[chain_name1], atom_idx)
+            else:
+                # Polymer chains are indexed by residue index
+                token1 = (chain_to_idx[chain_name1], residue_index_or_atom_name1 - 1)
+
+            pocket_constraints.append((binder, contacts, max_distance))
         else:
             msg = f"Invalid constraint: {constraint}"
             raise ValueError(msg)
 
+    # Get protein sequences in this YAML
+    protein_seqs = {name: chains[name].sequence for name in protein_chains}
+
+    # Parse templates
+    template_schema = schema.get("templates", [])
+    if template_schema and not boltz_2:
+        msg = "Templates are not supported in Boltz 1.0!"
+        raise ValueError(msg)
+
+    templates = {}
+    template_records = []
+    for template in template_schema:
+        if "cif" not in template:
+            msg = "Template was not properly specified, missing CIF path!"
+            raise ValueError(msg)
+
+        path = template["cif"]
+        template_id = Path(path).stem
+        chain_ids = template.get("chain_id", None)
+        template_chain_ids = template.get("template_id", None)
+
+        # Check validity of input
+        matched = False
+
+        if chain_ids is not None and not isinstance(chain_ids, list):
+            chain_ids = [chain_ids]
+        if template_chain_ids is not None and not isinstance(template_chain_ids, list):
+            template_chain_ids = [template_chain_ids]
+
+        if (
+            template_chain_ids is not None
+            and chain_ids is not None
+            and len(template_chain_ids) != len(chain_ids)
+        ):
+            matched = True
+            if len(template_chain_ids) != len(chain_ids):
+                msg = (
+                    "When providing both the chain_id and template_id, the number of"
+                    "template_ids provided must match the number of chain_ids!"
+                )
+                raise ValueError(msg)
+
+        # Get relevant chains ids
+        if chain_ids is None:
+            chain_ids = list(protein_chains)
+
+        for chain_id in chain_ids:
+            if chain_id not in protein_chains:
+                msg = (
+                    f"Chain {chain_id} assigned for template"
+                    f"{template_id} is not one of the protein chains!"
+                )
+                raise ValueError(msg)
+
+        # Get relevant template chain ids
+        parsed_template = parse_mmcif(
+            path,
+            mols=ccd,
+            moldir=mol_dir,
+            use_assembly=False,
+            compute_interfaces=False,
+        )
+        template_proteins = {
+            str(c["name"])
+            for c in parsed_template.data.chains
+            if c["mol_type"] == const.chain_type_ids["PROTEIN"]
+        }
+        if template_chain_ids is None:
+            template_chain_ids = list(template_proteins)
+
+        for chain_id in template_chain_ids:
+            if chain_id not in template_proteins:
+                msg = (
+                    f"Template chain {chain_id} assigned for template"
+                    f"{template_id} is not one of the protein chains!"
+                )
+                raise ValueError(msg)
+
+        # Compute template records
+        if matched:
+            template_records.extend(
+                get_template_records_from_matching(
+                    template_id=template_id,
+                    chain_ids=chain_ids,
+                    sequences=protein_seqs,
+                    template_chain_ids=template_chain_ids,
+                    template_sequences=parsed_template.sequences,
+                )
+            )
+        else:
+            template_records.extend(
+                get_template_records_from_search(
+                    template_id=template_id,
+                    chain_ids=chain_ids,
+                    sequences=protein_seqs,
+                    template_chain_ids=template_chain_ids,
+                    template_sequences=parsed_template.sequences,
+                )
+            )
+        # Save template
+        templates[template_id] = parsed_template.data
+
     # Convert into datatypes
-    atoms = np.array(atom_data, dtype=Atom)
-    bonds = np.array(bond_data, dtype=Bond)
     residues = np.array(res_data, dtype=Residue)
     chains = np.array(chain_data, dtype=Chain)
     interfaces = np.array([], dtype=Interface)
-    connections = np.array(connections, dtype=Connection)
     mask = np.ones(len(chain_data), dtype=bool)
     rdkit_bounds_constraints = np.array(
         rdkit_bounds_constraint_data, dtype=RDKitBoundsConstraint
@@ -1228,15 +1687,40 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         planar_ring_6_constraint_data, dtype=PlanarRing6Constraint
     )
 
-    data = Structure(
-        atoms=atoms,
-        bonds=bonds,
-        residues=residues,
-        chains=chains,
-        connections=connections,
-        interfaces=interfaces,
-        mask=mask,
-    )
+    if boltz_2:
+        atom_data = [(a[0], a[3], a[5], 0.0, 1.0) for a in atom_data]
+        connections = [(*c, const.bond_type_ids["COVALENT"]) for c in connections]
+        bond_data = bond_data + connections
+        atoms = np.array(atom_data, dtype=AtomV2)
+        bonds = np.array(bond_data, dtype=BondV2)
+        coords = [(x,) for x in atoms["coords"]]
+        coords = np.array(coords, Coords)
+        ensemble = np.array([(0, len(coords))], dtype=Ensemble)
+        data = StructureV2(
+            atoms=atoms,
+            bonds=bonds,
+            residues=residues,
+            chains=chains,
+            interfaces=interfaces,
+            mask=mask,
+            coords=coords,
+            ensemble=ensemble,
+        )
+    else:
+        bond_data = [(b[4], b[5], b[6]) for b in bond_data]
+        atom_data = [(convert_atom_name(a[0]), *a[1:]) for a in atom_data]
+        atoms = np.array(atom_data, dtype=Atom)
+        bonds = np.array(bond_data, dtype=Bond)
+        connections = np.array(connections, dtype=Connection)
+        data = Structure(
+            atoms=atoms,
+            bonds=bonds,
+            residues=residues,
+            chains=chains,
+            connections=connections,
+            interfaces=interfaces,
+            mask=mask,
+        )
 
     # Create metadata
     struct_info = StructureInfo(num_chains=len(chains))
@@ -1254,14 +1738,15 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         )
         chain_infos.append(chain_info)
 
-    options = InferenceOptions(binders=pocket_binders, pocket=pocket_residues)
-
+    options = InferenceOptions(pocket_constraints=pocket_constraints)
     record = Record(
         id=name,
         structure=struct_info,
         chains=chain_infos,
         interfaces=[],
         inference_options=options,
+        templates=template_records,
+        affinity=affinity_info,
     )
 
     residue_constraints = ResidueConstraints(
@@ -1278,4 +1763,34 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         structure=data,
         sequences=entity_to_seq,
         residue_constraints=residue_constraints,
+        templates=templates,
+        extra_mols=extra_mols,
     )
+
+
+def standardize(smiles: str) -> Optional[str]:
+    """Standardize a molecule and return its SMILES and a flag indicating whether the molecule is valid.
+    This version has exception handling, which the original in mol-finder/data doesn't have. I didn't change the mol-finder/data
+    since there are a lot of other functions that depend on it and I didn't want to break them.
+    """
+    LARGEST_FRAGMENT_CHOOSER = rdMolStandardize.LargestFragmentChooser()
+
+    mol = Chem.MolFromSmiles(smiles, sanitize=False)
+
+    exclude = exclude_flag(mol, includeRDKitSanitization=False)
+
+    if exclude:
+        raise ValueError("Molecule is excluded")
+
+    # Standardize with ChEMBL data curation pipeline. During standardization, the molecule may be broken
+    # Choose molecule with largest component
+    mol = LARGEST_FRAGMENT_CHOOSER.choose(mol)
+    # Standardize with ChEMBL data curation pipeline. During standardization, the molecule may be broken
+    mol = standardize_mol(mol)
+    smiles = Chem.MolToSmiles(mol)
+
+    # Check if molecule can be parsed by RDKit (in rare cases, the molecule may be broken during standardization)
+    if Chem.MolFromSmiles(smiles) is None:
+        raise ValueError("Molecule is broken")
+
+    return smiles

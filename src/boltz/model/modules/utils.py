@@ -4,11 +4,11 @@ from functools import partial
 from typing import Optional
 
 import torch
-from torch.nn import (
-    Module,
-    Linear,
-)
 import torch.nn.functional as F
+from torch.nn import (
+    Linear,
+    Module,
+)
 from torch.types import Device
 
 LinearNoBias = partial(Linear, bias=False)
@@ -29,23 +29,18 @@ def log(t, eps=1e-20):
 class SwiGLU(Module):
     def forward(
         self,
-        x,
-    ):
+        x,  #: Float['... d']
+    ):  # -> Float[' ... (d//2)']:
         x, gates = x.chunk(2, dim=-1)
         return F.silu(gates) * x
 
 
-def randomly_rotate(coords, return_second_coords=False, second_coords=None):
-    R = random_rotations(len(coords), coords.dtype, coords.device)
-
-    if return_second_coords:
-        return torch.einsum("bmd,bds->bms", coords, R), (
-            torch.einsum("bmd,bds->bms", second_coords, R)
-            if second_coords is not None
-            else None
-        )
-
-    return torch.einsum("bmd,bds->bms", coords, R)
+def center(atom_coords, atom_mask):
+    atom_mean = torch.sum(
+        atom_coords * atom_mask[:, :, None], dim=1, keepdim=True
+    ) / torch.sum(atom_mask[:, :, None], dim=1, keepdim=True)
+    atom_coords = atom_coords - atom_mean
+    return atom_coords
 
 
 def compute_random_augmentation(
@@ -58,6 +53,17 @@ def compute_random_augmentation(
     return R, random_trans
 
 
+def randomly_rotate(coords, return_second_coords=False, second_coords=None):
+    R = random_rotations(len(coords), coords.dtype, coords.device)
+
+    if return_second_coords:
+        return torch.einsum("bmd,bds->bms", coords, R), torch.einsum(
+            "bmd,bds->bms", second_coords, R
+        ) if second_coords is not None else None
+
+    return torch.einsum("bmd,bds->bms", coords, R)
+
+
 def center_random_augmentation(
     atom_coords,
     atom_mask,
@@ -67,27 +73,7 @@ def center_random_augmentation(
     return_second_coords=False,
     second_coords=None,
 ):
-    """Center and randomly augment the input coordinates.
-
-    Parameters
-    ----------
-    atom_coords : Tensor
-        The atom coordinates.
-    atom_mask : Tensor
-        The atom mask.
-    s_trans : float, optional
-        The translation factor, by default 1.0
-    augmentation : bool, optional
-        Whether to add rotational and translational augmentation the input, by default True
-    centering : bool, optional
-        Whether to center the input, by default True
-
-    Returns
-    -------
-    Tensor
-        The augmented atom coordinates.
-
-    """
+    """Algorithm 19"""
     if centering:
         atom_mean = torch.sum(
             atom_coords * atom_mask[:, :, None], dim=1, keepdim=True
