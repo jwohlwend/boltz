@@ -1,9 +1,10 @@
 import pytorch_lightning
 import torch
 import torch.nn as nn
-
+import pytest
 import unittest
-
+if not torch.cuda.is_available():
+    pytest.skip("no GPU available, skipping GPU-only tests", allow_module_level=True)
 from boltz.model.layers.triangular_attention.attention import TriangleAttention
 
 
