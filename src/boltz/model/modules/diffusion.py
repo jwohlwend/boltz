@@ -489,10 +489,9 @@ class AtomDiffusion(Module):
         feats = network_condition_kwargs.get("feats")
         ligand_mask = None
         if (not self.sample_ligand_conformation) and (feats is not None):
-            orig_coords = feats["coords"]
-            B, N, L = orig_coords.shape[0:3]
-            orig_coords = orig_coords.reshape(B * N, L, 3)
-            orig_coords = orig_coords.repeat_interleave(multiplicity // N, 0)
+            orig_coords = feats["ref_pos"]
+            orig_coords_rep = orig_coords.repeat_interleave(multiplicity, 0)
+
             ligand_mask = (
                 torch.bmm(
                     feats["atom_to_token"].float(),
@@ -505,7 +504,8 @@ class AtomDiffusion(Module):
             ligand_mask = ligand_mask.repeat_interleave(multiplicity, 0)
 
             atom_coords = init_sigma * torch.randn(shape, device=self.device)
-            atom_coords = atom_coords * (~ligand_mask.unsqueeze(-1)) + orig_coords * ligand_mask.unsqueeze(-1)
+            atom_coords = atom_coords * (~ligand_mask.unsqueeze(-1)) + orig_coords_rep * ligand_mask.unsqueeze(-1)
+
         else:
             atom_coords = init_sigma * torch.randn(shape, device=self.device)
         atom_coords_denoised = None
@@ -696,9 +696,25 @@ class AtomDiffusion(Module):
                 atom_coords_noisy
                 + self.step_scale * (sigma_t - t_hat) * denoised_over_sigma
             )
-
             if (ligand_mask is not None) and (not self.sample_ligand_conformation):
-                atom_coords_next = atom_coords_next * (~ligand_mask.unsqueeze(-1)) + atom_coords * ligand_mask.unsqueeze(-1)
+
+                if atom_coords_next.shape[0] == 1:
+                    ligand_mask = ligand_mask[0].unsqueeze(0)
+                entites = feats['entity_id']
+                unique_entities = torch.unique(entites)
+                for entity in unique_entities:
+                    subset_mask = torch.bmm(
+                        feats["atom_to_token"].float(),
+                        (entites == entity).unsqueeze(-1).float(),
+                    ).squeeze(-1).long()
+                    subset_mask = torch.logical_and(subset_mask, ligand_mask)
+
+                    if torch.sum(subset_mask) == 0:
+                        continue
+                    with torch.autocast("cuda", enabled=False):
+                        rigid_ligand = weighted_rigid_align(atom_coords.float(), atom_coords_next.float(), subset_mask.float(), subset_mask.float())
+                    
+                    atom_coords_next = atom_coords_next * (~subset_mask.unsqueeze(-1)) + rigid_ligand * subset_mask.unsqueeze(-1)
 
             atom_coords = atom_coords_next
 
