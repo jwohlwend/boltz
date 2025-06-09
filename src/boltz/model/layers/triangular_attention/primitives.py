@@ -39,11 +39,6 @@ if deepspeed_is_installed:
 if ds4s_is_installed:
     from deepspeed.ops.deepspeed4science import DS4Sci_EvoformerAttention
 
-fa_is_installed = importlib.util.find_spec("flash_attn") is not None
-if fa_is_installed:
-    from flash_attn.bert_padding import unpad_input
-    from flash_attn.flash_attn_interface import flash_attn_unpadded_kvpacked_func
-
 
 DEFAULT_LMA_Q_CHUNK_SIZE = 1024
 DEFAULT_LMA_KV_CHUNK_SIZE = 4096
@@ -695,8 +690,20 @@ def _trifast_attn(q, k, v, biases):
 
 @torch.jit.ignore
 def _flash_attn(q, k, v, kv_mask):
-    if not fa_is_installed:
+    # Delay import as FA is usually unselected, and API changes can cause import errors.
+    try:
+        from flash_attn.bert_padding import unpad_input
+    except ImportError:
         raise ValueError("_flash_attn requires that FlashAttention be installed")
+
+    try:
+        # flash-attn 1.x interface
+        from flash_attn.flash_attn_interface import flash_attn_unpadded_kvpacked_func
+    except ImportError:
+        # flash-attn 2.x renamed "unpadded" functions to "varlen"
+        from flash_attn.flash_attn_interface import (
+            flash_attn_varlen_kvpacked_func as flash_attn_unpadded_kvpacked_func,
+        )
 
     batch_dims = q.shape[:-3]
     no_heads, n, c = q.shape[-3:]
