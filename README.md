@@ -1,11 +1,12 @@
 <div align="center">
   <div>&nbsp;</div>
-  <img src="docs/boltz2_title.png" width="400"/>
+  <img src="docs/boltz2_title.png" width="300"/>
   <img src="https://model-gateway.boltz.bio/a.png?x-pxid=bce1627f-f326-4bff-8a97-45c6c3bc929d" />
 
 [Boltz-1](https://doi.org/10.1101/2024.11.19.624167) | [Boltz-2](https://bit.ly/boltz2-pdf) |
-[Slack](https://join.slack.com/t/boltz-community/shared_invite/zt-34qg8uink-V1LGdRRUf3avAUVaRvv93w) <br> <br>
+[Slack](https://boltz-community.slack.com/join/shared_invite/zt-37b5dxiuo-80rPSDp6lXjD1GTC4bxNIw#/shared-invite/email) <br> <br>
 </div>
+
 
 
 ![](docs/boltz1_pred_figure.png)
@@ -78,7 +79,7 @@ If you use this code or the models in your research, please cite the following p
 
 ```bibtex
 @article{passaro2025boltz2,
-  author = {Passaro, Saro and Corso, Gabriele and Wohlwend, Jeremy and Reveiz, Mateo and Thaler, Stephan and Somnath, Vignesh Ram and Portnoi, Tally and Roy, Julien and Stark, Hannes and Kwabi-Addo, David and Beaini, Dominique and Jaakkola, Tommi and Barzilay, Regina},
+  author = {Passaro, Saro and Corso, Gabriele and Wohlwend, Jeremy and Reveiz, Mateo and Thaler, Stephan and Somnath, Vignesh Ram and Getz, Noah and Portnoi, Tally and Roy, Julien and Stark, Hannes and Kwabi-Addo, David and Beaini, Dominique and Jaakkola, Tommi and Barzilay, Regina},
   title = {Boltz-2: Towards Accurate and Efficient Binding Affinity Prediction},
   year = {2025},
   doi = {},

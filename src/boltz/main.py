@@ -187,14 +187,12 @@ def download_boltz1(cache: Path) -> None:
         )
         for i, url in enumerate(BOLTZ1_URL_WITH_FALLBACK):
             try:
-                click.echo(f"Trying URL {i+1}: {url}")
                 urllib.request.urlretrieve(url, str(model))  # noqa: S310
                 break
             except Exception as e:  # noqa: BLE001
                 if i == len(BOLTZ1_URL_WITH_FALLBACK) - 1:
                     msg = f"Failed to download model from all URLs. Last error: {e}"
                     raise RuntimeError(msg) from e
-                click.echo(f"URL {i+1} failed: {e}")
                 continue
 
 
@@ -230,14 +228,12 @@ def download_boltz2(cache: Path) -> None:
         )
         for i, url in enumerate(BOLTZ2_URL_WITH_FALLBACK):
             try:
-                click.echo(f"Trying URL {i+1}: {url}")
                 urllib.request.urlretrieve(url, str(model))  # noqa: S310
                 break
             except Exception as e:  # noqa: BLE001
                 if i == len(BOLTZ2_URL_WITH_FALLBACK) - 1:
                     msg = f"Failed to download model from all URLs. Last error: {e}"
                     raise RuntimeError(msg) from e
-                click.echo(f"URL {i+1} failed: {e}")
                 continue
 
     # Download affinity model
@@ -249,14 +245,12 @@ def download_boltz2(cache: Path) -> None:
         )
         for i, url in enumerate(BOLTZ2_AFFINITY_URL_WITH_FALLBACK):
             try:
-                click.echo(f"Trying URL {i+1}: {url}")
-                urllib.request.urlretrieve(url, str(model))  # noqa: S310
+                urllib.request.urlretrieve(url, str(affinity_model))  # noqa: S310
                 break
             except Exception as e:  # noqa: BLE001
                 if i == len(BOLTZ2_AFFINITY_URL_WITH_FALLBACK) - 1:
                     msg = f"Failed to download model from all URLs. Last error: {e}"
                     raise RuntimeError(msg) from e
-                click.echo(f"URL {i+1} failed: {e}")
                 continue
 
 

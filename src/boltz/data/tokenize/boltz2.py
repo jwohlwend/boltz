@@ -1,10 +1,18 @@
 from dataclasses import astuple, dataclass
+from typing import Optional
 
 import numpy as np
 
 from boltz.data import const
 from boltz.data.tokenize.tokenizer import Tokenizer
-from boltz.data.types import Input, StructureV2, TokenBondV2, Tokenized, TokenV2
+from boltz.data.types import (
+    AffinityInfo,
+    Input,
+    StructureV2,
+    TokenBondV2,
+    Tokenized,
+    TokenV2,
+)
 
 
 @dataclass
@@ -93,13 +101,18 @@ def get_unk_token(chain: np.ndarray) -> int:
     return res_id
 
 
-def tokenize_structure(struct: StructureV2) -> tuple[np.ndarray, np.ndarray]:  # noqa: C901, PLR0915
+def tokenize_structure(  # noqa: C901, PLR0915
+    struct: StructureV2,
+    affinity: Optional[AffinityInfo] = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Tokenize a structure.
 
     Parameters
     ----------
     struct : StructureV2
         The structure to tokenize.
+    affinity : Optional[AffinityInfo]
+        The affinity information.
 
     Returns
     -------
@@ -128,7 +141,9 @@ def tokenize_structure(struct: StructureV2) -> tuple[np.ndarray, np.ndarray]:  #
         res_start = chain["res_idx"]
         res_end = chain["res_idx"] + chain["res_num"]
         is_protein = chain["mol_type"] == const.chain_type_ids["PROTEIN"]
-        affinity_mask = chain["affinity"]
+        affinity_mask = (affinity is not None) and (
+            int(chain["asym_id"]) == int(affinity.chain_id)
+        )
 
         for res in struct.residues[res_start:res_end]:
             # Get atom indices
@@ -349,7 +364,9 @@ class Boltz2Tokenizer(Tokenizer):
 
         """
         # Tokenize the structure
-        token_data, token_bonds = tokenize_structure(data.structure)
+        token_data, token_bonds = tokenize_structure(
+            data.structure, data.record.affinity
+        )
 
         # Tokenize the templates
         if data.templates is not None:

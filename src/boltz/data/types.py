@@ -139,7 +139,6 @@ Chain = [
     ("res_idx", np.dtype("i4")),
     ("res_num", np.dtype("i4")),
     ("cyclic_period", np.dtype("i4")),
-    ("affinity", np.dtype("?")),
 ]
 
 Connection = [
@@ -556,6 +555,14 @@ class TemplateInfo:
 
 
 @dataclass(frozen=True)
+class AffinityInfo:
+    """AffinityInfo datatype."""
+
+    chain_id: int
+    mw: float
+
+
+@dataclass(frozen=True)
 class Record(JSONSerializable):
     """Record datatype."""
 
@@ -566,7 +573,7 @@ class Record(JSONSerializable):
     inference_options: Optional[InferenceOptions] = None
     templates: Optional[list[TemplateInfo]] = None
     md: Optional[MDInfo] = None
-    affinity: Optional[bool] = False
+    affinity: Optional[AffinityInfo] = None
 
 
 ####################################################################################################
