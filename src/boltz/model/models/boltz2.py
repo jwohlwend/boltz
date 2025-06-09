@@ -10,14 +10,10 @@ from torchmetrics import MeanMetric
 
 import boltz.model.layers.initialize as init
 from boltz.data import const
-from boltz.data.mol import (
-    minimum_lddt_symmetry_coords,
-)
+from boltz.data.mol import minimum_lddt_symmetry_coords
 from boltz.model.layers.pairformer import PairformerModule
 from boltz.model.loss.bfactor import bfactor_loss_fn
-from boltz.model.loss.confidencev2 import (
-    confidence_loss,
-)
+from boltz.model.loss.confidencev2 import confidence_loss
 from boltz.model.loss.distogramv2 import distogram_loss
 from boltz.model.modules.affinity import AffinityModule
 from boltz.model.modules.confidencev2 import ConfidenceModule
@@ -113,7 +109,9 @@ class Boltz2(LightningModule):
 
         if validate_structure:
             # Late init at setup time
-            self.val_group_mapper = {}  # maps a dataset index to a validation group name
+            self.val_group_mapper = (
+                {}
+            )  # maps a dataset index to a validation group name
             self.validator_mapper = {}  # maps a dataset index to a validator
 
             # Validators for each dataset keep track of all metrics,
@@ -457,7 +455,9 @@ class Boltz2(LightningModule):
                         # Compute pairwise stack
                         if self.use_templates:
                             if self.is_template_compiled and not self.training:
-                                template_module = self.template_module._orig_mod  # noqa: SLF001
+                                template_module = (
+                                    self.template_module._orig_mod
+                                )  # noqa: SLF001
                             else:
                                 template_module = self.template_module
 
@@ -476,7 +476,9 @@ class Boltz2(LightningModule):
 
                         # Revert to uncompiled version for validation
                         if self.is_pairformer_compiled and not self.training:
-                            pairformer_module = self.pairformer_module._orig_mod  # noqa: SLF001
+                            pairformer_module = (
+                                self.pairformer_module._orig_mod
+                            )  # noqa: SLF001
                         else:
                             pairformer_module = self.pairformer_module
 
@@ -489,7 +491,13 @@ class Boltz2(LightningModule):
                         )
 
             pdistogram = self.distogram_module(z)
-            dict_out = {"pdistogram": pdistogram}
+            dict_out = {
+                "pdistogram": pdistogram,
+                "s_embeddings": s,
+                "z_embeddings": z,
+                "token_mask": mask,
+                "pair_mask": pair_mask,
+            }
 
             if (
                 self.run_trunk_and_structure
@@ -1072,6 +1080,11 @@ class Boltz2(LightningModule):
                 for key in self.predict_args["keys_dict_out"]:
                     pred_dict[key] = out[key]
             pred_dict["coords"] = out["sample_atom_coords"]
+            if self.predict_args.get("write_embeddings", False):
+                pred_dict["s_embeddings"] = out["s_embeddings"]
+                pred_dict["z_embeddings"] = out["z_embeddings"]
+                pred_dict["token_mask"] = out["token_mask"]
+                pred_dict["pair_mask"] = out["pair_mask"]
             if self.confidence_prediction:
                 # pred_dict["confidence"] = out.get("ablation_confidence", None)
                 pred_dict["pde"] = out["pde"]
@@ -1230,12 +1243,12 @@ class Boltz2(LightningModule):
             checkpoint["hyper_parameters"]["training_args"][
                 "diffusion_multiplicity"
             ] = self.training_args.diffusion_multiplicity
-            checkpoint["hyper_parameters"]["training_args"]["recycling_steps"] = (
-                self.training_args.recycling_steps
-            )
-            checkpoint["hyper_parameters"]["training_args"]["weight_decay"] = (
-                self.training_args.weight_decay
-            )
+            checkpoint["hyper_parameters"]["training_args"][
+                "recycling_steps"
+            ] = self.training_args.recycling_steps
+            checkpoint["hyper_parameters"]["training_args"][
+                "weight_decay"
+            ] = self.training_args.weight_decay
 
     def configure_callbacks(self) -> list[Callback]:
         """Configure model callbacks.

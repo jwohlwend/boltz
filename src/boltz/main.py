@@ -1179,6 +1179,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             "write_confidence_summary": True,
             "write_full_pae": write_full_pae,
             "write_full_pde": write_full_pde,
+            "write_embeddings": write_embeddings,
         }
 
         steering_args = BoltzSteeringParams()
