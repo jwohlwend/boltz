@@ -1782,6 +1782,9 @@ def standardize(smiles: str) -> Optional[str]:
     if exclude:
         raise ValueError("Molecule is excluded")
 
+    # Update property cache to calculate implicit valences before fragment selection
+    mol.UpdatePropertyCache(strict=False)
+
     # Standardize with ChEMBL data curation pipeline. During standardization, the molecule may be broken
     # Choose molecule with largest component
     mol = LARGEST_FRAGMENT_CHOOSER.choose(mol)
