@@ -191,7 +191,7 @@ class ConfidenceModule(nn.Module):
         multiplicity=1,
         s_diffusion=None,
         run_sequentially=False,
-        use_trifast: bool = False,
+        use_kernels: bool = False,
     ):
         if run_sequentially and multiplicity > 1:
             assert z.shape[0] == 1, "Not supported with batch size > 1"
@@ -210,7 +210,7 @@ class ConfidenceModule(nn.Module):
                         if s_diffusion is not None
                         else None,
                         run_sequentially=False,
-                        use_trifast=use_trifast,
+                        use_kernels=use_kernels,
                     )
                 )
 
@@ -299,17 +299,17 @@ class ConfidenceModule(nn.Module):
         pair_mask = mask[:, :, None] * mask[:, None, :]
 
         if self.imitate_trunk:
-            z = z + self.msa_module(z, s_inputs, feats, use_trifast=use_trifast)
+            z = z + self.msa_module(z, s_inputs, feats, use_kernels=use_kernels)
 
             s, z = self.pairformer_module(
-                s, z, mask=mask, pair_mask=pair_mask, use_trifast=use_trifast
+                s, z, mask=mask, pair_mask=pair_mask, use_kernels=use_kernels
             )
 
             s, z = self.final_s_norm(s), self.final_z_norm(z)
 
         else:
             s_t, z_t = self.pairformer_stack(
-                s, z, mask=mask, pair_mask=pair_mask, use_trifast=use_trifast
+                s, z, mask=mask, pair_mask=pair_mask, use_kernels=use_kernels
             )
 
             # AF3 has residual connections, we remove them

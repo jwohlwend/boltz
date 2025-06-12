@@ -84,9 +84,7 @@ class ConfidenceModule(nn.Module):
             )
             self.bond_type_feature = bond_type_feature
             if bond_type_feature:
-                self.token_bonds_type = nn.Embedding(
-                    len(const.bond_types) + 1, token_z
-                )
+                self.token_bonds_type = nn.Embedding(len(const.bond_types) + 1, token_z)
 
             self.contact_conditioning = ContactConditioning(
                 token_z=token_z,
@@ -118,7 +116,7 @@ class ConfidenceModule(nn.Module):
         pred_distogram_logits,
         multiplicity=1,
         run_sequentially=False,
-        use_trifast: bool = False,
+        use_kernels: bool = False,
     ):
         if run_sequentially and multiplicity > 1:
             assert z.shape[0] == 1, "Not supported with batch size > 1"
@@ -134,7 +132,7 @@ class ConfidenceModule(nn.Module):
                         pred_distogram_logits,
                         multiplicity=1,
                         run_sequentially=False,
-                        use_trifast=use_trifast
+                        use_kernels=use_kernels,
                     )
                 )
 
@@ -205,11 +203,7 @@ class ConfidenceModule(nn.Module):
         pair_mask = mask[:, :, None] * mask[:, None, :]
 
         s_t, z_t = self.pairformer_stack(
-            s,
-            z,
-            mask=mask,
-            pair_mask=pair_mask,
-            use_trifast=use_trifast
+            s, z, mask=mask, pair_mask=pair_mask, use_kernels=use_kernels
         )
 
         # AF3 has residual connections, we remove them
@@ -294,13 +288,11 @@ class ConfidenceHeads(nn.Module):
 
         if self.use_separate_heads:
             pae_intra_logits = self.to_pae_intra_logits(z)
-            pae_intra_logits = pae_intra_logits * is_same_chain.float().unsqueeze(
-                -1
-            )
+            pae_intra_logits = pae_intra_logits * is_same_chain.float().unsqueeze(-1)
 
             pae_inter_logits = self.to_pae_inter_logits(z)
-            pae_inter_logits = (
-                pae_inter_logits * is_different_chain.float().unsqueeze(-1)
+            pae_inter_logits = pae_inter_logits * is_different_chain.float().unsqueeze(
+                -1
             )
 
             pae_logits = pae_inter_logits + pae_intra_logits

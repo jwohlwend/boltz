@@ -103,7 +103,7 @@ class Boltz2(LightningModule):
         log_loss_every_steps: int = 50,
         checkpoint_diffusion_conditioning: bool = False,
         use_templates_v2: bool = False,
-        use_trifast: bool = False,
+        use_kernels: bool = False,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["validators"])
@@ -159,8 +159,8 @@ class Boltz2(LightningModule):
         self.is_msa_compiled = False
         self.is_template_compiled = False
 
-        # Trifast
-        self.use_trifast = use_trifast
+        # Kernels
+        self.use_kernels = use_kernels
 
         # Input embeddings
         full_embedder_args = {
@@ -358,7 +358,13 @@ class Boltz2(LightningModule):
                     param.requires_grad = False
 
     def setup(self, stage: str) -> None:
-        """Set the model for training, validation."""
+        """Set the model for training, validation and inference."""
+        if stage == "predict" and not (
+            torch.cuda.is_available()
+            and torch.cuda.get_device_properties(torch.device("cuda")).major >= 8.0  # noqa: PLR2004
+        ):
+            self.use_kernels = False
+
         if (
             stage != "predict"
             and hasattr(self.trainer, "datamodule")
@@ -456,7 +462,7 @@ class Boltz2(LightningModule):
                                 template_module = self.template_module
 
                             z = z + template_module(
-                                z, feats, pair_mask, use_trifast=self.use_trifast
+                                z, feats, pair_mask, use_kernels=self.use_kernels
                             )
 
                         if self.is_msa_compiled and not self.training:
@@ -465,7 +471,7 @@ class Boltz2(LightningModule):
                             msa_module = self.msa_module
 
                         z = z + msa_module(
-                            z, s_inputs, feats, use_trifast=self.use_trifast
+                            z, s_inputs, feats, use_kernels=self.use_kernels
                         )
 
                         # Revert to uncompiled version for validation
@@ -479,7 +485,7 @@ class Boltz2(LightningModule):
                             z,
                             mask=mask,
                             pair_mask=pair_mask,
-                            use_trifast=self.use_trifast,
+                            use_kernels=self.use_kernels,
                         )
 
             pdistogram = self.distogram_module(z)
@@ -539,9 +545,9 @@ class Boltz2(LightningModule):
 
             if self.training and self.confidence_prediction:
                 assert len(feats["coords"].shape) == 4
-                assert (
-                    feats["coords"].shape[1] == 1
-                ), "Only one conformation is supported for confidence"
+                assert feats["coords"].shape[1] == 1, (
+                    "Only one conformation is supported for confidence"
+                )
 
             # Compute structure module
             if self.training and self.structure_prediction_training:
@@ -591,7 +597,7 @@ class Boltz2(LightningModule):
                     ),
                     multiplicity=diffusion_samples,
                     run_sequentially=run_confidence_sequentially,
-                    use_trifast=self.use_trifast,
+                    use_kernels=self.use_kernels,
                 )
             )
 
@@ -623,7 +629,7 @@ class Boltz2(LightningModule):
                         x_pred=coords_affinity,
                         feats=feats,
                         multiplicity=1,
-                        use_trifast=self.use_trifast,
+                        use_kernels=self.use_kernels,
                     )
 
                     dict_out_affinity1["affinity_probability_binary"] = (
@@ -637,7 +643,7 @@ class Boltz2(LightningModule):
                         x_pred=coords_affinity,
                         feats=feats,
                         multiplicity=1,
-                        use_trifast=self.use_trifast,
+                        use_kernels=self.use_kernels,
                     )
                     dict_out_affinity2["affinity_probability_binary"] = (
                         torch.nn.functional.sigmoid(
@@ -696,7 +702,7 @@ class Boltz2(LightningModule):
                         x_pred=coords_affinity,
                         feats=feats,
                         multiplicity=1,
-                        use_trifast=self.use_trifast,
+                        use_kernels=self.use_kernels,
                     )
                     dict_out.update(
                         {
@@ -725,9 +731,9 @@ class Boltz2(LightningModule):
 
         return_dict = {}
 
-        assert (
-            batch["coords"].shape[0] == 1
-        ), f"Validation is not supported for batch sizes={batch['coords'].shape[0]}"
+        assert batch["coords"].shape[0] == 1, (
+            f"Validation is not supported for batch sizes={batch['coords'].shape[0]}"
+        )
 
         if symmetry_correction:
             true_coords = []
@@ -853,9 +859,9 @@ class Boltz2(LightningModule):
 
             # TODO remove once multiple conformers are supported
             K = true_coords.shape[1]
-            assert (
-                K == 1
-            ), f"Confidence_prediction is not supported for num_ensembles_val={K}."
+            assert K == 1, (
+                f"Confidence_prediction is not supported for num_ensembles_val={K}."
+            )
 
             # For now, just take the only conformer.
             true_coords = true_coords.squeeze(1)  # (S, L, 3)

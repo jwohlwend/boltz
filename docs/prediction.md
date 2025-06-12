@@ -80,7 +80,7 @@ The `modifications` field is an optional field that allows you to specify modifi
 
 `templates` is an otional field that allows you to specify structural templates for your prediction. At minimum, you must provide the path to the structural template, which must provided as a CIF file. If you wish to explicitely define which of the chains in your YAML should be templated using this CIF file, you can use the `chain_id` entry to specify them. Whether a set of ids is provided or not, Boltz will find the best matching chains from the provided template. If you wish to explicitely define the mapping yourself, you may provide the corresponding template_id. Note that only protein chains can be templated.
 
-`properties` is an optional field that allows you to specify whether you want to compute the affinity. If enabled, you must also provide the chain_id corresponding to the small molecule against which the affinity will be computed.
+`properties` is an optional field that allows you to specify whether you want to compute the affinity. If enabled, you must also provide the chain_id corresponding to the small molecule against which the affinity will be computed. Only one single molecule can be specified for affinity computation, and it must be a ligand chain (not a protein, DNA or RNA).
 
 As an example:
 

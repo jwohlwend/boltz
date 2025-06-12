@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "boltz"
-version = "2.0.3"
+version = "2.1.1"
 requires-python = ">=3.10,<3.13"
 description = "Boltz"
 readme = "README.md"
@@ -28,11 +28,13 @@ dependencies = [
     "pyyaml==6.0.2",
     "biopython==1.84",
     "scipy==1.13.1",
-    "trifast>=0.1.11; platform_system == 'Linux'",
     "numba==0.61.0",
     "gemmi==0.6.5",
     "scikit-learn==1.6.1",
     "chembl_structure_pipeline==1.2.2",
+    "cuequivariance_ops_cu12>=0.5.0",
+    "cuequivariance_ops_torch_cu12>=0.5.0",
+    "cuequivariance_torch>=0.5.0",
 ]
 
 [project.scripts]

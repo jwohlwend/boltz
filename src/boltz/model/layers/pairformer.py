@@ -68,21 +68,27 @@ class PairformerLayer(nn.Module):
         mask: Tensor,
         pair_mask: Tensor,
         chunk_size_tri_attn: Optional[int] = None,
-        use_trifast: bool = False,
+        use_kernels: bool = False,
+        use_cuequiv_mul: bool = False,
+        use_cuequiv_attn: bool = False,
     ) -> tuple[Tensor, Tensor]:
         # Compute pairwise stack
         dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_out(z, mask=pair_mask)
+        z = z + dropout * self.tri_mul_out(
+            z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
+        )
 
         dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_in(z, mask=pair_mask)
+        z = z + dropout * self.tri_mul_in(
+            z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
+        )
 
         dropout = get_dropout_mask(self.dropout, z, self.training)
         z = z + dropout * self.tri_att_start(
             z,
             mask=pair_mask,
             chunk_size=chunk_size_tri_attn,
-            use_trifast=use_trifast,
+            use_kernels=use_cuequiv_attn or use_kernels,
         )
 
         dropout = get_dropout_mask(self.dropout, z, self.training, columnwise=True)
@@ -90,7 +96,7 @@ class PairformerLayer(nn.Module):
             z,
             mask=pair_mask,
             chunk_size=chunk_size_tri_attn,
-            use_trifast=use_trifast,
+            use_kernels=use_cuequiv_attn or use_kernels,
         )
 
         z = z + self.transition_z(z)
@@ -153,7 +159,7 @@ class PairformerModule(nn.Module):
         z: Tensor,
         mask: Tensor,
         pair_mask: Tensor,
-        use_trifast: bool = False,
+        use_kernels: bool = False,
     ) -> tuple[Tensor, Tensor]:
         """Perform the forward pass.
 
@@ -167,6 +173,8 @@ class PairformerModule(nn.Module):
             The mask.
         pair_mask : Tensor
             The pairwise mask.
+        use_kernels : bool
+            Whether to use kernels.
 
         """
         if not self.training:
@@ -186,11 +194,11 @@ class PairformerModule(nn.Module):
                     mask,
                     pair_mask,
                     chunk_size_tri_attn,
-                    use_trifast=use_trifast,
+                    use_kernels=use_kernels,
                 )
             else:
                 s, z = layer(
-                    s, z, mask, pair_mask, chunk_size_tri_attn, use_trifast=use_trifast
+                    s, z, mask, pair_mask, chunk_size_tri_attn, use_kernels=use_kernels
                 )
         return s, z
 
@@ -228,21 +236,27 @@ class PairformerNoSeqLayer(nn.Module):
         z: Tensor,
         pair_mask: Tensor,
         chunk_size_tri_attn: Optional[int] = None,
-        use_trifast: bool = False,
+        use_kernels: bool = False,
+        use_cuequiv_mul: bool = False,
+        use_cuequiv_attn: bool = False,
     ) -> Tensor:
         # Compute pairwise stack
         dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_out(z, mask=pair_mask)
+        z = z + dropout * self.tri_mul_out(
+            z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
+        )
 
         dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_in(z, mask=pair_mask)
+        z = z + dropout * self.tri_mul_in(
+            z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
+        )
 
         dropout = get_dropout_mask(self.dropout, z, self.training)
         z = z + dropout * self.tri_att_start(
             z,
             mask=pair_mask,
             chunk_size=chunk_size_tri_attn,
-            use_trifast=use_trifast,
+            use_kernels=use_cuequiv_attn or use_kernels,
         )
 
         dropout = get_dropout_mask(self.dropout, z, self.training, columnwise=True)
@@ -250,7 +264,7 @@ class PairformerNoSeqLayer(nn.Module):
             z,
             mask=pair_mask,
             chunk_size=chunk_size_tri_attn,
-            use_trifast=use_trifast,
+            use_kernels=use_cuequiv_attn or use_kernels,
         )
 
         z = z + self.transition_z(z)
@@ -294,7 +308,7 @@ class PairformerNoSeqModule(nn.Module):
         self,
         z: Tensor,
         pair_mask: Tensor,
-        use_trifast: bool = False,
+        use_kernels: bool = False,
     ) -> Tensor:
         if not self.training:
             if z.shape[1] > const.chunk_size_threshold:
@@ -307,8 +321,17 @@ class PairformerNoSeqModule(nn.Module):
         for layer in self.layers:
             if self.activation_checkpointing and self.training:
                 z = torch.utils.checkpoint.checkpoint(
-                    layer, z, pair_mask, chunk_size_tri_attn, use_trifast=use_trifast
+                    layer,
+                    z,
+                    pair_mask,
+                    chunk_size_tri_attn,
+                    use_kernels=use_kernels,
                 )
             else:
-                z = layer(z, pair_mask, chunk_size_tri_attn, use_trifast=use_trifast)
+                z = layer(
+                    z,
+                    pair_mask,
+                    chunk_size_tri_attn,
+                    use_kernels=use_kernels,
+                )
         return z

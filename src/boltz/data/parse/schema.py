@@ -633,7 +633,7 @@ def get_mol(ccd: str, mols: dict, moldir: str) -> Mol:
 
 
 def parse_ccd_residue(
-    name: str, ref_mol: Mol, res_idx: int, remove_oxt_atom: bool = False
+    name: str, ref_mol: Mol, res_idx: int, drop_leaving_atoms: bool = False
 ) -> Optional[ParsedResidue]:
     """Parse an MMCIF ligand.
 
@@ -707,8 +707,8 @@ def parse_ccd_residue(
         # Get atom name, charge, element and reference coordinates
         atom_name = atom.GetProp("name")
 
-        # Drop OXT atoms for non-canonical amino acids.
-        if remove_oxt_atom and atom_name == "OXT":
+        # Drop leaving atoms for non-canonical amino acids.
+        if drop_leaving_atoms and int(atom.GetProp('leaving_atom')):
             continue
 
         charge = atom.GetFormalCharge()
@@ -839,7 +839,7 @@ def parse_polymer(
                 name=res_corrected,
                 ref_mol=ref_mol,
                 res_idx=res_idx,
-                remove_oxt_atom=True,
+                drop_leaving_atoms=True,
             )
             parsed.append(residue)
             continue
