@@ -68,12 +68,11 @@ class PairWeightedAveraging(nn.Module):
 
         """
         # Compute layer norms
-        m = self.norm_m(m)
-        z = self.norm_z(z)
+        m_norm = self.norm_m(m)
+        z_norm = self.norm_z(z)
 
         if chunk_heads and not self.training:
             # Compute heads sequentially
-            o_chunks = []
             for head_idx in range(self.num_heads):
                 sliced_weight_proj_m = self.proj_m.weight[
                     head_idx * self.c_h : (head_idx + 1) * self.c_h, :
@@ -87,48 +86,53 @@ class PairWeightedAveraging(nn.Module):
                 ]
 
                 # Project input tensors
-                v: Tensor = m @ sliced_weight_proj_m.T
+                v: Tensor = m_norm @ sliced_weight_proj_m.T
                 v = v.reshape(*v.shape[:3], 1, self.c_h)
                 v = v.permute(0, 3, 1, 2, 4)
 
                 # Compute weights
-                b: Tensor = z @ sliced_weight_proj_z.T
+                b: Tensor = z_norm @ sliced_weight_proj_z.T
                 b = b.permute(0, 3, 1, 2)
-                b = b + (1 - mask[:, None]) * -self.inf
-                w = torch.softmax(b, dim=-1)
+                b += (1 - mask[:, None]) * -self.inf
+                b[:] = torch.softmax(b, dim=-1)
+
+                # Compute output
+                o = torch.einsum("bhij,bhsjd->bsihd", b, v)
+                del b, v
+                o = o.reshape(*o.shape[:3], 1 * self.c_h)
 
                 # Compute gating
-                g: Tensor = m @ sliced_weight_proj_g.T
+                g: Tensor = m_norm @ sliced_weight_proj_g.T
                 g = g.sigmoid()
 
                 # Compute output
-                o = torch.einsum("bhij,bhsjd->bhsid", w, v)
-                o = o.permute(0, 2, 3, 1, 4)
-                o = o.reshape(*o.shape[:3], 1 * self.c_h)
                 o_chunks = g * o
+                del g, o
+
                 if head_idx == 0:
                     o_out = o_chunks @ sliced_weight_proj_o.T
                 else:
                     o_out += o_chunks @ sliced_weight_proj_o.T
+                del o_chunks
             return o_out
         else:
             # Project input tensors
-            v: Tensor = self.proj_m(m)
+            v: Tensor = self.proj_m(m_norm)
             v = v.reshape(*v.shape[:3], self.num_heads, self.c_h)
             v = v.permute(0, 3, 1, 2, 4)
 
             # Compute weights
-            b: Tensor = self.proj_z(z)
+            b: Tensor = self.proj_z(z_norm)
             b = b.permute(0, 3, 1, 2)
-            b = b + (1 - mask[:, None]) * -self.inf
-            w = torch.softmax(b, dim=-1)
+            b += (1 - mask[:, None]) * -self.inf
+            b = torch.softmax(b, dim=-1)
 
             # Compute gating
-            g: Tensor = self.proj_g(m)
+            g: Tensor = self.proj_g(m_norm)
             g = g.sigmoid()
 
             # Compute output
-            o = torch.einsum("bhij,bhsjd->bhsid", w, v)
+            o = torch.einsum("bhij,bhsjd->bhsid", b, v)
             o = o.permute(0, 2, 3, 1, 4)
             o = o.reshape(*o.shape[:3], self.num_heads * self.c_h)
             o = self.proj_o(g * o)
