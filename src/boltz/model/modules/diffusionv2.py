@@ -492,7 +492,7 @@ class AtomDiffusion(Module):
                         token_repr = token_repr[resample_indices]
 
             if self.alignment_reverse_diff:
-                with torch.autocast("cuda", enabled=False):
+                with torch.autocast(device_type=atom_coords.device.type, enabled=False):
                     atom_coords_noisy = weighted_rigid_align(
                         atom_coords_noisy.float(),
                         atom_coords_denoised.float(),
@@ -583,7 +583,7 @@ class AtomDiffusion(Module):
         multiplicity=1,
         filter_by_plddt=0.0,
     ):
-        with torch.autocast("cuda", enabled=False):
+        with torch.autocast(device_type=self.device.type, enabled=False):
             denoised_atom_coords = out_dict["denoised_atom_coords"].float()
             noised_atom_coords = out_dict["noised_atom_coords"].float()
             sigmas = out_dict["sigmas"].float()

@@ -45,7 +45,16 @@ def weighted_rigid_align(
     original_dtype = cov_matrix.dtype
     cov_matrix_32 = cov_matrix.to(dtype=torch.float32)
 
-    U, S, V = torch.linalg.svd(
+    if cov_matrix_32.device.type == "mps":
+        # Move to CPU for SVD
+        cov_matrix_32_cpu = cov_matrix_32.cpu()
+        U, S, V = torch.linalg.svd(cov_matrix_32_cpu)
+        # Move results back to original device
+        U = U.to(cov_matrix_32.device)
+        S = S.to(cov_matrix_32.device)
+        V = V.to(cov_matrix_32.device)
+    else:
+        U, S, V = torch.linalg.svd(
         cov_matrix_32, driver="gesvd" if cov_matrix_32.is_cuda else None
     )
     V = V.mH

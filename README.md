@@ -37,11 +37,11 @@ cd boltz; pip install -e .
 
 ## For Mac users
 
-Create a new conda environment for boltz with python 3.10 and numba:
+Create a new conda environment for boltz with python 3.12, numba and lvmlite:
 
 ```
-conda create --name boltz python=3.10 numba
-conda activate boltz
+conda create --name boltz-2 python=3.12 llvmlite==0.44.0 numba==0.61.0
+conda activate boltz-2
 ```
 
 Clone this repository
@@ -50,6 +50,8 @@ git clone https://github.com/fnachon/boltz.git
 cd boltz
 pip install -e .
 ```
+allow using multiple libomp libraries
+export KMP_DUPLICATE_LIB_OK=TRUE
 
 ## Inference
 
