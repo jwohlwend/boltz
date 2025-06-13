@@ -37,10 +37,10 @@ cd boltz; pip install -e .
 
 ## For Mac users
 
-Create a new conda environment for boltz with python 3.12, numba and lvmlite:
+Create a new conda environment for boltz with python 3.12, numba, lvmlite and numpy:
 
 ```
-conda create --name boltz-2 python=3.12 llvmlite==0.44.0 numba==0.61.0
+conda create --name boltz-2 python=3.12 llvmlite==0.44.0 numba==0.61.0 numpy==1.26.3
 conda activate boltz-2
 ```
 
