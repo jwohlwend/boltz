@@ -451,8 +451,8 @@ class Boltz2(LightningModule):
                             torch.clear_autocast_cache()
 
                         # Apply recycling
-                        s = s_init + self.s_recycle(self.s_norm(s))
-                        z = z_init + self.z_recycle(self.z_norm(z))
+                        s[:] = s_init + self.s_recycle(self.s_norm(s))
+                        z[:] = z_init + self.z_recycle(self.z_norm(z))
 
                         # Compute pairwise stack
                         if self.use_templates:
@@ -461,7 +461,7 @@ class Boltz2(LightningModule):
                             else:
                                 template_module = self.template_module
 
-                            z = z + template_module(
+                            z += template_module(
                                 z, feats, pair_mask, use_kernels=self.use_kernels
                             )
 
@@ -470,7 +470,7 @@ class Boltz2(LightningModule):
                         else:
                             msa_module = self.msa_module
 
-                        z = z + msa_module(
+                        z += msa_module(
                             z, s_inputs, feats, use_kernels=self.use_kernels
                         )
 
@@ -480,7 +480,7 @@ class Boltz2(LightningModule):
                         else:
                             pairformer_module = self.pairformer_module
 
-                        s, z = pairformer_module(
+                        s[:], z[:] = pairformer_module(
                             s,
                             z,
                             mask=mask,

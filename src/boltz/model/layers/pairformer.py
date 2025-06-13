@@ -74,17 +74,17 @@ class PairformerLayer(nn.Module):
     ) -> tuple[Tensor, Tensor]:
         # Compute pairwise stack
         dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_out(
+        z += dropout * self.tri_mul_out(
             z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
         )
 
         dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_in(
+        z += dropout * self.tri_mul_in(
             z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
         )
 
         dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_att_start(
+        z += dropout * self.tri_att_start(
             z,
             mask=pair_mask,
             chunk_size=chunk_size_tri_attn,
@@ -92,23 +92,24 @@ class PairformerLayer(nn.Module):
         )
 
         dropout = get_dropout_mask(self.dropout, z, self.training, columnwise=True)
-        z = z + dropout * self.tri_att_end(
+        z += dropout * self.tri_att_end(
             z,
             mask=pair_mask,
             chunk_size=chunk_size_tri_attn,
             use_kernels=use_cuequiv_attn or use_kernels,
         )
 
-        z = z + self.transition_z(z)
+        z += self.transition_z(z)
 
         # Compute sequence stack
         with torch.autocast("cuda", enabled=False):
-            s_normed = self.pre_norm_s(s.float())
-            s = s.float() + self.attention(
+            s = s.float()
+            s_normed = self.pre_norm_s(s)
+            s += self.attention(
                 s=s_normed, z=z.float(), mask=mask.float(), k_in=s_normed
             )
-            s = s + self.transition_s(s)
-            s = self.s_post_norm(s)
+            s += self.transition_s(s)
+            s[:] = self.s_post_norm(s)
 
         return s, z
 
@@ -187,7 +188,7 @@ class PairformerModule(nn.Module):
 
         for layer in self.layers:
             if self.activation_checkpointing and self.training:
-                s, z = torch.utils.checkpoint.checkpoint(
+                s[:], z[:] = torch.utils.checkpoint.checkpoint(
                     layer,
                     s,
                     z,
@@ -197,7 +198,7 @@ class PairformerModule(nn.Module):
                     use_kernels=use_kernels,
                 )
             else:
-                s, z = layer(
+                s[:], z[:] = layer(
                     s, z, mask, pair_mask, chunk_size_tri_attn, use_kernels=use_kernels
                 )
         return s, z
@@ -242,17 +243,17 @@ class PairformerNoSeqLayer(nn.Module):
     ) -> Tensor:
         # Compute pairwise stack
         dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_out(
+        z += dropout * self.tri_mul_out(
             z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
         )
 
         dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_in(
+        z += dropout * self.tri_mul_in(
             z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
         )
 
         dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_att_start(
+        z += dropout * self.tri_att_start(
             z,
             mask=pair_mask,
             chunk_size=chunk_size_tri_attn,
@@ -260,14 +261,14 @@ class PairformerNoSeqLayer(nn.Module):
         )
 
         dropout = get_dropout_mask(self.dropout, z, self.training, columnwise=True)
-        z = z + dropout * self.tri_att_end(
+        z += dropout * self.tri_att_end(
             z,
             mask=pair_mask,
             chunk_size=chunk_size_tri_attn,
             use_kernels=use_cuequiv_attn or use_kernels,
         )
 
-        z = z + self.transition_z(z)
+        z += self.transition_z(z)
         return z
 
 

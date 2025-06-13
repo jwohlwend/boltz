@@ -155,35 +155,33 @@ class ConfidenceModule(nn.Module):
 
         s_inputs = self.s_inputs_norm(s_inputs)
         if not self.no_update_s:
-            s = self.s_norm(s)
+            s[:] = self.s_norm(s)
 
         if self.add_s_input_to_s:
-            s = s + self.s_input_to_s(s_inputs)
+            s += self.s_input_to_s(s_inputs)
 
-        z = self.z_norm(z)
+        z[:] = self.z_norm(z)
 
         if self.add_z_input_to_z:
             relative_position_encoding = self.rel_pos(feats)
-            z = z + relative_position_encoding
-            z = z + self.token_bonds(feats["token_bonds"].float())
+            z += relative_position_encoding
+            z += self.token_bonds(feats["token_bonds"].float())
             if self.bond_type_feature:
-                z = z + self.token_bonds_type(feats["type_bonds"].long())
-            z = z + self.contact_conditioning(feats)
+                z += self.token_bonds_type(feats["type_bonds"].long())
+            z += self.contact_conditioning(feats)
 
-        s = s.repeat_interleave(multiplicity, 0)
+        s[:] = s.repeat_interleave(multiplicity, 0)
 
-        z = (
-            z
-            + self.s_to_z(s_inputs)[:, :, None, :]
-            + self.s_to_z_transpose(s_inputs)[:, None, :, :]
-        )
+        z += self.s_to_z(s_inputs)[:, :, None, :]
+        z += self.s_to_z_transpose(s_inputs)[:, None, :, :]
+        
         if self.add_s_to_z_prod:
-            z = z + self.s_to_z_prod_out(
+            z += self.s_to_z_prod_out(
                 self.s_to_z_prod_in1(s_inputs)[:, :, None, :]
                 * self.s_to_z_prod_in2(s_inputs)[:, None, :, :]
             )
 
-        z = z.repeat_interleave(multiplicity, 0)
+        z[:] = z.repeat_interleave(multiplicity, 0)
         s_inputs = s_inputs.repeat_interleave(multiplicity, 0)
 
         token_to_rep_atom = feats["token_to_rep_atom"]
@@ -197,18 +195,15 @@ class ConfidenceModule(nn.Module):
         d = torch.cdist(x_pred_repr, x_pred_repr)
         distogram = (d.unsqueeze(-1) > self.boundaries).sum(dim=-1).long()
         distogram = self.dist_bin_pairwise_embed(distogram)
-        z = z + distogram
+        z += distogram
 
         mask = feats["token_pad_mask"].repeat_interleave(multiplicity, 0)
         pair_mask = mask[:, :, None] * mask[:, None, :]
 
-        s_t, z_t = self.pairformer_stack(
+        s[:], z[:] = self.pairformer_stack(
             s, z, mask=mask, pair_mask=pair_mask, use_kernels=use_kernels
         )
-
         # AF3 has residual connections, we remove them
-        s = s_t
-        z = z_t
 
         out_dict = {}
 

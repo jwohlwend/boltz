@@ -64,15 +64,15 @@ class Transition(nn.Module):
             x = self.silu(self.fc1(x)) * self.fc2(x)
             x = self.fc3(x)
             return x
-        else:
-            # Compute in chunks
-            for i in range(0, self.hidden, chunk_size):
-                fc1_slice = self.fc1.weight[i : i + chunk_size, :]
-                fc2_slice = self.fc2.weight[i : i + chunk_size, :]
-                fc3_slice = self.fc3.weight[:, i : i + chunk_size]
-                x_chunk = self.silu((x @ fc1_slice.T)) * (x @ fc2_slice.T)
-                if i == 0:
-                    x_out = x_chunk @ fc3_slice.T
-                else:
-                    x_out = x_out + x_chunk @ fc3_slice.T
-            return x_out
+
+        # Compute in chunks
+        for i in range(0, self.hidden, chunk_size):
+            fc1_slice = self.fc1.weight[i : i + chunk_size, :]
+            fc2_slice = self.fc2.weight[i : i + chunk_size, :]
+            fc3_slice = self.fc3.weight[:, i : i + chunk_size]
+            x_chunk = self.silu((x @ fc1_slice.T)) * (x @ fc2_slice.T)
+            if i == 0:
+                x_out = x_chunk @ fc3_slice.T
+            else:
+                x_out += x_chunk @ fc3_slice.T
+        return x_out
