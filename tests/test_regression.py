@@ -1,47 +1,40 @@
-import os
-import pickle
-from dataclasses import asdict
-import pprint
-
-import torch
-import torch.nn as nn
+import unittest
+from pathlib import Path
 
 import pytest
-import unittest
-
+import test_utils
+import torch
+import torch.nn as nn
 from lightning_fabric import seed_everything
 
-from boltz.main import MODEL_URL
-from boltz.model.model import Boltz1
+from boltz.main import BOLTZ1_URL_WITH_FALLBACK
+from boltz.model.models.boltz1 import Boltz1
 
-import test_utils
+tests_dir = Path(__file__).resolve().parent
+test_data_dir = tests_dir / "data"
 
-tests_dir = os.path.dirname(os.path.abspath(__file__))
-test_data_dir = os.path.join(tests_dir, 'data')
 
 @pytest.mark.regression
 class RegressionTester(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        cache = os.path.expanduser('~/.boltz')
-        checkpoint_url = MODEL_URL
+        cache = Path.expanduser(Path("~/.boltz"))
+        checkpoint_url = BOLTZ1_URL_WITH_FALLBACK[1]
         model_name = checkpoint_url.split("/")[-1]
-        checkpoint = os.path.join(cache, model_name)
-        if not os.path.exists(checkpoint):
+        checkpoint = cache / model_name
+        if not Path.exists(checkpoint):
             test_utils.download_file(checkpoint_url, checkpoint)
 
-        regression_feats_path = os.path.join(test_data_dir, 'ligand_regression_feats.pkl')
-        if not os.path.exists(regression_feats_path):
+        regression_feats_path = test_data_dir / "ligand_regression_feats.pkl"
+        if not Path.exists(regression_feats_path):
             regression_feats_url = "https://www.dropbox.com/scl/fi/1avbcvoor5jcnvpt07tp6/ligand_regression_feats.pkl?rlkey=iwtm9gpxgrbp51jbizq937pqf&st=jnbky253&dl=1"
             test_utils.download_file(regression_feats_url, regression_feats_path)
 
-        regression_feats = torch.load(regression_feats_path, map_location=device)
-        model_module: nn.Module = Boltz1.load_from_checkpoint(checkpoint, map_location=device)
+        regression_feats = torch.load(regression_feats_path, map_location=device, weights_only=False)
+        model_module: nn.Module = Boltz1.load_from_checkpoint(checkpoint, map_location=device, steering_args={})
         model_module.to(device)
         model_module.eval()
-
         coords = regression_feats["feats"]["coords"]
         # Coords should be rank 4
         if len(coords.shape) == 3:
@@ -62,6 +55,7 @@ class RegressionTester(unittest.TestCase):
 
     def test_rel_pos(self):
         exp_rel_pos_encoding = self.regression_feats["relative_position_encoding"]
+        self.regression_feats["feats"]["cyclic_period"] = torch.zeros((1,), dtype=torch.int32)
         act_rel_pos_encoding = self.model_module.rel_pos(self.regression_feats["feats"])
 
         assert torch.allclose(exp_rel_pos_encoding, act_rel_pos_encoding, atol=1e-5)
@@ -103,5 +97,5 @@ class RegressionTester(unittest.TestCase):
             assert torch.allclose(exp_val, act_val, atol=1e-4)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
