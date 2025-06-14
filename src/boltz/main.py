@@ -983,8 +983,8 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     if seed is not None:
         seed_everything(seed)
 
-    # Set no_trifast=True when on CPU
-    if accelerator == "cpu":
+    # Set no_trifast=True when on CPU or MPS
+    if accelerator == "cpu" or torch.backends.mps.is_available():
         no_trifast = True
     use_trifast = not no_trifast
 
