@@ -76,7 +76,7 @@ class Boltz1(LightningModule):
         max_dist: float = 22.0,
         predict_args: Optional[dict[str, Any]] = None,
         steering_args: Optional[dict[str, Any]] = None,
-        use_trifast: bool = False,
+        use_kernels: bool = False,
     ) -> None:
         super().__init__()
 
@@ -140,7 +140,7 @@ class Boltz1(LightningModule):
         self.predict_args = predict_args
         self.steering_args = steering_args
 
-        self.use_trifast = use_trifast
+        self.use_kernels = use_kernels
 
         self.nucleotide_rmsd_weight = nucleotide_rmsd_weight
         self.ligand_rmsd_weight = ligand_rmsd_weight
@@ -261,6 +261,14 @@ class Boltz1(LightningModule):
                 if name.split(".")[0] != "confidence_module":
                     param.requires_grad = False
 
+    def setup(self, stage: str) -> None:
+        """Set the model for training, validation and inference."""
+        if stage == "predict" and not (
+            torch.cuda.is_available()
+            and torch.cuda.get_device_properties(torch.device("cuda")).major >= 8.0  # noqa: PLR2004
+        ):
+            self.use_kernels = False
+
     def forward(
         self,
         feats: dict[str, Tensor],
@@ -314,7 +322,7 @@ class Boltz1(LightningModule):
                     # Compute pairwise stack
                     if not self.no_msa:
                         z = z + self.msa_module(
-                            z, s_inputs, feats, use_trifast=self.use_trifast
+                            z, s_inputs, feats, use_kernels=self.use_kernels
                         )
 
                     # Revert to uncompiled version for validation
@@ -328,7 +336,7 @@ class Boltz1(LightningModule):
                         z,
                         mask=mask,
                         pair_mask=pair_mask,
-                        use_trifast=self.use_trifast,
+                        use_kernels=self.use_kernels,
                     )
 
             pdistogram = self.distogram_module(z)
@@ -380,7 +388,7 @@ class Boltz1(LightningModule):
                     pred_distogram_logits=dict_out["pdistogram"].detach(),
                     multiplicity=diffusion_samples,
                     run_sequentially=run_confidence_sequentially,
-                    use_trifast=self.use_trifast,
+                    use_kernels=self.use_kernels,
                 )
             )
         if self.confidence_prediction and self.confidence_module.use_s_diffusion:

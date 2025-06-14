@@ -208,7 +208,7 @@ class MSAModule(nn.Module):
         z: Tensor,
         emb: Tensor,
         feats: dict[str, Tensor],
-        use_trifast: bool = False,
+        use_kernels: bool = False,
     ) -> Tensor:
         """Perform the forward pass.
 
@@ -284,7 +284,7 @@ class MSAModule(nn.Module):
                 chunk_size_transition_msa,
                 chunk_size_outer_product,
                 chunk_size_tri_attn,
-                use_trifast=use_trifast,
+                use_kernels=use_kernels,
             )
         return z
 
@@ -360,7 +360,7 @@ class MSALayer(nn.Module):
         chunk_size_transition_msa: int = None,
         chunk_size_outer_product: int = None,
         chunk_size_tri_attn: int = None,
-        use_trifast: bool = False,
+        use_kernels: bool = False,
     ) -> tuple[Tensor, Tensor]:
         """Perform the forward pass.
 
@@ -405,7 +405,7 @@ class MSALayer(nn.Module):
             z,
             mask=token_mask,
             chunk_size=chunk_size_tri_attn,
-            use_trifast=use_trifast,
+            use_kernels=use_kernels,
         )
 
         dropout = get_dropout_mask(self.z_dropout, z, self.training, columnwise=True)
@@ -413,7 +413,7 @@ class MSALayer(nn.Module):
             z,
             mask=token_mask,
             chunk_size=chunk_size_tri_attn,
-            use_trifast=use_trifast,
+            use_kernels=use_kernels,
         )
 
         z = z + self.z_transition(z, chunk_size_transition_z)
@@ -512,7 +512,7 @@ class PairformerModule(nn.Module):
         mask: Tensor,
         pair_mask: Tensor,
         chunk_size_tri_attn: Optional[int] = None,
-        use_trifast: bool = False,
+        use_kernels: bool = False,
     ) -> tuple[Tensor, Tensor]:
         """Perform the forward pass.
 
@@ -544,7 +544,12 @@ class PairformerModule(nn.Module):
 
         for layer in self.layers:
             s, z = layer(
-                s, z, mask, pair_mask, chunk_size_tri_attn, use_trifast=use_trifast
+                s,
+                z,
+                mask,
+                pair_mask,
+                chunk_size_tri_attn,
+                use_kernels=use_kernels,
             )
         return s, z
 
@@ -612,7 +617,7 @@ class PairformerLayer(nn.Module):
         mask: Tensor,
         pair_mask: Tensor,
         chunk_size_tri_attn: Optional[int] = None,
-        use_trifast: bool = False,
+        use_kernels: bool = False,
     ) -> tuple[Tensor, Tensor]:
         """Perform the forward pass."""
         # Compute pairwise stack
@@ -627,7 +632,7 @@ class PairformerLayer(nn.Module):
             z,
             mask=pair_mask,
             chunk_size=chunk_size_tri_attn,
-            use_trifast=use_trifast,
+            use_kernels=use_kernels,
         )
 
         dropout = get_dropout_mask(self.dropout, z, self.training, columnwise=True)
@@ -635,7 +640,7 @@ class PairformerLayer(nn.Module):
             z,
             mask=pair_mask,
             chunk_size=chunk_size_tri_attn,
-            use_trifast=use_trifast,
+            use_kernels=use_kernels,
         )
 
         z = z + self.transition_z(z)

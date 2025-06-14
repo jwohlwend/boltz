@@ -4,6 +4,7 @@ import pickle
 import platform
 import tarfile
 import urllib.request
+import warnings
 from dataclasses import asdict, dataclass
 from functools import partial
 from multiprocessing import Pool
@@ -148,7 +149,7 @@ class BoltzSteeringParams:
     """Steering parameters."""
 
     fk_steering: bool = True
-    num_particles: int = 8
+    num_particles: int = 3
     fk_lambda: float = 4.0
     fk_resampling_interval: int = 3
     guidance_update: bool = True
@@ -337,16 +338,15 @@ def filter_inputs_structure(
     # Remove them from the input data
     if existing and not override:
         manifest = Manifest([r for r in manifest.records if r.id not in existing])
-        num_skipped = len(existing) - len(manifest.records)
         msg = (
-            f"Found some existing predictions ({num_skipped}), "
+            f"Found some existing predictions ({len(existing)}), "
             f"skipping and running only the missing ones, "
             "if any. If you wish to override these existing "
             "predictions, please set the --override flag."
         )
         click.echo(msg)
     elif existing and override:
-        msg = "Found existing predictions, will override."
+        msg = f"Found {len(existing)} existing predictions, will override."
         click.echo(msg)
 
     return manifest
@@ -662,7 +662,6 @@ def process_inputs(
             click.echo("All inputs are already processed.")
             updated_manifest = Manifest(existing)
             updated_manifest.dump(out_dir / "processed" / "manifest.json")
-            return updated_manifest
 
     # Create output directories
     msa_dir = out_dir / "msa"
@@ -725,7 +724,6 @@ def process_inputs(
     records = [Record.load(p) for p in records_dir.glob("*.json")]
     manifest = Manifest(records)
     manifest.dump(out_dir / "processed" / "manifest.json")
-    return manifest
 
 
 @click.group()
@@ -926,9 +924,9 @@ def cli() -> None:
     default=1024,
 )
 @click.option(
-    "--no_trifast",
+    "--no_kernels",
     is_flag=True,
-    help="Whether to not use trifast kernels for triangular updates. Default False",
+    help="Whether to disable the kernels. Default False",
 )
 def predict(  # noqa: C901, PLR0915, PLR0912
     data: str,
@@ -962,13 +960,18 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     max_msa_seqs: int = 8192,
     subsample_msa: bool = True,
     num_subsampled_msa: int = 1024,
-    no_trifast: bool = False,
+    no_kernels: bool = False,
 ) -> None:
     """Run predictions with Boltz."""
     # If cpu, write a friendly warning
     if accelerator == "cpu":
         msg = "Running on CPU, this will be slow. Consider using a GPU."
         click.echo(msg)
+
+    # Supress some lightning warnings
+    warnings.filterwarnings(
+        "ignore", ".*that has Tensor Cores. To properly utilize them.*"
+    )
 
     # Set no grad
     torch.set_grad_enabled(False)
@@ -983,10 +986,10 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     if seed is not None:
         seed_everything(seed)
 
-    # Set no_trifast=True when on CPU or MPS
-    if accelerator == "cpu" or torch.backends.mps.is_available():
-        no_trifast = True
-    use_trifast = not no_trifast
+    for key in ["CUEQ_DEFAULT_CONFIG", "CUEQ_DISABLE_AOT_TUNING"]:
+        # Disable kernel tuning by default,
+        # but do not modify envvar if already set by caller
+        os.environ[key] = os.environ.get(key, "1")
 
     # Set cache path
     cache = Path(cache).expanduser()
@@ -1023,7 +1026,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     # Process inputs
     ccd_path = cache / "ccd.pkl"
     mol_dir = cache / "mols"
-    manifest: Manifest = process_inputs(
+    process_inputs(
         data=data,
         out_dir=out_dir,
         ccd_path=ccd_path,
@@ -1035,6 +1038,9 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         preprocessing_threads=preprocessing_threads,
         max_msa_seqs=max_msa_seqs,
     )
+
+    # Load manifest
+    manifest = Manifest.load(out_dir / "processed" / "manifest.json")
 
     # Filter out existing predictions
     filtered_manifest = filter_inputs_structure(
@@ -1163,9 +1169,8 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         }
 
         steering_args = BoltzSteeringParams()
-        if not use_potentials:
-            steering_args.fk_steering = False
-            steering_args.guidance_update = False
+        steering_args.fk_steering = use_potentials
+        steering_args.guidance_update = use_potentials
 
         model_cls = Boltz2 if model == "boltz2" else Boltz1
         model_module = model_cls.load_from_checkpoint(
@@ -1175,7 +1180,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             map_location="cpu",
             diffusion_process_args=asdict(diffusion_params),
             ema=False,
-            use_trifast=use_trifast,
+            use_kernels=not no_kernels,
             pairformer_args=asdict(pairformer_args),
             msa_args=asdict(msa_args),
             steering_args=asdict(steering_args),

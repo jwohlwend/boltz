@@ -81,7 +81,7 @@ class AffinityModule(nn.Module):
         x_pred,
         feats,
         multiplicity=1,
-        use_trifast=False,
+        use_kernels=False,
     ):
         z = self.z_linear(self.z_norm(z))
         z = z.repeat_interleave(multiplicity, 0)
@@ -123,7 +123,11 @@ class AffinityModule(nn.Module):
             + rec_mask[:, :, None] * lig_mask[:, None, :]
             + lig_mask[:, :, None] * lig_mask[:, None, :]
         )
-        z = self.pairformer_stack(z, pair_mask=cross_pair_mask, use_trifast=use_trifast)
+        z = self.pairformer_stack(
+            z,
+            pair_mask=cross_pair_mask,
+            use_kernels=use_kernels,
+        )
 
         out_dict = {}
 

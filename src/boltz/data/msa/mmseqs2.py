@@ -38,8 +38,8 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
             query += f">{n}\n{seq}\n"
             n += 1
 
+        error_count = 0
         while True:
-            error_count = 0
             try:
                 # https://requests.readthedocs.io/en/latest/user/advanced/#advanced
                 # "good practice to set connect timeouts to slightly larger than a multiple of 3"
@@ -49,20 +49,15 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
                     timeout=6.02,
                     headers=headers,
                 )
-            except requests.exceptions.Timeout:
-                logger.warning("Timeout while submitting to MSA server. Retrying...")
-                continue
             except Exception as e:
                 error_count += 1
-                logger.warning(
-                    f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
-                )
+                logger.warning(f"Error while fetching result from MSA server. Retrying... ({error_count}/5)")
                 logger.warning(f"Error: {e}")
-                time.sleep(5)
                 if error_count > 5:
-                    raise
-                continue
-            break
+                    raise Exception("Too many failed attempts for the MSA generation request.")
+                time.sleep(5)
+            else:
+                break
 
         try:
             out = res.json()
@@ -72,28 +67,21 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
         return out
 
     def status(ID):
+        error_count = 0
         while True:
-            error_count = 0
             try:
                 res = requests.get(
                     f"{host_url}/ticket/{ID}", timeout=6.02, headers=headers
                 )
-            except requests.exceptions.Timeout:
-                logger.warning(
-                    "Timeout while fetching status from MSA server. Retrying..."
-                )
-                continue
             except Exception as e:
                 error_count += 1
-                logger.warning(
-                    f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
-                )
+                logger.warning(f"Error while fetching result from MSA server. Retrying... ({error_count}/5)")
                 logger.warning(f"Error: {e}")
-                time.sleep(5)
                 if error_count > 5:
-                    raise
-                continue
-            break
+                    raise Exception("Too many failed attempts for the MSA generation request.")
+                time.sleep(5)
+            else:
+                break
         try:
             out = res.json()
         except ValueError:
@@ -108,22 +96,15 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
                 res = requests.get(
                     f"{host_url}/result/download/{ID}", timeout=6.02, headers=headers
                 )
-            except requests.exceptions.Timeout:
-                logger.warning(
-                    "Timeout while fetching result from MSA server. Retrying..."
-                )
-                continue
             except Exception as e:
                 error_count += 1
-                logger.warning(
-                    f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
-                )
+                logger.warning(f"Error while fetching result from MSA server. Retrying... ({error_count}/5)")
                 logger.warning(f"Error: {e}")
-                time.sleep(5)
                 if error_count > 5:
-                    raise
-                continue
-            break
+                    raise Exception("Too many failed attempts for the MSA generation request.")
+                time.sleep(5)
+            else:
+                break
         with open(path, "wb") as out:
             out.write(res.content)
 

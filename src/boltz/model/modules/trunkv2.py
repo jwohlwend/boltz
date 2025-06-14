@@ -263,7 +263,7 @@ class TemplateModule(nn.Module):
         z: Tensor,
         feats: dict[str, Tensor],
         pair_mask: Tensor,
-        use_trifast: bool = False,
+        use_kernels: bool = False,
     ) -> Tensor:
         """Perform the forward pass.
 
@@ -344,7 +344,7 @@ class TemplateModule(nn.Module):
         # Compute input projections
         v = self.z_proj(self.z_norm(z[:, None])) + a_tij
         v = v.view(B * T, *v.shape[2:])
-        v = v + self.pairformer(v, pair_mask, use_trifast=use_trifast)
+        v = v + self.pairformer(v, pair_mask, use_kernels=use_kernels)
         v = self.v_norm(v)
         v = v.view(B, T, *v.shape[1:])
 
@@ -413,7 +413,7 @@ class TemplateV2Module(nn.Module):
         z: Tensor,
         feats: dict[str, Tensor],
         pair_mask: Tensor,
-        use_trifast: bool = False,
+        use_kernels: bool = False,
     ) -> Tensor:
         """Perform the forward pass.
 
@@ -495,7 +495,7 @@ class TemplateV2Module(nn.Module):
         # Compute input projections
         v = self.z_proj(self.z_norm(z[:, None])) + a_tij
         v = v.view(B * T, *v.shape[2:])
-        v = v + self.pairformer(v, pair_mask, use_trifast=use_trifast)
+        v = v + self.pairformer(v, pair_mask, use_kernels=use_kernels)
         v = self.v_norm(v)
         v = v.view(B, T, *v.shape[1:])
 
@@ -569,7 +569,7 @@ class MSAModule(nn.Module):
         z: Tensor,
         emb: Tensor,
         feats: dict[str, Tensor],
-        use_trifast: bool = False,
+        use_kernels: bool = False,
     ) -> Tensor:
         """Perform the forward pass.
 
@@ -581,8 +581,8 @@ class MSAModule(nn.Module):
             The input embeddings
         feats : dict[str, Tensor]
             Input features
-        use_trifast: bool
-            Whether to use trifast for triangular updates
+        use_kernels: bool
+            Whether to use kernels for triangular updates
 
         Returns
         -------
@@ -651,7 +651,7 @@ class MSAModule(nn.Module):
                     chunk_size_transition_msa,
                     chunk_size_outer_product,
                     chunk_size_tri_attn,
-                    use_trifast=use_trifast,
+                    use_kernels,
                 )
             else:
                 z, m = self.layers[i](
@@ -664,7 +664,7 @@ class MSAModule(nn.Module):
                     chunk_size_transition_msa,
                     chunk_size_outer_product,
                     chunk_size_tri_attn,
-                    use_trifast=use_trifast,
+                    use_kernels,
                 )
         return z
 
@@ -722,7 +722,7 @@ class MSALayer(nn.Module):
         chunk_size_transition_msa: int = None,
         chunk_size_outer_product: int = None,
         chunk_size_tri_attn: int = None,
-        use_trifast: bool = False,
+        use_kernels: bool = False,
     ) -> tuple[Tensor, Tensor]:
         """Perform the forward pass.
 
@@ -752,7 +752,7 @@ class MSALayer(nn.Module):
 
         # Compute pairwise stack
         z = self.pairformer_layer(
-            z, token_mask, chunk_size_tri_attn, use_trifast=use_trifast
+            z, token_mask, chunk_size_tri_attn, use_kernels=use_kernels
         )
 
         return z, m
