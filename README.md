@@ -50,8 +50,11 @@ git clone https://github.com/fnachon/boltz.git
 cd boltz
 pip install -e .
 ```
-allow using multiple libomp libraries
+Temporary workaround for using multiple libomp libraries:
 export KMP_DUPLICATE_LIB_OK=TRUE
+
+Dataloader does not exit cleanly after prediction => no return to the prompt.
+As a temporary fix, set the option "--num_workers 0"
 
 ## Inference
 
