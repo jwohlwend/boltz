@@ -17,7 +17,10 @@ import math
 from typing import Callable, List, Optional, Tuple
 
 import torch
-from cuequivariance_torch.primitives.triangle import triangle_attention
+if torch.cuda.is_available():
+    from cuequivariance_torch.primitives.triangle import triangle_attention
+else:
+    triangle_attention = None 
 from einops import rearrange
 from torch import nn
 

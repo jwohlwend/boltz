@@ -1,5 +1,8 @@
 import torch
-from cuequivariance_torch.primitives.triangle import triangle_multiplicative_update
+if torch.cuda.is_available():
+    from cuequivariance_torch.primitives.triangle import triangle_multiplicative_update
+else:
+    triangle_multiplicative_update = None
 from torch import Tensor, nn
 
 from boltz.model.layers import initialize as init
