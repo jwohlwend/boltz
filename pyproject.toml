@@ -42,7 +42,7 @@ boltz = "boltz.main:cli"
 
 [project.optional-dependencies]
 lint = ["ruff"]
-test = ["pytest", "requests"]
+test = [ "pytest", "requests", "pytest-cov"]
 
 [tool.ruff]
 src = ["src"]
@@ -85,8 +85,3 @@ keep-runtime-typing = true
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
 
-[tool.pytest.ini_options]
-markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "regression",
-]
