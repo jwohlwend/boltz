@@ -1072,21 +1072,27 @@ def predict(  # noqa: C901, PLR0915, PLR0912
 
     # Set up trainer
     strategy = "auto"
-    if (isinstance(devices, int) and devices > 1) or (
-        isinstance(devices, list) and len(devices) > 1
-    ):
-        start_method = "fork" if platform.system() != "win32" else "spawn"
-        strategy = DDPStrategy(start_method=start_method)
-        if len(filtered_manifest.records) < devices:
-            msg = (
-                "Number of requested devices is greater "
-                "than the number of predictions, taking the minimum."
-            )
-            click.echo(msg)
-            if isinstance(devices, list):
-                devices = devices[: max(1, len(filtered_manifest.records))]
-            else:
-                devices = max(1, min(len(filtered_manifest.records), devices))
+    # Don't use DDP on macOS with MPS
+    if torch.backends.mps.is_available():
+        strategy = "auto"
+        devices = 1  # Force single-device for MPS
+        num_workers = 0  # MPS does not support multiple workers
+    else:
+        if (isinstance(devices, int) and devices > 1) or (
+            isinstance(devices, list) and len(devices) > 1
+        ):
+            start_method = "fork" if platform.system() != "win32" else "spawn"
+            strategy = DDPStrategy(start_method=start_method)
+            if len(filtered_manifest.records) < devices:
+                msg = (
+                    "Number of requested devices is greater "
+                    "than the number of predictions, taking the minimum."
+                )
+                click.echo(msg)
+                if isinstance(devices, list):
+                    devices = devices[: max(1, len(filtered_manifest.records))]
+                else:
+                    devices = max(1, min(len(filtered_manifest.records), devices))
 
     # Set up model parameters
     if model == "boltz2":
