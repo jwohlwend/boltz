@@ -1,9 +1,24 @@
-from typing import Optional
+from typing import Optional, Callable
 
 from torch import Tensor, nn
 
 import boltz.model.layers.initialize as init
 
+def transform_multiply(x: Tensor, func1: Callable[[Tensor],Tensor], func2: Callable[[Tensor],Tensor]) -> Tensor:
+    '''
+    Multiply transformed versions of a large Tensor in a memory efficient way, 
+    avoiding co-existing intermediate tensors and corresponding memory spikes.
+
+    The original Tensor is freed in the process. Expected usage is therefore
+    >>> x = transform_multiply(x,func1,func2)
+
+    NOTE for maximal efficiency, func1 should be the most memory-intensive computation.
+    '''
+    y = func1(x)
+    z = func2(x)
+    del x 
+    y *= z
+    return y
 
 class Transition(nn.Module):
     """Perform a two-layer MLP."""
@@ -61,7 +76,7 @@ class Transition(nn.Module):
         x = self.norm(x)
 
         if chunk_size is None or self.training:
-            x = self.silu(self.fc1(x)) * self.fc2(x)
+            x = transform_multiply(x, lambda _x: self.silu(self.fc1(_x)),self.fc2) 
             x = self.fc3(x)
             return x
 
@@ -70,7 +85,9 @@ class Transition(nn.Module):
             fc1_slice = self.fc1.weight[i : i + chunk_size, :]
             fc2_slice = self.fc2.weight[i : i + chunk_size, :]
             fc3_slice = self.fc3.weight[:, i : i + chunk_size]
-            x_chunk = self.silu((x @ fc1_slice.T)) * (x @ fc2_slice.T)
+            x_chunk = transform_multiply(x,
+                                         lambda _x: self.silu((_x @ fc1_slice.T)),
+                                         lambda _x: _x @ fc2_slice.T)
             if i == 0:
                 x_out = x_chunk @ fc3_slice.T
             else:
