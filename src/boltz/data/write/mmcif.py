@@ -1,4 +1,5 @@
 import io
+import re
 from collections.abc import Iterator
 from typing import Optional
 
@@ -13,7 +14,11 @@ from boltz.data import const
 from boltz.data.types import Structure
 
 
-def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # noqa: C901, PLR0915, PLR0912
+def to_mmcif(
+    structure: Structure,
+    plddts: Optional[Tensor] = None,
+    boltz2: bool = False,
+) -> str:  # noqa: C901, PLR0915, PLR0912
     """Write a structure into an MMCIF file.
 
     Parameters
@@ -102,7 +107,7 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
         chain_idx = chain["asym_id"]
         chain_tag = str(chain["name"])
         entity = entities_map[chain_idx]
-        if entity.type == 'water':
+        if entity.type == "water":
             asym = ihm.WaterAsymUnit(
                 entity,
                 1,
@@ -149,6 +154,7 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
 
                 residues = structure.residues[res_start:res_end]
                 for residue in residues:
+                    res_name = str(residue["name"])
                     atom_start = residue["atom_idx"]
                     atom_end = residue["atom_idx"] + residue["atom_num"]
                     atoms = structure.atoms[atom_start:atom_end]
@@ -158,22 +164,38 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
                         if not atom["is_present"]:
                             continue
 
-                        name = atom["name"]
-                        name = [chr(c + 32) for c in name if c != 0]
-                        name = "".join(name)
-                        element = periodic_table.GetElementSymbol(
-                            atom["element"].item()
-                        )
+                        if boltz2:
+                            atom_name = str(atom["name"])
+                            atom_key = re.sub(r"\d", "", atom_name)
+                            if atom_key in const.ambiguous_atoms:
+                                if isinstance(const.ambiguous_atoms[atom_key], str):
+                                    element = const.ambiguous_atoms[atom_key]
+                                elif res_name in const.ambiguous_atoms[atom_key]:
+                                    element = const.ambiguous_atoms[atom_key][res_name]
+                                else:
+                                    element = const.ambiguous_atoms[atom_key]["*"]
+                            else:
+                                element = atom_key[0]
+                        else:
+                            atom_name = atom["name"]
+                            atom_name = [chr(c + 32) for c in atom_name if c != 0]
+                            atom_name = "".join(atom_name)
+                            element = periodic_table.GetElementSymbol(
+                                atom["element"].item()
+                            )
                         element = element.upper()
                         residue_index = residue["res_idx"] + 1
                         pos = atom_coords[i]
 
-                        if record_type != 'HETATM':
+                        if record_type != "HETATM":
                             # The current residue plddt is stored at the res_num index unless a ligand has previouly been added.
                             biso = (
                                 100.00
                                 if plddts is None
-                                else round(plddts[res_num + ligand_index_offset].item() * 100, 3)
+                                else round(
+                                    plddts[res_num + ligand_index_offset].item() * 100,
+                                    3,
+                                )
                             )
                             prev_polymer_resnum = res_num
                         else:
@@ -182,14 +204,20 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
                             biso = (
                                 100.00
                                 if plddts is None
-                                else round(plddts[prev_polymer_resnum + ligand_index_offset].item() * 100, 3)
+                                else round(
+                                    plddts[
+                                        prev_polymer_resnum + ligand_index_offset
+                                    ].item()
+                                    * 100,
+                                    3,
+                                )
                             )
 
                         yield Atom(
                             asym_unit=asym_unit_map[chain_idx],
                             type_symbol=element,
                             seq_id=residue_index,
-                            atom_id=name,
+                            atom_id=atom_name,
                             x=f"{pos[0]:.5f}",
                             y=f"{pos[1]:.5f}",
                             z=f"{pos[2]:.5f}",
@@ -198,12 +226,14 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
                             occupancy=1,
                         )
 
-                    if record_type != 'HETATM':
+                    if record_type != "HETATM":
                         res_num += 1
 
         def add_plddt(self, plddts):
             res_num = 0
-            prev_polymer_resnum = -1 # -1 handles case where ligand is the first residue
+            prev_polymer_resnum = (
+                -1
+            )  # -1 handles case where ligand is the first residue
             ligand_index_offset = 0
             for chain in structure.chains:
                 chain_idx = chain["asym_id"]
@@ -213,7 +243,7 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
 
                 record_type = (
                     "ATOM"
-                    if chain['mol_type'] != const.chain_type_ids["NONPOLYMER"]
+                    if chain["mol_type"] != const.chain_type_ids["NONPOLYMER"]
                     else "HETATM"
                 )
 
@@ -222,14 +252,17 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
                     residue_idx = residue["res_idx"] + 1
 
                     atom_start = residue["atom_idx"]
-                    atom_end = residue["atom_idx"] + residue['atom_num']
+                    atom_end = residue["atom_idx"] + residue["atom_num"]
 
-                    if record_type != 'HETATM':
+                    if record_type != "HETATM":
                         # The current residue plddt is stored at the res_num index unless a ligand has previouly been added.
                         self.qa_metrics.append(
                             _LocalPLDDT(
                                 asym_unit_map[chain_idx].residue(residue_idx),
-                                round(plddts[res_num + ligand_index_offset].item() * 100, 3),
+                                round(
+                                    plddts[res_num + ligand_index_offset].item() * 100,
+                                    3,
+                                ),
                             )
                         )
                         prev_polymer_resnum = res_num
@@ -238,15 +271,25 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
                         self.qa_metrics.append(
                             _LocalPLDDT(
                                 asym_unit_map[chain_idx].residue(residue_idx),
-                                round(plddts[
-                                    prev_polymer_resnum + ligand_index_offset + 1: 
-                                    prev_polymer_resnum + ligand_index_offset + residue["atom_num"] + 1
-                                ].mean().item() * 100, 2),
+                                round(
+                                    plddts[
+                                        prev_polymer_resnum
+                                        + ligand_index_offset
+                                        + 1 : prev_polymer_resnum
+                                        + ligand_index_offset
+                                        + residue["atom_num"]
+                                        + 1
+                                    ]
+                                    .mean()
+                                    .item()
+                                    * 100,
+                                    2,
+                                ),
                             )
                         )
-                        ligand_index_offset += residue['atom_num']
-                        
-                    if record_type != 'HETATM':
+                        ligand_index_offset += residue["atom_num"]
+
+                    if record_type != "HETATM":
                         res_num += 1
 
     # Add the model and modeling protocol to the file and write them out:

@@ -11,12 +11,12 @@ from torch import Tensor, from_numpy
 from torch.nn.functional import one_hot
 
 from boltz.data import const
-from boltz.data.feature.pad import pad_dim
 from boltz.data.feature.symmetry import (
     get_amino_acids_symmetries,
     get_chain_symmetries,
     get_ligand_symmetries,
 )
+from boltz.data.pad import pad_dim
 from boltz.data.types import (
     MSA,
     MSADeletion,

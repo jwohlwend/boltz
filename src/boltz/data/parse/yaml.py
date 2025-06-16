@@ -7,7 +7,12 @@ from boltz.data.parse.schema import parse_boltz_schema
 from boltz.data.types import Target
 
 
-def parse_yaml(path: Path, ccd: dict[str, Mol]) -> Target:
+def parse_yaml(
+    path: Path,
+    ccd: dict[str, Mol],
+    mol_dir: Path,
+    boltz2: bool = False,
+) -> Target:
     """Parse a Boltz input yaml / json.
 
     The input file should be a yaml file with the following format:
@@ -35,6 +40,10 @@ def parse_yaml(path: Path, ccd: dict[str, Mol]) -> Target:
         - pocket:
             binder: E
             contacts: [[B, 1], [B, 2]]
+    templates:
+        - path: /path/to/template.pdb
+          ids: [A] # optional, specify which chains to template
+
     version: 1
 
     Parameters
@@ -43,6 +52,8 @@ def parse_yaml(path: Path, ccd: dict[str, Mol]) -> Target:
         Path to the YAML input format.
     components : Dict
         Dictionary of CCD components.
+    boltz2 : bool
+        Whether to parse the input for Boltz2.
 
     Returns
     -------
@@ -54,4 +65,4 @@ def parse_yaml(path: Path, ccd: dict[str, Mol]) -> Target:
         data = yaml.safe_load(file)
 
     name = path.stem
-    return parse_boltz_schema(name, data, ccd)
+    return parse_boltz_schema(name, data, ccd, mol_dir, boltz2)
