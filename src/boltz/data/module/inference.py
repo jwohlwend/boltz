@@ -267,7 +267,7 @@ class BoltzInferenceDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=not torch.backends.mps.is_available(),
             shuffle=False,
-            persistent_workers=True,
+            persistent_workers=False,
             collate_fn=collate,
         )
 
