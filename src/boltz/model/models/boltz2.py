@@ -1020,9 +1020,7 @@ class Boltz2(LightningModule):
                     print(msg)
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
-                    if torch.backends.mps.is_available():
-                        torch.backends.mps.empty_cache()
-                    gc.collect()
+                        gc.collect()
                     return
                 raise e
         else:
@@ -1125,9 +1123,7 @@ class Boltz2(LightningModule):
                 print("| WARNING: ran out of memory, skipping batch")
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-                if torch.backends.mps.is_available():
-                    torch.backends.mps.empty_cache()
-                gc.collect()
+                    gc.collect()
                 return {"exception": True}
             else:
                 raise e
