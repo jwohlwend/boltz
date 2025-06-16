@@ -525,7 +525,7 @@ class Boltz2(LightningModule):
                     "token_trans_bias": token_trans_bias,
                 }
 
-                with torch.autocast(device_type=q.device.type, enabled=False):
+                with torch.autocast(device_type=s.device.type, enabled=False):
                     struct_out = self.structure_module.sample(
                         s_trunk=s.float(),
                         s_inputs=s_inputs.float(),

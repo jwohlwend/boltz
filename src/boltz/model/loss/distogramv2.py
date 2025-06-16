@@ -24,7 +24,7 @@ def distogram_loss(
         Per example loss.
 
     """
-    with torch.autocast(device_type=output.device.type, enabled=False):
+    with torch.autocast(device_type=output["pdistogram"].device.type, enabled=False):
         # Get predicted distograms
         pred = output["pdistogram"].float()  # (B, L, L, num_distograms, disto_bins)
         D = pred.shape[3]  # num_distograms  # noqa: N806
