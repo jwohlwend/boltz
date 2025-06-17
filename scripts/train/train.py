@@ -130,7 +130,7 @@ def train(raw_config: str, args: list[str]) -> None:  # noqa: C901, PLR0912, PLR
     if cfg.pretrained and not cfg.resume:
         # Load the pretrained weights into the confidence module
         if cfg.load_confidence_from_trunk:
-            checkpoint = torch.load(cfg.pretrained, map_location="cpu")
+            checkpoint = torch.load(cfg.pretrained, map_location="cpu", weights_only=True)
 
             # Modify parameter names in the state_dict
             new_state_dict = {}
