@@ -593,7 +593,7 @@ class Boltz2(LightningModule):
                     pred_distogram_logits=(
                         dict_out["pdistogram"][
                             :, :, :, 0
-                        ].detach()  # TODO only implemeted for 1 distogram
+                        ].detach()  # TODO only implemented for 1 distogram
                     ),
                     multiplicity=diffusion_samples,
                     run_sequentially=run_confidence_sequentially,

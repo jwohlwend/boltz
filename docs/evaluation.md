@@ -47,7 +47,7 @@ boltz_results_final/
 ├── outputs/                # Output files for every model
     ├── casp15
     └── test
-├── evals/                  # Output of evluation script for every
+├── evals/                  # Output of evaluation script for every
     ├── casp15
     └── test
 ├── results_casp.csv        # Summary of evaluation results for CASP15

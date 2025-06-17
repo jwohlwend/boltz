@@ -206,13 +206,19 @@ def download_boltz2(cache: Path) -> None:
     # Download CCD
     mols = cache / "mols"
     tar_mols = cache / "mols.tar"
-    if not mols.exists():
+    if not tar_mols.exists():
         click.echo(
-            f"Downloading and extracting the CCD data to {mols}. "
+            f"Downloading the CCD data to {tar_mols}. "
             "This may take a bit of time. You may change the cache directory "
             "with the --cache flag."
         )
         urllib.request.urlretrieve(MOL_URL, str(tar_mols))  # noqa: S310
+    if not mols.exists():
+        click.echo(
+            f"Extracting the CCD data to {mols}. "
+            "This may take a bit of time. You may change the cache directory "
+            "with the --cache flag."
+        )
         with tarfile.open(str(tar_mols), "r") as tar:
             tar.extractall(cache)  # noqa: S202
 
