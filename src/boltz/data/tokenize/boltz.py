@@ -185,10 +185,11 @@ class BoltzTokenizer(Tokenizer):
         token_data = np.array(token_data, dtype=Token)
         token_bonds = np.array(token_bonds, dtype=TokenBond)
         tokenized = Tokenized(
-            token_data,
-            token_bonds,
-            data.structure,
-            data.msa,
-            data.residue_constraints,
+            tokens=token_data,
+            bonds=token_bonds,
+            structure=data.structure,
+            msa=data.msa,
+            record=data.record,
+            residue_constraints=data.residue_constraints,
         )
         return tokenized

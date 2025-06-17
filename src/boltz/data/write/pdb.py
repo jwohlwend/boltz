@@ -1,3 +1,4 @@
+import re
 from typing import Optional
 
 from rdkit import Chem
@@ -7,7 +8,11 @@ from boltz.data import const
 from boltz.data.types import Structure
 
 
-def to_pdb(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # noqa: PLR0915
+def to_pdb(
+    structure: Structure,
+    plddts: Optional[Tensor] = None,
+    boltz2: bool = False,
+) -> str:  # noqa: PLR0915
     """Write a structure into a PDB file.
 
     Parameters
@@ -33,7 +38,7 @@ def to_pdb(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # noq
     res_num = 0
     # Tracks non-ligand plddt tensor indices,
     # Initializing to -1 handles case where ligand is resnum 0
-    prev_polymer_resnum = -1 
+    prev_polymer_resnum = -1
     # Tracks ligand indices.
     ligand_index_offset = 0
 
@@ -48,6 +53,7 @@ def to_pdb(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # noq
 
         residues = structure.residues[res_start:res_end]
         for residue in residues:
+            res_name = str(residue["name"])
             atom_start = residue["atom_idx"]
             atom_end = residue["atom_idx"] + residue["atom_num"]
             atoms = structure.atoms[atom_start:atom_end]
@@ -62,14 +68,29 @@ def to_pdb(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # noq
                     if chain["mol_type"] != const.chain_type_ids["NONPOLYMER"]
                     else "HETATM"
                 )
-                name = atom["name"]
-                name = [chr(c + 32) for c in name if c != 0]
-                name = "".join(name)
+                name = str(atom["name"])
+                if boltz2:
+                    atom_name = str(atom["name"])
+                    atom_key = re.sub(r"\d", "", atom_name)
+                    if atom_key in const.ambiguous_atoms:
+                        if isinstance(const.ambiguous_atoms[atom_key], str):
+                            element = const.ambiguous_atoms[atom_key]
+                        elif res_name in const.ambiguous_atoms[atom_key]:
+                            element = const.ambiguous_atoms[atom_key][res_name]
+                        else:
+                            element = const.ambiguous_atoms[atom_key]["*"]
+                    else:
+                        element = atom_key[0]
+                else:
+                    atom_name = atom["name"]
+                    atom_name = [chr(c + 32) for c in atom_name if c != 0]
+                    atom_name = "".join(atom_name)
+                    element = periodic_table.GetElementSymbol(atom["element"].item())
+
                 name = name if len(name) == 4 else f" {name}"  # noqa: PLR2004
                 alt_loc = ""
                 insertion_code = ""
                 occupancy = 1.00
-                element = periodic_table.GetElementSymbol(atom["element"].item())
                 element = element.upper()
                 charge = ""
                 residue_index = residue["res_idx"] + 1
@@ -78,17 +99,27 @@ def to_pdb(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # noq
                     "LIG" if record_type == "HETATM" else str(residue["name"][:3])
                 )
 
-                if record_type != 'HETATM':
+                if record_type != "HETATM":
                     # The current residue plddt is stored at the res_num index unless a ligand has previouly been added.
                     b_factor = (
-                        100.00 if plddts is None else round(plddts[res_num + ligand_index_offset].item() * 100, 2)
+                        100.00
+                        if plddts is None
+                        else round(
+                            plddts[res_num + ligand_index_offset].item() * 100, 2
+                        )
                     )
                     prev_polymer_resnum = res_num
                 else:
                     # If not a polymer resnum, we can get index into plddts by adding offset relative to previous polymer resnum.
                     ligand_index_offset += 1
                     b_factor = (
-                        100.00 if plddts is None else round(plddts[prev_polymer_resnum + ligand_index_offset].item() * 100, 2)
+                        100.00
+                        if plddts is None
+                        else round(
+                            plddts[prev_polymer_resnum + ligand_index_offset].item()
+                            * 100,
+                            2,
+                        )
                     )
 
                 # PDB is a columnar format, every space matters here!
@@ -104,7 +135,7 @@ def to_pdb(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # noq
                 atom_reindex_ter.append(atom_index)
                 atom_index += 1
 
-            if record_type != 'HETATM':
+            if record_type != "HETATM":
                 res_num += 1
 
         should_terminate = chain_idx < (len(structure.chains) - 1)
@@ -120,16 +151,19 @@ def to_pdb(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # noq
             atom_index += 1
 
     # Dump CONECT records.
-    for bonds in [structure.bonds, structure.connections]:
-        for bond in bonds:
-            atom1 = structure.atoms[bond["atom_1"]]
-            atom2 = structure.atoms[bond["atom_2"]]
-            if not atom1["is_present"] or not atom2["is_present"]:
-                continue
-            atom1_idx = atom_reindex_ter[bond["atom_1"]]
-            atom2_idx = atom_reindex_ter[bond["atom_2"]]
-            conect_line = f"CONECT{atom1_idx:>5}{atom2_idx:>5}"
-            pdb_lines.append(conect_line)
+    all_bonds = structure.bonds
+    if hasattr(structure, "connections"):
+        all_bonds = all_bonds + structure.connections
+
+    for bond in all_bonds:
+        atom1 = structure.atoms[bond["atom_1"]]
+        atom2 = structure.atoms[bond["atom_2"]]
+        if not atom1["is_present"] or not atom2["is_present"]:
+            continue
+        atom1_idx = atom_reindex_ter[bond["atom_1"]]
+        atom2_idx = atom_reindex_ter[bond["atom_2"]]
+        conect_line = f"CONECT{atom1_idx:>5}{atom2_idx:>5}"
+        pdb_lines.append(conect_line)
 
     pdb_lines.append("END")
     pdb_lines.append("")

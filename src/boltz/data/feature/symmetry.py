@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from boltz.data import const
-from boltz.data.feature.pad import pad_dim
+from boltz.data.pad import pad_dim
 from boltz.model.loss.confidence import lddt_dist
 from boltz.model.loss.validation import weighted_minimum_rmsd_single
 
