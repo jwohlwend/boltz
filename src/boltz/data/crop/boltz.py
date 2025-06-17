@@ -245,7 +245,7 @@ class BoltzCropper(Cropper):
                 new_tokens = chain_tokens
             else:
                 # First limit to the maximum set of tokens, with the
-                # neighboorhood on both sides to handle edges. This
+                # neighborhood on both sides to handle edges. This
                 # is mostly for efficiency with the while loop below.
                 min_idx = token["res_idx"] - neighborhood_size
                 max_idx = token["res_idx"] + neighborhood_size
