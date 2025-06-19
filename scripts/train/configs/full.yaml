@@ -189,3 +189,11 @@ model:
     add_smooth_lddt_loss: true
     nucleotide_loss_weight: 5.0
     ligand_loss_weight: 10.0
+
+  steering_args:
+    fk_steering: False
+    num_particles: 3
+    fk_lambda: 4.0
+    fk_resampling_interval: 3
+    guidance_update: False
+    num_gd_steps: 16 

@@ -16,9 +16,10 @@
 # limitations under the License.
 
 import math
+
 import numpy as np
-from scipy.stats import truncnorm
 import torch
+from scipy.stats import truncnorm
 
 
 def _prod(nums):

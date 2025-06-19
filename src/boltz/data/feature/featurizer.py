@@ -11,12 +11,12 @@ from torch import Tensor, from_numpy
 from torch.nn.functional import one_hot
 
 from boltz.data import const
-from boltz.data.feature.pad import pad_dim
 from boltz.data.feature.symmetry import (
     get_amino_acids_symmetries,
     get_chain_symmetries,
     get_ligand_symmetries,
 )
+from boltz.data.pad import pad_dim
 from boltz.data.types import (
     MSA,
     MSADeletion,
@@ -1215,6 +1215,7 @@ class BoltzFeaturizer:
 
         # Compute residue constraint features
         residue_constraint_features = {}
+        chain_constraint_features = {}
         if compute_constraint_features:
             residue_constraint_features = process_residue_constraint_features(data)
             chain_constraint_features = process_chain_feature_constraints(data)

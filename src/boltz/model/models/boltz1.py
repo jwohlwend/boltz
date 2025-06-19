@@ -56,7 +56,6 @@ class Boltz1(LightningModule):
         diffusion_process_args: dict[str, Any],
         diffusion_loss_args: dict[str, Any],
         confidence_model_args: dict[str, Any],
-        steering_args: dict[str, Any],
         atom_feature_dim: int = 128,
         confidence_prediction: bool = False,
         confidence_imitate_trunk: bool = False,
@@ -76,6 +75,8 @@ class Boltz1(LightningModule):
         min_dist: float = 2.0,
         max_dist: float = 22.0,
         predict_args: Optional[dict[str, Any]] = None,
+        steering_args: Optional[dict[str, Any]] = None,
+        use_kernels: bool = False,
     ) -> None:
         super().__init__()
 
@@ -138,6 +139,8 @@ class Boltz1(LightningModule):
         self.diffusion_loss_args = diffusion_loss_args
         self.predict_args = predict_args
         self.steering_args = steering_args
+
+        self.use_kernels = use_kernels
 
         self.nucleotide_rmsd_weight = nucleotide_rmsd_weight
         self.ligand_rmsd_weight = ligand_rmsd_weight
@@ -258,6 +261,14 @@ class Boltz1(LightningModule):
                 if name.split(".")[0] != "confidence_module":
                     param.requires_grad = False
 
+    def setup(self, stage: str) -> None:
+        """Set the model for training, validation and inference."""
+        if stage == "predict" and not (
+            torch.cuda.is_available()
+            and torch.cuda.get_device_properties(torch.device("cuda")).major >= 8.0  # noqa: PLR2004
+        ):
+            self.use_kernels = False
+
     def forward(
         self,
         feats: dict[str, Tensor],
@@ -265,6 +276,7 @@ class Boltz1(LightningModule):
         num_sampling_steps: Optional[int] = None,
         multiplicity_diffusion_train: int = 1,
         diffusion_samples: int = 1,
+        max_parallel_samples: Optional[int] = None,
         run_confidence_sequentially: bool = False,
     ) -> dict[str, Tensor]:
         dict_out = {}
@@ -309,7 +321,9 @@ class Boltz1(LightningModule):
 
                     # Compute pairwise stack
                     if not self.no_msa:
-                        z = z + self.msa_module(z, s_inputs, feats)
+                        z = z + self.msa_module(
+                            z, s_inputs, feats, use_kernels=self.use_kernels
+                        )
 
                     # Revert to uncompiled version for validation
                     if self.is_pairformer_compiled and not self.training:
@@ -317,7 +331,13 @@ class Boltz1(LightningModule):
                     else:
                         pairformer_module = self.pairformer_module
 
-                    s, z = pairformer_module(s, z, mask=mask, pair_mask=pair_mask)
+                    s, z = pairformer_module(
+                        s,
+                        z,
+                        mask=mask,
+                        pair_mask=pair_mask,
+                        use_kernels=self.use_kernels,
+                    )
 
             pdistogram = self.distogram_module(z)
             dict_out = {"pdistogram": pdistogram}
@@ -346,6 +366,7 @@ class Boltz1(LightningModule):
                     num_sampling_steps=num_sampling_steps,
                     atom_mask=feats["atom_pad_mask"],
                     multiplicity=diffusion_samples,
+                    max_parallel_samples=max_parallel_samples,
                     train_accumulate_token_repr=self.training,
                     steering_args=self.steering_args,
                 )
@@ -367,6 +388,7 @@ class Boltz1(LightningModule):
                     pred_distogram_logits=dict_out["pdistogram"].detach(),
                     multiplicity=diffusion_samples,
                     run_sequentially=run_confidence_sequentially,
+                    use_kernels=self.use_kernels,
                 )
             )
         if self.confidence_prediction and self.confidence_module.use_s_diffusion:
@@ -1131,6 +1153,7 @@ class Boltz1(LightningModule):
                 recycling_steps=self.predict_args["recycling_steps"],
                 num_sampling_steps=self.predict_args["sampling_steps"],
                 diffusion_samples=self.predict_args["diffusion_samples"],
+                max_parallel_samples=self.predict_args["diffusion_samples"],
                 run_confidence_sequentially=True,
             )
             pred_dict = {"exception": False}
