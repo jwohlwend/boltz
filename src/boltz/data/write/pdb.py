@@ -31,7 +31,7 @@ def to_pdb(
     atom_index = 1
     atom_reindex_ter = []
 
-    # Load periodic table for element mapping
+    # Load periodic table for element mapping.
     periodic_table = Chem.GetPeriodicTable()
 
     # Index into plddt tensor for current residue.
@@ -44,9 +44,11 @@ def to_pdb(
 
     # Add all atom sites.
     for chain in structure.chains:
-        # We rename the chains in alphabetical order
+        # We rename the chains in alphabetical order.
         chain_idx = chain["asym_id"]
-        chain_tag = chain["name"]
+        
+        # Use only the first character of the chain name to ensure PDB compatibility.
+        chain_tag = chain["name"][0]
 
         res_start = chain["res_idx"]
         res_end = chain["res_idx"] + chain["res_num"]
