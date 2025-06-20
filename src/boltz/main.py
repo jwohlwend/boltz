@@ -3,12 +3,29 @@ import os
 import pickle
 import platform
 import tarfile
-import urllib.request
+import requests
 from dataclasses import asdict, dataclass
 from functools import partial
 from multiprocessing import Pool
 from pathlib import Path
 from typing import Literal, Optional
+
+def safe_url_request(url):
+    """Safely request a URL, only allowing HTTP/HTTPS schemes."""
+    if not isinstance(url, str):
+        url = str(url)
+    
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("Only HTTP and HTTPS URLs are allowed")
+    
+    try:
+        import requests
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        return response
+    except Exception as e:
+        raise Exception(f"Failed to fetch URL: {e}")
+
 
 import click
 import torch
@@ -17,6 +34,23 @@ from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.utilities import rank_zero_only
 from rdkit import Chem
 from tqdm import tqdm
+
+def safe_url_request(url):
+    """Safely request a URL, only allowing HTTP/HTTPS schemes."""
+    if not isinstance(url, str):
+        url = str(url)
+    
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("Only HTTP and HTTPS URLs are allowed")
+    
+    try:
+        import requests
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        return response
+    except Exception as e:
+        raise Exception(f"Failed to fetch URL: {e}")
+
 
 from boltz.data import const
 from boltz.data.module.inference import BoltzInferenceDataModule
@@ -31,6 +65,23 @@ from boltz.data.types import MSA, Manifest, Record
 from boltz.data.write.writer import BoltzAffinityWriter, BoltzWriter
 from boltz.model.models.boltz1 import Boltz1
 from boltz.model.models.boltz2 import Boltz2
+
+def safe_url_request(url):
+    """Safely request a URL, only allowing HTTP/HTTPS schemes."""
+    if not isinstance(url, str):
+        url = str(url)
+    
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("Only HTTP and HTTPS URLs are allowed")
+    
+    try:
+        import requests
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        return response
+    except Exception as e:
+        raise Exception(f"Failed to fetch URL: {e}")
+
 
 CCD_URL = "https://huggingface.co/boltz-community/boltz-1/resolve/main/ccd.pkl"
 MOL_URL = "https://huggingface.co/boltz-community/boltz-2/resolve/main/mols.tar"
