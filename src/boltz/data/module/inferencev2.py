@@ -261,7 +261,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         # Inference specific options
         options = record.inference_options
         if options is None:
-            pocket_constraints = None, None
+            pocket_constraints = None
         else:
             pocket_constraints = options.pocket_constraints
 
