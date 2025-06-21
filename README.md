@@ -28,11 +28,18 @@ Install boltz with PyPI (recommended):
 pip install boltz -U
 ```
 
-or directly from GitHub for daily updates:
+or directly from GitHub for daily updates with cuda 12:
 
 ```
 git clone https://github.com/jwohlwend/boltz.git
-cd boltz; pip install -e .
+cd boltz; pip install -e .[cuda12] 
+```
+
+or directly from GitHub for daily updates with cuda 11:
+
+```
+git clone https://github.com/jwohlwend/boltz.git
+cd boltz; pip install -e .[cuda11] —extra-index-url https://download.pytorch.org/whl/cu118 torch
 ```
 
 ## Inference
