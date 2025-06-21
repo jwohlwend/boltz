@@ -53,7 +53,7 @@ There are two main predictions in the affinity output: `affinity_pred_value` and
 
 ⚠️ **Coming soon: updated evaluation code for Boltz-2!**
 
-To encourage reproducibility and facilitate comparison with other models, on top of the existing Boltz-1 evaluation pipeline, we will soon provide the evaluation scripts and structural predictions for Boltz-2, Boltz-1, Chai-1 and AlphaFold3 on our test benchmark dataset, and our affinity predictions on the FEP+ benchamark, CASP16 and our MF-PCBA test set.
+To encourage reproducibility and facilitate comparison with other models, on top of the existing Boltz-1 evaluation pipeline, we will soon provide the evaluation scripts and structural predictions for Boltz-2, Boltz-1, Chai-1 and AlphaFold3 on our test benchmark dataset, and our affinity predictions on the FEP+ benchmark, CASP16 and our MF-PCBA test set.
 
 ![Affinity test sets evaluations](docs/pearson_plot.png)
 ![Test set evaluations](docs/plot_test_boltz2.png)
