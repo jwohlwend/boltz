@@ -620,7 +620,6 @@ class MSAModule(nn.Module):
 
         # AF-sample2 MSA masking (before one-hot)
         if self.mask_rate_msa > 0.0:
-            print("Applying MSA masking with rate:", self.mask_rate_msa)
             g = torch.Generator(device=msa.device)
             g.manual_seed(self.mask_seed_msa)
             rand = torch.rand(msa.shape, generator=g, device=msa.device)
