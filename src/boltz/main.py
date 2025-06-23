@@ -104,7 +104,6 @@ class MSAModuleArgs:
     offload_to_cpu: bool = False
     subsample_msa: bool = False
     num_subsampled_msa: int = 1024
-    mask_msa: bool = False
     mask_rate_msa: float = 0.1
     mask_seed_msa: int = 42
 
@@ -939,11 +938,6 @@ def cli() -> None:
     help="Whether to disable the kernels. Default False",
 )
 @click.option(
-    "--mask_msa",
-    is_flag=True,
-    help="Whether to use MSA masking. Default is False.",
-)
-@click.option(
     "--mask_rate_msa",
     type=click.FloatRange(0.0, 1.0),
     default=0.1,
@@ -1135,7 +1129,6 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         subsample_msa=subsample_msa,
         num_subsampled_msa=num_subsampled_msa,
         use_paired_feature=model == "boltz2",
-        mask_msa=mask_msa,
         mask_rate_msa=mask_rate_msa,
         mask_seed_msa=mask_seed_msa
     )

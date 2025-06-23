@@ -526,7 +526,6 @@ class MSAModule(nn.Module):
         use_paired_feature: bool = True,
         subsample_msa: bool = False,
         num_subsampled_msa: int = 1024,
-        mask_msa: bool = True,
         mask_rate_msa: float = 0.1,
         mask_seed_msa: int = 42,
         **kwargs,
@@ -547,7 +546,6 @@ class MSAModule(nn.Module):
         self.activation_checkpointing = activation_checkpointing
         self.subsample_msa = subsample_msa
         self.num_subsampled_msa = num_subsampled_msa
-        self.mask_msa = mask_msa
         self.mask_rate_msa = mask_rate_msa
         self.mask_seed_msa = mask_seed_msa
 
@@ -619,6 +617,17 @@ class MSAModule(nn.Module):
 
         # Load relevant features
         msa = feats["msa"]
+
+        # AF-sample2 MSA masking (before one-hot)
+        if self.mask_rate_msa > 0.0:
+            print("Applying MSA masking with rate:", self.mask_rate_msa)
+            g = torch.Generator(device=msa.device)
+            g.manual_seed(self.mask_seed_msa)
+            rand = torch.rand(msa.shape, generator=g, device=msa.device)
+            mask = (rand < self.mask_rate_msa) & (msa != const.token_ids["UNK"])
+            mask[:, 0, :] = False  # Do not mask query row
+            msa = torch.where(mask, torch.full_like(msa, const.token_ids["UNK"]), msa)
+
         msa = torch.nn.functional.one_hot(msa, num_classes=const.num_tokens)
         has_deletion = feats["has_deletion"].unsqueeze(-1)
         deletion_value = feats["deletion_value"].unsqueeze(-1)
@@ -638,15 +647,6 @@ class MSAModule(nn.Module):
             msa_indices = torch.randperm(msa.shape[1])[: self.num_subsampled_msa]
             m = m[:, msa_indices]
             msa_mask = msa_mask[:, msa_indices]
-
-        # AF-sample2 MSA masking
-        if self.mask_msa and self.mask_rate_msa > 0.0:
-            g = torch.Generator(device=msa.device)
-            g.manual_seed(self.mask_seed_msa)
-            rand = torch.rand(msa.shape, generator=g, device=msa.device)
-            mask = (rand < self.mask_rate_msa) & (msa != const.token_ids["UNK"])
-            mask[:, 0, :] = False
-            msa = torch.where(mask, torch.full_like(msa, const.token_ids["UNK"]), msa)
 
         # Compute input projections
         m = self.msa_proj(m)
