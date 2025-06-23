@@ -554,7 +554,7 @@ class AtomDiffusion(Module):
         noise = torch.randn_like(atom_coords)
         noised_atom_coords = atom_coords + padded_sigmas * noise
 
-        denoised_atom_coords, _ = self.preconditioned_network_forward(
+        denoised_atom_coords = self.preconditioned_network_forward(
             noised_atom_coords,
             sigmas,
             network_condition_kwargs={

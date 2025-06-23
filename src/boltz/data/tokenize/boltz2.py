@@ -133,7 +133,7 @@ def tokenize_structure(  # noqa: C901, PLR0915
     chains = struct.chains[struct.mask]
 
     # Ensemble atom id start in coords table.
-    # For cropper and other operations, harcoded to 0th conformer.
+    # For cropper and other operations, hardcoded to 0th conformer.
     offset = struct.ensemble[0]["atom_coord_idx"]
 
     for chain in chains:
