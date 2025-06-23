@@ -619,7 +619,7 @@ class Boltz2(LightningModule):
             coords_affinity = dict_out["sample_atom_coords"].detach()[best_idx][
                 None, None
             ]
-            s_inputs = self.input_embedder(feats, affinity=False)
+            s_inputs = self.input_embedder(feats, affinity=True)
 
             with torch.autocast("cuda", enabled=False):
                 if self.affinity_ensemble:
