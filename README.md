@@ -3,8 +3,8 @@
   <img src="docs/boltz2_title.png" width="300"/>
   <img src="https://model-gateway.boltz.bio/a.png?x-pxid=bce1627f-f326-4bff-8a97-45c6c3bc929d" />
 
-[Boltz-1](https://doi.org/10.1101/2024.11.19.624167) | [Boltz-2](https://bit.ly/boltz2-pdf) |
-[Slack](https://join.slack.com/t/boltz-community/shared_invite/zt-3751cpmn6-kDLgLcQFMOPeUdFIJd4oqQ) <br> <br>
+[Boltz-1](https://doi.org/10.1101/2024.11.19.624167) | [Boltz-2](https://doi.org/10.1101/2025.06.14.659707) |
+[Slack](https://join.slack.com/t/boltz-community/shared_invite/zt-37uc4m8t2-gbbph6ka704ORcDCHLlFKg) <br> <br>
 </div>
 
 
@@ -16,7 +16,7 @@
 
 Boltz is a family of models for biomolecular interaction prediction. Boltz-1 was the first fully open source model to approach AlphaFold3 accuracy. Our latest work Boltz-2 is a new biomolecular foundation model that goes beyond AlphaFold3 and Boltz-1 by jointly modeling complex structures and binding affinities, a critical component towards accurate molecular design. Boltz-2 is the first deep learning model to approach the accuracy of physics-based free-energy perturbation (FEP) methods, while running 1000x faster — making accurate in silico screening practical for early-stage drug discovery.
 
-All the code and weights are provided under MIT license, making them freely available for both academic and commercial uses. For more information about the model, see the [Boltz-1](https://doi.org/10.1101/2024.11.19.624167) and [Boltz-2](https://bit.ly/boltz2-pdf) technical reports. To discuss updates, tools and applications join our [Slack channel](https://join.slack.com/t/boltz-community/shared_invite/zt-34qg8uink-V1LGdRRUf3avAUVaRvv93w).
+All the code and weights are provided under MIT license, making them freely available for both academic and commercial uses. For more information about the model, see the [Boltz-1](https://doi.org/10.1101/2024.11.19.624167) and [Boltz-2](https://doi.org/10.1101/2025.06.14.659707) technical reports. To discuss updates, tools and applications join our [Slack channel](https://join.slack.com/t/boltz-community/shared_invite/zt-37uc4m8t2-gbbph6ka704ORcDCHLlFKg).
 
 ## Installation
 
@@ -68,7 +68,7 @@ If you're interested in retraining the model, currently for Boltz-1 but soon for
 
 ## Contributing
 
-We welcome external contributions and are eager to engage with the community. Connect with us on our [Slack channel](https://join.slack.com/t/boltz-community/shared_invite/zt-34qg8uink-V1LGdRRUf3avAUVaRvv93w) to discuss advancements, share insights, and foster collaboration around Boltz-2.
+We welcome external contributions and are eager to engage with the community. Connect with us on our [Slack channel](https://join.slack.com/t/boltz-community/shared_invite/zt-37uc4m8t2-gbbph6ka704ORcDCHLlFKg) to discuss advancements, share insights, and foster collaboration around Boltz-2.
 
 Boltz also runs on Tenstorrent hardware thanks to a [fork](https://github.com/moritztng/tt-boltz) by Moritz Thüning.
 
@@ -86,8 +86,8 @@ If you use this code or the models in your research, please cite the following p
   author = {Passaro, Saro and Corso, Gabriele and Wohlwend, Jeremy and Reveiz, Mateo and Thaler, Stephan and Somnath, Vignesh Ram and Getz, Noah and Portnoi, Tally and Roy, Julien and Stark, Hannes and Kwabi-Addo, David and Beaini, Dominique and Jaakkola, Tommi and Barzilay, Regina},
   title = {Boltz-2: Towards Accurate and Efficient Binding Affinity Prediction},
   year = {2025},
-  doi = {},
-  journal = {}
+  doi = {10.1101/2025.06.14.659707},
+  journal = {bioRxiv}
 }
 
 @article{wohlwend2024boltz1,
