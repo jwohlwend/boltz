@@ -337,9 +337,12 @@ def filter_inputs_structure(
         The manifest of the filtered input data.
 
     """
-    # Check if existing predictions are found
-    existing = (outdir / "predictions").rglob("*")
-    existing = {e.name for e in existing if e.is_dir()}
+    # Check if existing predictions are found (only top-level prediction folders)
+    pred_dir = outdir / "predictions"
+    if pred_dir.exists():
+        existing = {d.name for d in pred_dir.iterdir() if d.is_dir()}
+    else:
+        existing = set()
 
     # Remove them from the input data
     if existing and not override:
