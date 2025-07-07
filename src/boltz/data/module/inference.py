@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 
 from boltz.data import const
 from boltz.data.feature.featurizer import BoltzFeaturizer
-from boltz.data.feature.pad import pad_to_max
+from boltz.data.pad import pad_to_max
 from boltz.data.tokenize.boltz import BoltzTokenizer
 from boltz.data.types import (
     MSA,
@@ -71,7 +71,7 @@ def load_input(
             constraints_dir / f"{record.id}.npz"
         )
 
-    return Input(structure, msas, residue_constraints=residue_constraints)
+    return Input(structure, msas, record, residue_constraints)
 
 
 def collate(data: list[dict[str, Tensor]]) -> dict[str, Tensor]:
@@ -181,10 +181,10 @@ class PredictionDataset(torch.utils.data.Dataset):
 
         # Inference specific options
         options = record.inference_options
-        if options is None:
-            binders, pocket = None, None
+        if options is None or len(options.pocket_constraints) == 0:
+            binder, pocket = None, None
         else:
-            binders, pocket = options.binders, options.pocket
+            binder, pocket = options.pocket_constraints[0][0], options.pocket_constraints[0][1]
 
         # Compute features
         try:
@@ -197,7 +197,7 @@ class PredictionDataset(torch.utils.data.Dataset):
                 pad_to_max_seqs=False,
                 symmetries={},
                 compute_symmetries=False,
-                inference_binder=binders,
+                inference_binder=binder,
                 inference_pocket=pocket,
                 compute_constraint_features=True,
             )
