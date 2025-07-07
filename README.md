@@ -65,12 +65,12 @@ If you're interested in retraining the model, see our [training instructions](do
 
 Build locally:
 ```bash
-docker build -t boltz-1 .
+docker build -t boltz .
 ```
 
 Run locally with GPUs and mounted volume:
 ```bash
-docker run --gpus all -v ./:/mnt/ --name boltz-1 --rm -it boltz-1 /bin/bash
+docker run --gpus all -v ./:/mnt/ --name boltz --rm -it boltz /bin/bash
 ```
 
 ## Contributing
