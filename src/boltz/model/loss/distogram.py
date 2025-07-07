@@ -1,13 +1,11 @@
-from typing import Dict, Tuple
-
 import torch
 from torch import Tensor
 
 
 def distogram_loss(
-    output: Dict[str, Tensor],
-    feats: Dict[str, Tensor],
-) -> Tuple[Tensor, Tensor]:
+    output: dict[str, Tensor],
+    feats: dict[str, Tensor],
+) -> tuple[Tensor, Tensor]:
     """Compute the  distogram loss.
 
     Parameters

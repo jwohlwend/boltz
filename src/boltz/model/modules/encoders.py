@@ -2,14 +2,14 @@
 from functools import partial
 from math import pi
 
-from einops import rearrange
 import torch
+from einops import rearrange
 from torch import nn
 from torch.nn import Module, ModuleList
 from torch.nn.functional import one_hot
 
-from boltz.data import const
 import boltz.model.layers.initialize as init
+from boltz.data import const
 from boltz.model.layers.transition import Transition
 from boltz.model.modules.transformers import AtomTransformer
 from boltz.model.modules.utils import LinearNoBias
@@ -27,7 +27,6 @@ class FourierEmbedding(Module):
             The dimension of the embeddings.
 
         """
-
         super().__init__()
         self.proj = nn.Linear(1, dim)
         torch.nn.init.normal_(self.proj.weight, mean=0, std=1)
@@ -82,7 +81,7 @@ class RelativePositionEncoder(Module):
                 feats["cyclic_period"] > 0,
                 feats["cyclic_period"],
                 torch.zeros_like(feats["cyclic_period"]) + 10000,
-            )
+            ).unsqueeze(1)
             rel_pos = (rel_pos - period * torch.round(rel_pos / period)).long()
 
         d_residue = torch.clip(

@@ -3,7 +3,7 @@
 # Modified from : https://github.com/BioinfoMachineLearning/bio-diffusion/blob/main/src/utils/__init__.py
 # --------------------------------------------------------------------------------------
 
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import torch
 from pytorch_lightning import Callback, LightningModule, Trainer
@@ -27,10 +27,11 @@ class EMA(Callback):
 
     def __init__(
         self,
-        decay: float,
+        decay: float = 0.999,
         apply_ema_every_n_steps: int = 1,
         start_step: int = 0,
         eval_with_ema: bool = True,
+        warm_start: bool = True,
     ) -> None:
         """Initialize the EMA callback.
 
@@ -52,13 +53,14 @@ class EMA(Callback):
             msg = "EMA decay value must be between 0 and 1"
             raise MisconfigurationException(msg)
 
-        self._ema_weights: Optional[Dict[str, torch.Tensor]] = None
+        self._ema_weights: Optional[dict[str, torch.Tensor]] = None
         self._cur_step: Optional[int] = None
-        self._weights_buffer: Optional[Dict[str, torch.Tensor]] = None
+        self._weights_buffer: Optional[dict[str, torch.Tensor]] = None
         self.apply_ema_every_n_steps = apply_ema_every_n_steps
         self.start_step = start_step
         self.eval_with_ema = eval_with_ema
         self.decay = decay
+        self.warm_start = warm_start
 
     @property
     def ema_initialized(self) -> bool:
@@ -72,12 +74,12 @@ class EMA(Callback):
         """
         return self._ema_weights is not None
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         """Return the current state of the callback.
 
         Returns
         -------
-        Dict[str, Any]
+        dict[str, Any]
             The current state of the callback.
 
         """
@@ -86,12 +88,12 @@ class EMA(Callback):
             "ema_weights": self._ema_weights,
         }
 
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """Load the state of the callback.
 
         Parameters
         ----------
-        state_dict: Dict[str, Any]
+        state_dict: dict[str, Any]
             The state of the callback to load.
 
         """
@@ -127,6 +129,10 @@ class EMA(Callback):
             The LightningModule instance.
 
         """
+        decay = self.decay
+        if self.warm_start:
+            decay = min(decay, (1 + self._cur_step) / (10 + self._cur_step))
+
         for k, orig_weight in pl_module.state_dict().items():
             ema_weight = self._ema_weights[k]
             if (
@@ -134,12 +140,12 @@ class EMA(Callback):
                 and orig_weight.data.dtype != torch.long  # skip non-trainable weights
             ):
                 diff = ema_weight.data - orig_weight.data
-                diff.mul_(1.0 - self.decay)
+                diff.mul_(1.0 - decay)
                 ema_weight.sub_(diff)
 
     def on_load_checkpoint(
         self,
-        trainer: Trainer,  # noqa: ARG002
+        trainer: Trainer,
         pl_module: LightningModule,  # noqa: ARG002
         checkpoint: dict[str, Any],
     ) -> None:
@@ -151,11 +157,12 @@ class EMA(Callback):
             The Trainer instance.
         pl_module: LightningModule
             The LightningModule instance.
-        checkpoint: Dict[str, Any]
+        checkpoint: dict[str, Any]
             The checkpoint to load.
 
         """
         if "ema" in checkpoint:
+            print("LOADING CHECKPOINT RUNNING")
             self.load_state_dict(checkpoint["ema"])
 
     def on_save_checkpoint(
@@ -172,7 +179,7 @@ class EMA(Callback):
             The Trainer instance.
         pl_module: LightningModule
             The LightningModule instance.
-        checkpoint: Dict[str, Any]
+        checkpoint: dict[str, Any]
             The checkpoint to save.
 
         """
@@ -193,7 +200,7 @@ class EMA(Callback):
         # Create EMA weights if not already initialized
         if not self.ema_initialized:
             self._ema_weights = {
-                k: p.detach().clone() for k, p in pl_module.state_dict()
+                k: p.detach().clone() for k, p in pl_module.state_dict().items()
             }
 
         # Move EMA weights to the correct device

@@ -966,7 +966,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
                         entity=entity.name,
                         residues=residues,
                         type=const.chain_type_ids["NONPOLYMER"],
-                        sequence=None
+                        sequence=None,
                     )
                 )
 
