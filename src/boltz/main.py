@@ -404,7 +404,7 @@ def filter_inputs_affinity(
         msg = "Found existing affinity predictions, will override."
         click.echo(msg)
 
-    return Manifest([r for r in manifest.records if r.id not in existing])
+    return Manifest([r for r in manifest.records if r.affinity and r.id not in existing])
 
 
 def compute_msa(
