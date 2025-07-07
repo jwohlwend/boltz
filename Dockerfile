@@ -17,3 +17,15 @@ RUN apt-get clean && \
 
 ## Install Boltz (+ dependencies)
 RUN pip install boltz==2.1.1 -U
+
+## Download CCD data and model weights 
+# RUN mkdir ~/.boltz && \
+#     cd ~/.boltz && \
+#     wget https://huggingface.co/boltz-community/boltz-2/resolve/main/mols.tar && \
+#     tar -xvf mols.tar && \
+#     rm mols.tar && \
+#     wget https://model-gateway.boltz.bio/boltz2_conf.ckpt && \
+#     wget https://model-gateway.boltz.bio/boltz2_aff.ckpt
+
+
+CMD ["boltz"]
