@@ -16,4 +16,4 @@ RUN apt-get clean && \
         g++
 
 ## Install Boltz (+ dependencies)
-RUN pip install boltz -U
+RUN pip install boltz==2.1.1 -U
