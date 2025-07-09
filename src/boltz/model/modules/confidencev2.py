@@ -484,11 +484,12 @@ class ConfidenceHeads(nn.Module):
         out_dict["pae"] = compute_aggregated_metric(pae_logits, end=32)
 
         try:
-            ptm, iptm, ligand_iptm, protein_iptm, pair_chains_iptm = compute_ptms(
-                pae_logits, x_pred, feats, multiplicity
+            ptm, iptm, tcr_pmhc_iptm, ligand_iptm, protein_iptm, pair_chains_iptm = (
+                compute_ptms(pae_logits, x_pred, feats, multiplicity)
             )
             out_dict["ptm"] = ptm
             out_dict["iptm"] = iptm
+            out_dict["tcr_pmhc_iptm"] = tcr_pmhc_iptm
             out_dict["ligand_iptm"] = ligand_iptm
             out_dict["protein_iptm"] = protein_iptm
             out_dict["pair_chains_iptm"] = pair_chains_iptm
