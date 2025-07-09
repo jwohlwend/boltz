@@ -1,0 +1,36 @@
+name: boltz2
+channels:
+  - pytorch
+  - conda-forge
+  - nvidia
+dependencies:
+  - python>=3.10
+  - pytorch>=2.2=*cuda*
+  - pytorch-cuda=11.8
+  - numpy<2.0
+  - hydra-core=1.3
+  - pytorch-lightning=2.5
+  - rdkit==2024.3.2
+  - dm-tree=0.1.8
+  - requests=2.32
+  - pandas=2.2
+  - einops=0.8
+  - einx=0.3
+  - mashumaro=3.14
+  - modelcif=1.2
+  - wandb
+  - click=8.1
+  - pyyaml=6.0
+  - biopython=1.84
+  - scipy<2.0
+  - numba=0.61
+  - gemmi=0.6.5
+  - scikit-learn=1.6.1
+  - chembl_structure_pipeline=1.2.2
+  - ruff
+  - mypy
+  - pytest
+  - pip
+  - pip:
+      - fairscale~=0.4
+      - trifast>=0.1.11
