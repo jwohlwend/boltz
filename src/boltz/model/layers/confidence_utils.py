@@ -248,4 +248,4 @@ def compute_ptms(logits, x_preds, feats, multiplicity):
             ).values
         chain_pair_iptm[idx1] = chain_iptm
 
-    return ptm, iptm, ligand_iptm, protein_iptm, chain_pair_iptm
+    return ptm, iptm, tcr_pmhc_iptm, ligand_iptm, protein_iptm, chain_pair_iptm
