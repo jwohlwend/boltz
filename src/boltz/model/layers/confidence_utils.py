@@ -148,6 +148,20 @@ def compute_ptms(logits, x_preds, feats, multiplicity):
         * mask_pad[:, None, :]
         * mask_pad[:, :, None]
     )
+
+    is_tcr = (asym_id == 0) | (asym_id == 1)
+    is_pmhc = (asym_id == 2) | (asym_id == 3) | (asym_id == 4)
+
+    tcr_pmhc_iptm_mask = (
+        maski[:, :, None]
+        * mask_pad[:, None, :]
+        * mask_pad[:, :, None]
+        * (
+            (is_tcr[:, :, None] * is_pmhc[:, None, :])
+            + (is_pmhc[:, :, None] * is_tcr[:, None, :])
+        )
+    )
+
     num_bins = logits.shape[-1]
     bin_width = 32.0 / num_bins
     end = 32.0
@@ -169,6 +183,12 @@ def compute_ptms(logits, x_preds, feats, multiplicity):
     iptm = torch.max(
         torch.sum(tm_expected_value * pair_mask_iptm, dim=-1)
         / (torch.sum(pair_mask_iptm, dim=-1) + 1e-5),
+        dim=1,
+    ).values
+
+    tcr_pmhc_iptm = torch.max(
+        torch.sum(tm_expected_value * tcr_pmhc_iptm_mask, dim=-1)
+        / (torch.sum(tcr_pmhc_iptm_mask, dim=-1) + 1e-5),
         dim=1,
     ).values
 
