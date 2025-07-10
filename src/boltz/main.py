@@ -285,7 +285,7 @@ def check_inputs(data: Path) -> list[Path]:
     Parameters
     ----------
     data : Path
-        The input path (file or directory.
+        The input path (file or directory).
 
     Returns
     -------
@@ -1024,7 +1024,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         raise ValueError(f"Model {model} not supported.")
 
     # Report model type
-    click.echo(f"Boltz {__version__} Ã¢â‚¬â€� running model: {model}")
+    click.echo(f"Boltz {__version__} - running model: {model}")
     
     # Validate inputs
     data = check_inputs(data)
