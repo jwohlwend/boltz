@@ -63,6 +63,12 @@ To encourage reproducibility and facilitate comparison with other models, on top
 ![Test set evaluations](docs/plot_test_boltz2.png)
 
 
+### Build easily with Gradio
+
+```
+python gradio_app.py
+```
+
 ## Training
 
 ⚠️ **Coming soon: updated training code for Boltz-2!**
