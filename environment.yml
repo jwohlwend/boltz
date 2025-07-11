@@ -1,0 +1,8 @@
+name: boltz
+channels:
+  - pytorch
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.12
+  - cuda=12.8

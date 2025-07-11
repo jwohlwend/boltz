@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "boltz"
 version = "2.1.1"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.12,<3.13"
 description = "Boltz"
 readme = "README.md"
 dependencies = [
@@ -48,22 +48,39 @@ test = ["pytest", "requests"]
 src = ["src"]
 extend-exclude = ["conf.py"]
 target-version = "py39"
-lint.select = ["ALL"]
+lint.extend-select = [
+    "W6",
+    "I",
+    "N80",
+    "S102",
+    "S108",
+    "S306",
+    "S307",
+    "S60",
+    "B",
+    "A",
+    "PT",
+    "PTH",
+    "PLE",
+    "PLW",
+    "NPY",
+    "RUF",
+]
 lint.ignore = [
-    "COM812",  # Conflicts with the formatter
-    "ISC001",  # Conflicts with the formatter
-    "ANN101",  # "missing-type-self"
-    "RET504",  # Unnecessary assignment to `x` before `return` statementRuff
-    "S101",    # Use of `assert` detected
-    "D100",    # Missing docstring in public module
-    "D104",    # Missing docstring in public package
-    "PT001",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
-    "PT004",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
-    "PT005",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
-    "PT023",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
-    "FBT001",
-    "FBT002",
-    "PLR0913", # Too many arguments to init (> 5)
+    "E74",
+    "F403",
+    "F405",
+    "N803",
+    "N806",
+    "S603",
+    "S607",
+    "B008",
+    "B905",
+    "PTH123",
+    "PLW2901",
+    "RUF005",
+    "RUF100",  # for upstream compatibility
+    "NPY002",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -75,6 +92,9 @@ lint.ignore = [
     "INP001", # Requires __init__.py but folder is not a package.
 ]
 "scripts/**" = [
+    "INP001", # Requires __init__.py but folder is not a package.
+]
+"tests/**" = [
     "INP001", # Requires __init__.py but folder is not a package.
 ]
 
@@ -90,3 +110,80 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "regression",
 ]
+
+[tool.mypy]
+files = ["src/boltz/"]
+mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
+
+check_untyped_defs = true
+disallow_any_explicit = false
+disallow_any_generics = false
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
+
+allow_redefinition = true
+local_partial_types = true
+disable_error_code = ["import-untyped", "no-redef"]
+
+show_error_context = true
+show_column_numbers = true
+
+[[tool.mypy.overrides]]
+module = ["rdkit.*", "lightning.*", "Bio.*", "networkx.*"]
+
+follow_imports = "skip"
+follow_imports_for_stubs = true
+
+[[tool.mypy.overrides]]
+module = ["deepspeed.*", "flash_attn.*"]
+
+ignore_missing_imports = true
+
+[tool.pyright]
+include = ["src", "tests", "scripts"]
+pythonVersion = "3.10"
+pythonPlatform = "Linux"
+
+strictParameterNoneValue = false
+
+reportGeneralTypeIssues = "information"
+reportUnusedImport = "warning"
+reportUnusedClass = "warning"
+reportUnusedFunction = "warning"
+reportUnusedVariable = "warning"
+reportDuplicateImport = "warning"
+reportWildcardImportFromLibrary = "none"
+reportOptionalSubscript = "warning"
+reportOptionalMemberAccess = "warning"
+reportOptionalCall = "warning"
+reportOptionalIterable = "warning"
+reportOptionalContextManager = "warning"
+reportOptionalOperand = "warning"
+reportPrivateImportUsage = "none"
+reportIncompatibleMethodOverride = "none"
+reportIncompatibleVariableOverride = "warning"
+reportInconsistentConstructor = "warning"
+reportOverlappingOverload = "warning"
+reportUninitializedInstanceVariable = "warning"
+reportInvalidStringEscapeSequence = "error"
+reportUnnecessaryIsInstance = "warning"
+reportUnnecessaryCast = "warning"
+reportUnnecessaryComparison = "warning"
+reportUnnecessaryContains = "warning"
+reportAssertAlwaysTrue = "warning"
+reportSelfClsParameterName = "warning"
+reportImplicitStringConcatenation = "information"
+reportInvalidStubStatement = "warning"
+reportIncompleteStub = "warning"
+reportUnnecessaryTypeIgnoreComment = "none"
+reportMatchNotExhaustive = "warning"
+reportShadowedImports = "warning"
+reportPossiblyUnboundVariable = "none"
+
+# Covered by mypy
+reportAssignmentType = "none"
+reportAttributeAccessIssue = "none"
+reportArgumentType = "none"
+reportCallIssue = "none"
+reportReturnType = "none"
