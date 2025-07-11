@@ -928,7 +928,7 @@ def cli() -> None:
     "--subsample_msa/--no_subsample_msa",
     is_flag=True,
     help="Whether to subsample the MSA.",
-    default=True,
+    default=False,
 )
 @click.option(
     "--num_subsampled_msa",
