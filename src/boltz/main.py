@@ -434,6 +434,20 @@ def compute_msa(
         The MSA pairing strategy.
 
     """
+
+    skip_msa_flag = True
+    for name in data:
+        msa_path = msa_dir / f"{name}.csv"
+        if not msa_path.exists():
+            click.echo(f"MSA file {msa_path} not found, computing MSA.")
+            skip_msa_flag = False
+            break
+        else:
+            click.echo(f"MSA file {msa_path} already exists.")
+    if skip_msa_flag:
+        click.echo("MSA already computed, skipping.")
+        return
+
     if len(data) > 1:
         paired_msas = run_mmseqs2(
             list(data.values()),
@@ -757,7 +771,7 @@ def cli() -> None:
         "The directory where to download the data and model. "
         "Default is ~/.boltz, or $BOLTZ_CACHE if set."
     ),
-    default=get_cache_path,
+    default="/home.galaxy4/share/boltz",
 )
 @click.option(
     "--checkpoint",
@@ -946,7 +960,7 @@ def cli() -> None:
 def predict(  # noqa: C901, PLR0915, PLR0912
     data: str,
     out_dir: str,
-    cache: str = "~/.boltz",
+    cache: str = "/home.galaxy4/share/boltz",
     checkpoint: Optional[str] = None,
     affinity_checkpoint: Optional[str] = None,
     devices: int = 1,
