@@ -13,7 +13,6 @@ from boltz.data.types import Coords, Interface, Record, Structure, StructureV2
 from boltz.data.write.mmcif import to_mmcif
 from boltz.data.write.pdb import to_pdb
 
-
 class BoltzWriter(BasePredictionWriter):
     """Custom writer for predictions."""
 
@@ -41,6 +40,7 @@ class BoltzWriter(BasePredictionWriter):
         self.data_dir = Path(data_dir)
         self.output_dir = Path(output_dir)
         self.output_format = output_format
+        self.paths_to_relax = []
         self.failed = 0
         self.boltz2 = boltz2
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -165,12 +165,14 @@ class BoltzWriter(BasePredictionWriter):
                         f.write(
                             to_pdb(new_structure, plddts=plddts, boltz2=self.boltz2)
                         )
+                        self.paths_to_relax.append(Path(path).resolve())
                 elif self.output_format == "mmcif":
                     path = struct_dir / f"{outname}.cif"
                     with path.open("w") as f:
                         f.write(
                             to_mmcif(new_structure, plddts=plddts, boltz2=self.boltz2)
                         )
+                        self.paths_to_relax.append(Path(path).resolve())
                 else:
                     path = struct_dir / f"{outname}.npz"
                     np.savez_compressed(path, **asdict(new_structure))
@@ -341,3 +343,6 @@ class BoltzAffinityWriter(BasePredictionWriter):
         """Print the number of failed examples."""
         # Print number of failed examples
         print(f"Number of failed examples: {self.failed}")  # noqa: T201
+
+    def get_paths_to_relax(self):
+        return self.paths_to_relax

@@ -180,7 +180,9 @@ As an example, to predict a structure using 10 recycling steps and 25 samples (t
 | `--msa_pairing_strategy` | str             | `greedy`                    | Pairing strategy to use. Used only if --use_msa_server is set. Options are 'greedy' and 'complete'                                                                                  |
 | `--use_potentials`        | `FLAG`          | `False`                     | Whether to run the original Boltz-2 model using inference time potentials.                                                                                                        |
 | `--write_full_pae`       | `FLAG`          | `False`                     | Whether to save the full PAE matrix as a file.                                                                                                                                      |
-| `--write_full_pde`       | `FLAG`          | `False`                     | Whether to save the full PDE matrix as a file.                                                                                                                                      |
+| `--write_full_pde`       | `FLAG`          | `False`                     | Whether to save the full PDE matrix as a file.
+| `--rosetta_relax`        | `FLAG`          | `False`                     | Whether to perform rosetta repacking and fastrelax. Installation of pyrosetta and a valid license are required.
+| `--relax_cores`          | `INTEGER`       | `8`                         | Number of cores for rosetta relaxation.                                                                                                                                  |
 
 ## Output
 

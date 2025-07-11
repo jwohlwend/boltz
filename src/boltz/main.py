@@ -18,6 +18,7 @@ from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.utilities import rank_zero_only
 from rdkit import Chem
 from tqdm import tqdm
+import pandas as pd
 
 from boltz.data import const
 from boltz.data.module.inference import BoltzInferenceDataModule
@@ -439,6 +440,8 @@ def compute_msa(
             list(data.values()),
             msa_dir / f"{target_id}_paired_tmp",
             use_env=True,
+            use_omg=True, # not supported in pairing mode yet
+            use_envhog=True, # not supported in pairing mode yet
             use_pairing=True,
             host_url=msa_server_url,
             pairing_strategy=msa_pairing_strategy,
@@ -450,6 +453,8 @@ def compute_msa(
         list(data.values()),
         msa_dir / f"{target_id}_unpaired_tmp",
         use_env=True,
+        use_omg=True,
+        use_envhog=True,
         use_pairing=False,
         host_url=msa_server_url,
         pairing_strategy=msa_pairing_strategy,
@@ -858,7 +863,7 @@ def cli() -> None:
     "--msa_server_url",
     type=str,
     help="MSA server url. Used only if --use_msa_server is set. ",
-    default="https://api.colabfold.com",
+    default="http://ont-msa0:80",
 )
 @click.option(
     "--msa_pairing_strategy",
@@ -868,6 +873,17 @@ def cli() -> None:
         "Options are 'greedy' and 'complete'"
     ),
     default="greedy",
+)
+@click.option(
+    "--rosetta_relax",
+    is_flag=True,
+    help="Whether to perform Rosetta repacking and fastrelax. Installation of pyrosetta and a valid license are required",
+)
+@click.option(
+    "--relax_cores",
+    type=int,
+    default=8,
+    help="Number of cores for rosetta relaxation",
 )
 @click.option(
     "--use_potentials",
@@ -980,6 +996,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
 ) -> None:
     """Run predictions with Boltz."""
     # If cpu, write a friendly warning
+
     if accelerator == "cpu":
         msg = "Running on CPU, this will be slow. Consider using a GPU."
         click.echo(msg)
@@ -1282,6 +1299,37 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             datamodule=data_module,
             return_predictions=False,
         )
+
+    paths_to_relax = pred_writer.get_paths_to_relax()
+    if rosetta_relax and len(paths_to_relax) > 0:
+        from boltz.data.write.rosetta_relax import parallel_relax
+
+        release_resources(trainer, model_module, data_module, pred_writer)
+        ret = parallel_relax(
+            paths_to_relax,
+            override=True,
+            cores=min(relax_cores, len(paths_to_relax)),
+            save_energies=True,
+        )
+        csv = Path(paths_to_relax[0]).parent.parent / "rosetta_energies.csv"
+        ret = ret.sort_values(by=["name", "repacked_energy"]).reset_index(drop=True)
+        if csv.exists():
+            print(f"`{csv}` exists! appending ...\n")
+            ret = pd.concat([ret, pd.read_csv(csv)])
+        ret.to_csv(csv, index=False)
+
+
+def release_resources(trainer=None, *objects):
+    import gc
+
+    for obj in objects:
+        try:
+            del obj
+        except Exception as e:
+            print(f"Error releasing object {obj}: {e}")
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":

@@ -21,10 +21,12 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
     x: Union[str, list[str]],
     prefix: str = "tmp",
     use_env: bool = True,
+    use_omg: bool = True,
+    use_envhog: bool = True,
     use_filter: bool = True,
     use_pairing: bool = False,
     pairing_strategy: str = "greedy",
-    host_url: str = "https://api.colabfold.com",
+    host_url: str = "http://ont-msa0:80",
 ) -> tuple[list[str], list[str]]:
     submission_endpoint = "ticket/pair" if use_pairing else "ticket/msa"
 
@@ -128,6 +130,10 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
         mode = "env" if use_env else "all"
     else:
         mode = "env-nofilter" if use_env else "nofilter"
+    if use_omg:
+        mode += "-omg"
+    if use_envhog:
+        mode += "-envhog"
 
     if use_pairing:
         mode = ""
@@ -221,7 +227,10 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
         a3m_files = [f"{path}/uniref.a3m"]
         if use_env:
             a3m_files.append(f"{path}/bfd.mgnify30.metaeuk30.smag30.a3m")
-
+        if use_omg:
+            a3m_files.append(f"{path}/omg50.a3m")
+        if use_envhog:
+            a3m_files.append(f"{path}/envhog80.a3m")
     # extract a3m files
     if any(not os.path.isfile(a3m_file) for a3m_file in a3m_files):
         with tarfile.open(tar_gz_file) as tar_gz:
