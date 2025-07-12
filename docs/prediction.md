@@ -302,4 +302,65 @@ The `affinity_pred_value` aims to measure the specific affinity of different bin
 - IC50 of $10^{-6}$ M $\longrightarrow$ our model outputs $0$ (moderate binder)
 - IC50 of $10^{-4}$ M $\longrightarrow$ our model outputs $2$ (weak binder / decoy)
 
-You can convert the model's output to pIC50 in `kcal/mol` by using `y --> (6 - y) * 1.364` where `y` is the model's prediction.
+
+### Calculation of ΔG_binding (free binding energy):
+
+`ΔG_binding [kcal/mol] ≈ -1.363 × (6 - affinity_pred_value)`
+
+<details>
+  <summary>Full derivation of ΔG_binding via pIC50 </summary>
+
+#### Definitions:
+
+`affinity_pred_value = log10(IC50)`, where IC50 is in μM.
+
+`pIC50 = -log10(IC50 in M)`, where IC50 in M is the molar concentration.
+
+#### Conversion of IC50 from μM to M to compute pIC50.
+
+`IC50 (M) = IC50 (μM) * 10^-6`
+
+If affinity_pred_value = log10(IC50 in μM), then:
+
+`IC50 (μM) = 10^affinity_pred_value`
+
+`IC50 (M) = 10^affinity_pred_value * 10^-6`
+
+#### Taking the logarithm:
+
+`log10(IC50 in M) = log10(10^affinity_pred_value * 10^-6) = affinity_pred_value - 6`
+
+#### Calculate pIC50:
+
+`pIC50 = -log10(IC50 in M)`
+
+`pIC50 = -(affinity_pred_value - 6) = 6 - affinity_pred_value.`
+
+`pIC50 = 6 - affinity_pred_value`
+
+
+#### With this you can calculate ΔG_binding [kcal/mol]:
+
+`ΔG_binding = -RT * ln(10) * pIC50`
+
+Where:
+
+`R = gas constant = 0.001987 kcal/(mol·K)`
+
+`T = temperature` in Kelvin (typically 298 K for room temperature, ~25°C)
+
+`ln(10) ≈ 2.3026`
+
+`RT * ln(10) ≈ 0.001987 * 298 * 2.3026 ≈ 1.363 kcal/mol`
+
+Thus, at 298 K:
+
+`ΔG_binding [kcal/mol] ≈ -1.363 × pIC50`
+
+
+</details>
+
+
+
+
+
