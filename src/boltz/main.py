@@ -33,6 +33,8 @@ from boltz.data.write.writer import BoltzAffinityWriter, BoltzWriter
 from boltz.model.models.boltz1 import Boltz1
 from boltz.model.models.boltz2 import Boltz2
 
+from boltz import __version__
+
 CCD_URL = "https://huggingface.co/boltz-community/boltz-1/resolve/main/ccd.pkl"
 MOL_URL = "https://huggingface.co/boltz-community/boltz-2/resolve/main/mols.tar"
 
@@ -284,7 +286,7 @@ def check_inputs(data: Path) -> list[Path]:
     Parameters
     ----------
     data : Path
-        The input data.
+        The input path (file or directory).
 
     Returns
     -------
@@ -293,27 +295,32 @@ def check_inputs(data: Path) -> list[Path]:
 
     """
     click.echo("Checking input data.")
+    valid_suffixes = {".fa", ".fas", ".fasta", ".yml", ".yaml"}
 
     # Check if data is a directory
     if data.is_dir():
-        data: list[Path] = list(data.glob("*"))
+        files = list(data.glob("*"))
+        valid_files = []
 
-        # Filter out non .fasta or .yaml files, raise
-        # an error on directory and other file types
-        for d in data:
+        for d in files:
             if d.is_dir():
-                msg = f"Found directory {d} instead of .fasta or .yaml."
-                raise RuntimeError(msg)
-            if d.suffix not in (".fa", ".fas", ".fasta", ".yml", ".yaml"):
-                msg = (
-                    f"Unable to parse filetype {d.suffix}, "
-                    "please provide a .fasta or .yaml file."
-                )
-                raise RuntimeError(msg)
-    else:
-        data = [data]
+                click.echo(f"Skipping subdirectory: {d}", err=True)
+                continue
+            if d.suffix.lower() not in valid_suffixes:
+                click.echo(f"Skipping unsupported file: {d.name}", err=True)
+                continue
+            valid_files.append(d)
 
-    return data
+        if not valid_files:
+            raise RuntimeError(f"No valid FASTA or YAML files found in directory: {data}")
+
+        return valid_files
+
+    else:
+        if data.suffix.lower() not in valid_suffixes:
+            raise RuntimeError(f"Unsupported input file: {data.name}")
+
+        return [data]
 
 
 def filter_inputs_structure(
@@ -544,9 +551,9 @@ def process_input(  # noqa: C901, PLR0912, PLR0915, D103
 ) -> None:
     try:
         # Parse data
-        if path.suffix in (".fa", ".fas", ".fasta"):
+        if path.suffix.lower() in (".fa", ".fas", ".fasta"):
             target = parse_fasta(path, ccd, mol_dir, boltz2)
-        elif path.suffix in (".yml", ".yaml"):
+        elif path.suffix.lower() in (".yml", ".yaml"):
             target = parse_yaml(path, ccd, mol_dir, boltz2)
         elif path.is_dir():
             msg = f"Found directory {path} instead of .fasta or .yaml, skipping."
@@ -688,7 +695,7 @@ def process_inputs(
     ccd_path : Path
         The path to the CCD dictionary.
     max_msa_seqs : int, optional
-        Max number of MSA sequences, by default 4096.
+        Max number of MSA sequences, by default 8192.
     use_msa_server : bool, optional
         Whether to use the MMSeqs2 server for MSA generation, by default False.
     msa_server_username : str, optional
@@ -807,10 +814,10 @@ def process_inputs(
     manifest.dump(out_dir / "processed" / "manifest.json")
 
 
-@click.group()
+@click.group(help=f"Boltz v{__version__}")
+@click.version_option(__version__)
 def cli() -> None:
-    """Boltz."""
-    return
+    pass
 
 
 @cli.command()
@@ -1142,6 +1149,9 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         msg = f"Model {model} not supported. Supported: boltz1, boltz2."
         raise ValueError(f"Model {model} not supported.")
 
+    # Report model type
+    click.echo(f"Boltz {__version__} - running model: {model}")
+    
     # Validate inputs
     data = check_inputs(data)
 
@@ -1154,6 +1164,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             method_names = list(const.method_types_ids.keys())
             msg = f"Method {method} not supported. Supported: {method_names}"
             raise ValueError(msg)
+
 
     # Process inputs
     ccd_path = cache / "ccd.pkl"
@@ -1409,6 +1420,131 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             return_predictions=False,
         )
 
+@cli.command(short_help="Generate MSA CSVs from input (uses online server).")
+@click.argument("input_path", type=click.Path(exists=True, path_type=Path), nargs=-1)
+@click.option(
+    "--out-dir",
+    type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    default=Path("./msa_results"),
+    show_default=True,
+    help="Output directory for MSA CSVs.",
+)
+@click.option(
+    "--cache",
+    type=click.Path(exists=False, file_okay=False, dir_okay=True, path_type=Path),
+    default=lambda: Path(get_cache_path()),
+    show_default=True,
+    help="Path to Boltz cache (used for CCD/mols).",
+)
+@click.option(
+    "--msa-server-url",
+    type=str,
+    default="https://api.colabfold.com",
+    show_default=True,
+    help="URL of the MMseqs2 MSA server.",
+)
+@click.option(
+    "--msa-pairing-strategy",
+    type=click.Choice(["greedy", "complete"]),
+    default="greedy",
+    show_default=True,
+    help="MSA pairing strategy to use.",
+)
+@click.option(
+    "--max-msa-seqs",
+    type=int,
+    default=8192,
+    show_default=True,
+    help="Maximum number of MSA sequences to retain.",
+)
+@click.option(
+    "--preprocessing-threads",
+    type=int,
+    default=1,
+    show_default=True,
+    help="Number of threads to use for parallel MSA generation.",
+)
+@click.option(
+    "--model",
+    default="boltz2",
+    type=click.Choice(["boltz1", "boltz2"]),
+    help="The model to use for prediction. Default is boltz2.",
+)
+def msa(
+    input_path: tuple[Path, ...],
+    out_dir: Path,
+    cache: Path,
+    msa_server_url: str,
+    msa_pairing_strategy: str,
+    max_msa_seqs: int,
+    preprocessing_threads: int,
+    model: Literal["boltz1", "boltz2"],
+):
+    """
+    Generate MSAs from input FASTA or YAML files and save them as CSV.
 
+    This command uses an online MSA server (MMseqs2 at ColabFold) to compute
+    alignments. It should not be used with confidential or unpublished sequences.
+
+    The output CSVs can be reused on systems without internet access.
+    """
+    
+    click.echo(f"Boltz {__version__} - generating MSAs only")
+    
+    # Ensure cache path exists
+    cache.mkdir(parents=True, exist_ok=True)
+    if not cache.is_dir():
+        raise NotADirectoryError(f"The cache path {cache} exists but is not a directory.")
+    
+    all_inputs = []
+    for path in input_path:
+        all_inputs.extend(check_inputs(path))
+
+    # Download CCD data if needed
+    ccd = cache / "ccd.pkl"
+    mol_dir = cache / "mols"
+    
+    if model == "boltz1":   
+        if not ccd.exists():
+            click.echo(
+                f"Downloading the CCD dictionary to {ccd}. You may "
+                "change the cache directory with the --cache flag."
+            )
+            urllib.request.urlretrieve(CCD_URL, str(ccd))  # noqa: S310
+    else:
+
+        tar_mols = cache / "mols.tar"
+        if not tar_mols.exists():
+            click.echo(
+                f"Downloading the CCD data to {tar_mols}. "
+                "This may take a bit of time. You may change the cache directory "
+                "with the --cache flag."
+            )
+            urllib.request.urlretrieve(MOL_URL, str(tar_mols))  # noqa: S310
+        if not mol_dir.exists():
+            click.echo(
+                f"Extracting the CCD data to {mol_dir}. "
+                "This may take a bit of time. You may change the cache directory "
+                "with the --cache flag."
+            )
+            with tarfile.open(str(tar_mols), "r") as tar:
+                tar.extractall(cache)  # noqa: S202
+
+    # Create output structure
+    process_inputs(
+        data=all_inputs,
+        out_dir=out_dir,
+        ccd_path=ccd,
+        mol_dir=mol_dir,
+        use_msa_server=True,
+        msa_server_url=msa_server_url,
+        msa_pairing_strategy=msa_pairing_strategy,
+        max_msa_seqs=max_msa_seqs,
+        boltz2=model=='boltz2',
+        preprocessing_threads=preprocessing_threads,
+    )
+
+    click.echo(f"MSAs written to: {out_dir / 'msa'}")
+    
 if __name__ == "__main__":
     cli()
