@@ -9,33 +9,20 @@ requires-python = ">=3.12,<3.13"
 description = "Boltz"
 readme = "README.md"
 dependencies = [
-    "torch>=2.2",
-    "numpy>=1.26,<2.0",
-    "hydra-core==1.3.2",
-    "pytorch-lightning==2.5.0",
-    "rdkit>=2024.3.2",
-    "dm-tree==0.1.8",
-    "requests==2.32.3",
-    "pandas>=2.2.2",
-    "types-requests",
-    "einops==0.8.0",
-    "einx==0.3.0",
+    "cuequivariance-ops-torch-cu12>=0.5.1",
+    "cuequivariance-torch>=0.5.1",
     "fairscale==0.4.13",
-    "mashumaro==3.14",
-    "modelcif==1.2",
-    "wandb==0.18.7",
-    "click==8.1.7",
-    "pyyaml==6.0.2",
-    "biopython==1.84",
-    "scipy==1.13.1",
-    "numba==0.61.0",
-    "gemmi==0.6.5",
-    "scikit-learn==1.6.1",
-    "chembl_structure_pipeline==1.2.2",
-    "cuequivariance_ops_cu12>=0.5.0",
-    "cuequivariance_ops_torch_cu12>=0.5.0",
-    "cuequivariance_torch>=0.5.0",
+    "torch==2.6.0+cu126",
 ]
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+
+[[tool.uv.index]]
+# Optional name for the index.
+name = "pytorch"
+# Required URL for the index.
+url = "https://download.pytorch.org/whl/cu126"
 
 [project.scripts]
 boltz = "boltz.main:cli"
@@ -45,10 +32,16 @@ lint = ["ruff"]
 test = ["pytest", "requests"]
 
 [tool.ruff]
+line-length = 79
+
+target-version = "py312"
+
 src = ["src"]
-extend-exclude = ["conf.py"]
-target-version = "py39"
-lint.extend-select = [
+extend-include = ["*.pyi", "*.ipynb"]
+extend-exclude = [".github/**", "*.pyc"]
+
+[tool.ruff.lint]
+extend-select = [
     "W6",
     "I",
     "N80",
@@ -66,7 +59,7 @@ lint.extend-select = [
     "NPY",
     "RUF",
 ]
-lint.ignore = [
+ignore = [
     "E74",
     "F403",
     "F405",
@@ -78,46 +71,29 @@ lint.ignore = [
     "B905",
     "PTH123",
     "PLW2901",
-    "RUF005",
-    "RUF100",  # for upstream compatibility
-    "NPY002",
 ]
+
+dummy-variable-rgx = "^_$"
 
 [tool.ruff.lint.per-file-ignores]
-"**/__init__.py" = [
-    "F401", # Imported but unused
-    "F403", # Wildcard imports
-]
-"docs/**" = [
-    "INP001", # Requires __init__.py but folder is not a package.
-]
-"scripts/**" = [
-    "INP001", # Requires __init__.py but folder is not a package.
-]
-"tests/**" = [
-    "INP001", # Requires __init__.py but folder is not a package.
-]
+"__init__.py" = ["F401"]
 
-[tool.ruff.lint.pyupgrade]
-# Preserve types, even if a file imports `from __future__ import annotations`(https://github.com/astral-sh/ruff/issues/5434)
-keep-runtime-typing = true
+[tool.ruff.lint.isort]
+no-lines-before = ["local-folder"]
 
-[tool.ruff.lint.pydocstyle]
-convention = "numpy"
-
-[tool.pytest.ini_options]
-markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "regression",
-]
+[tool.ruff.lint.flake8-pytest-style]
+fixture-parentheses = true
+mark-parentheses = true
 
 [tool.mypy]
 files = ["src/boltz/"]
 mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
 
+plugins = ["pydantic.mypy"]
+
 check_untyped_defs = true
-disallow_any_explicit = false
-disallow_any_generics = false
+disallow_any_explicit = true
+disallow_any_generics = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 warn_unreachable = true
@@ -130,19 +106,49 @@ show_error_context = true
 show_column_numbers = true
 
 [[tool.mypy.overrides]]
-module = ["rdkit.*", "lightning.*", "Bio.*", "networkx.*"]
+module = ["rdkit.*", "lightning.*", "Bio.*", "networkx.*", "pandas.*"]
 
 follow_imports = "skip"
 follow_imports_for_stubs = true
 
+# pycocotools breaks environment by installing numpy
 [[tool.mypy.overrides]]
-module = ["deepspeed.*", "flash_attn.*"]
+module = ["pycocotools.*"]
 
 ignore_missing_imports = true
 
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+command_line = "-m pytest -v -s"
+branch = true
+relative_files = true
+dynamic_context = "test_function"
+source = ["src"]
+
+[tool.coverage.report]
+skip_covered = true
+skip_empty = true
+sort = "-cover"
+exclude_also = [
+    "def __repr__",
+    "@abstractmethod",
+    "if __name__ == ['\"]__main__['\"]:",
+]
+
+[tool.coverage.html]
+show_contexts = true
+skip_covered = false
+skip_empty = true
+
 [tool.pyright]
 include = ["src", "tests", "scripts"]
-pythonVersion = "3.10"
+pythonVersion = "3.12"
 pythonPlatform = "Linux"
 
 strictParameterNoneValue = false

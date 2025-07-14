@@ -20,19 +20,12 @@ All the code and weights are provided under MIT license, making them freely avai
 
 ## Installation
 
-> Note: we recommend installing boltz in a fresh python environment
-
-Install boltz with PyPI (recommended):
-
+Install with uv
 ```
-pip install boltz -U
-```
-
-or directly from GitHub for daily updates:
-
-```
-git clone https://github.com/jwohlwend/boltz.git
-cd boltz; pip install -e .
+git clone https://github.com/hsbyeon1/boltz.git
+cd boltz
+conda env create -f environment.yaml
+uv pip install -e .
 ```
 
 ## Inference
