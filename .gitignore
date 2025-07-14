@@ -164,3 +164,7 @@ cython_debug/
 # Boltz prediction outputs
 #   All result files generated from a boltz prediction call
 boltz_results_*/
+
+# uv files
+.python-version
+uv.lock
