@@ -812,7 +812,7 @@ def process_inputs(
 @click.group(help=f"Boltz v{__version__}")
 @click.version_option(__version__)
 def cli() -> None:
-    pass
+    click.echo(f"Boltz v{__version__}")
 
 
 @cli.command()
