@@ -21,52 +21,6 @@ Before diving into more details about the input formats, here are the key differ
 | Pocket conditioning | :x:                | :white_check_mark:   |
 | Affinity | :x:                | :white_check_mark:   |
 
-## Authentication to MSA Server
-
-When using the `--use_msa_server` option with a server that requires authentication, you can provide credentials in one of two ways:
-
-### 1. Basic Authentication
-
-- Use the CLI options `--msa_server_username` and `--msa_server_password`.
-- Or, set the environment variables:
-  - `BOLTZ_MSA_USERNAME` (for the username)
-  - `BOLTZ_MSA_PASSWORD` (for the password, recommended for security)
-
-**Example:**
-```bash
-export BOLTZ_MSA_USERNAME=myuser
-export BOLTZ_MSA_PASSWORD=mypassword
-boltz predict ... --use_msa_server
-```
-Or:
-```bash
-boltz predict ... --use_msa_server --msa_server_username myuser --msa_server_password mypassword
-```
-
-### 2. API Key Authentication
-
-- Use the CLI options `--api_key_header` (default: `X-API-Key`) and `--api_key_value` to specify the header and value for API key authentication.
-- Or, set the API key value via the environment variable `MSA_API_KEY_VALUE` (recommended for security).
-
-**Example using CLI:**
-```bash
-boltz predict ... --use_msa_server --api_key_header X-API-Key --api_key_value <your-api-key>
-```
-
-**Example using environment variable:**
-```bash
-export MSA_API_KEY_VALUE=<your-api-key>
-boltz predict ... --use_msa_server --api_key_header X-API-Key
-```
-If both the CLI option and environment variable are set, the CLI option takes precedence.
-
-> If your server expects a different header, set `--api_key_header` accordingly (e.g., `--api_key_header X-Gravitee-Api-Key`).
-
----
-
-**Note:**  
-Only one authentication method (basic or API key) can be used at a time. If both are provided, the program will raise an error.
-
 
 ## YAML format
 
@@ -303,3 +257,55 @@ The `affinity_pred_value` aims to measure the specific affinity of different bin
 - IC50 of $10^{-4}$ M $\longrightarrow$ our model outputs $2$ (weak binder / decoy)
 
 You can convert the model's output to pIC50 in `kcal/mol` by using `y --> (6 - y) * 1.364` where `y` is the model's prediction.
+
+
+## Authentication to MSA Server
+
+When using the `--use_msa_server` option with a server that requires authentication, you can provide credentials in one of two ways:
+
+### 1. Basic Authentication
+
+- Use the CLI options `--msa_server_username` and `--msa_server_password`.
+- Or, set the environment variables:
+  - `BOLTZ_MSA_USERNAME` (for the username)
+  - `BOLTZ_MSA_PASSWORD` (for the password, recommended for security)
+
+**Example:**
+```bash
+export BOLTZ_MSA_USERNAME=myuser
+export BOLTZ_MSA_PASSWORD=mypassword
+boltz predict ... --use_msa_server
+```
+Or:
+```bash
+boltz predict ... --use_msa_server --msa_server_username myuser --msa_server_password mypassword
+```
+
+### 2. API Key Authentication
+
+- Use the CLI options `--api_key_header` (default: `X-API-Key`) and `--api_key_value` to specify the header and value for API key authentication.
+- Or, set the API key value via the environment variable `MSA_API_KEY_VALUE` (recommended for security).
+
+**Example using CLI:**
+```bash
+boltz predict ... --use_msa_server --api_key_header X-API-Key --api_key_value <your-api-key>
+```
+
+**Example using environment variable:**
+```bash
+export MSA_API_KEY_VALUE=<your-api-key>
+boltz predict ... --use_msa_server --api_key_header X-API-Key
+```
+If both the CLI option and environment variable are set, the CLI option takes precedence.
+
+> If your server expects a different header, set `--api_key_header` accordingly (e.g., `--api_key_header X-Gravitee-Api-Key`).
+
+---
+
+**Note:**  
+Only one authentication method (basic or API key) can be used at a time. If both are provided, the program will raise an error.
+
+
+## Troubleshooting
+
+ - When running on old NVIDIA GPUs, you may encounter an error related to the `cuequivariance` library. In this case, you should run the model with the `--no_kernels` flag, which will disable the use of the `cuequivariance` library and allow the model to run without it. This may result in slightly lower performance, but it will allow you to run the model on older hardware.

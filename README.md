@@ -25,15 +25,17 @@ All the code and weights are provided under MIT license, making them freely avai
 Install boltz with PyPI (recommended):
 
 ```
-pip install boltz -U
+pip install boltz[cuda] -U
 ```
 
 or directly from GitHub for daily updates:
 
 ```
 git clone https://github.com/jwohlwend/boltz.git
-cd boltz; pip install -e .
+cd boltz; pip install -e .[cuda]
 ```
+
+If you are installing on CPU-only or non-CUDA GPus hardware, remove `[cuda]` from the above commands. Note that the CPU version is significantly slower than the GPU version.
 
 ## Inference
 

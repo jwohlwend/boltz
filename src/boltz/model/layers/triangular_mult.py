@@ -1,5 +1,4 @@
 import torch
-from cuequivariance_torch.primitives.triangle import triangle_multiplicative_update
 from torch import Tensor, nn
 
 from boltz.model.layers import initialize as init
@@ -20,6 +19,7 @@ def kernel_triangular_mult(
     g_out_weight,
     eps,
 ):
+    from cuequivariance_torch.primitives.triangle import triangle_multiplicative_update
     return triangle_multiplicative_update(
         x,
         direction=direction,
