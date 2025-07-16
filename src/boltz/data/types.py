@@ -521,7 +521,12 @@ class InterfaceInfo:
 class InferenceOptions:
     """InferenceOptions datatype."""
 
-    pocket_constraints: Optional[list[tuple[int, list[tuple[int, int]], float]]] = None
+    pocket_constraints: Optional[
+        list[tuple[int, list[tuple[int, int]], float, bool]]
+    ] = None
+    contact_constraints: Optional[
+        list[tuple[tuple[int, int], tuple[int, int], float, bool]]
+    ] = None
 
 
 @dataclass(frozen=True)
@@ -552,6 +557,8 @@ class TemplateInfo:
     template_chain: str
     template_st: int
     template_en: int
+    force: bool = False
+    threshold: Optional[float] = float("inf")
 
 
 @dataclass(frozen=True)

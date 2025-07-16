@@ -148,11 +148,12 @@ class Boltz2DiffusionParams:
 class BoltzSteeringParams:
     """Steering parameters."""
 
-    fk_steering: bool = True
+    fk_steering: bool = False
     num_particles: int = 3
     fk_lambda: float = 4.0
     fk_resampling_interval: int = 3
-    guidance_update: bool = True
+    physical_guidance_update: bool = False
+    contact_guidance_update: bool = True
     num_gd_steps: int = 20
 
 
@@ -337,9 +338,12 @@ def filter_inputs_structure(
         The manifest of the filtered input data.
 
     """
-    # Check if existing predictions are found
-    existing = (outdir / "predictions").rglob("*")
-    existing = {e.name for e in existing if e.is_dir()}
+    # Check if existing predictions are found (only top-level prediction folders)
+    pred_dir = outdir / "predictions"
+    if pred_dir.exists():
+        existing = {d.name for d in pred_dir.iterdir() if d.is_dir()}
+    else:
+        existing = set()
 
     # Remove them from the input data
     if existing and not override:
@@ -413,6 +417,10 @@ def compute_msa(
     msa_dir: Path,
     msa_server_url: str,
     msa_pairing_strategy: str,
+    msa_server_username: Optional[str] = None,
+    msa_server_password: Optional[str] = None,
+    api_key_header: Optional[str] = None,
+    api_key_value: Optional[str] = None,
 ) -> None:
     """Compute the MSA for the input data.
 
@@ -428,8 +436,35 @@ def compute_msa(
         The MSA server URL.
     msa_pairing_strategy : str
         The MSA pairing strategy.
+    msa_server_username : str, optional
+        Username for basic authentication with MSA server.
+    msa_server_password : str, optional
+        Password for basic authentication with MSA server.
+    api_key_header : str, optional
+        Custom header key for API key authentication (default: X-API-Key).
+    api_key_value : str, optional
+        Custom header value for API key authentication (overrides --api_key if set).
 
     """
+    click.echo(f"Calling MSA server for target {target_id} with {len(data)} sequences")
+    click.echo(f"MSA server URL: {msa_server_url}")
+    click.echo(f"MSA pairing strategy: {msa_pairing_strategy}")
+    
+    # Construct auth headers if API key header/value is provided
+    auth_headers = None
+    if api_key_value:
+        key = api_key_header if api_key_header else "X-API-Key"
+        value = api_key_value
+        auth_headers = {
+            "Content-Type": "application/json",
+            key: value
+        }
+        click.echo(f"Using API key authentication for MSA server (header: {key})")
+    elif msa_server_username and msa_server_password:
+        click.echo("Using basic authentication for MSA server")
+    else:
+        click.echo("No authentication provided for MSA server")
+    
     if len(data) > 1:
         paired_msas = run_mmseqs2(
             list(data.values()),
@@ -438,6 +473,9 @@ def compute_msa(
             use_pairing=True,
             host_url=msa_server_url,
             pairing_strategy=msa_pairing_strategy,
+            msa_server_username=msa_server_username,
+            msa_server_password=msa_server_password,
+            auth_headers=auth_headers,
         )
     else:
         paired_msas = [""] * len(data)
@@ -449,6 +487,9 @@ def compute_msa(
         use_pairing=False,
         host_url=msa_server_url,
         pairing_strategy=msa_pairing_strategy,
+        msa_server_username=msa_server_username,
+        msa_server_password=msa_server_password,
+        auth_headers=auth_headers,
     )
 
     for idx, name in enumerate(data):
@@ -489,6 +530,10 @@ def process_input(  # noqa: C901, PLR0912, PLR0915, D103
     use_msa_server: bool,
     msa_server_url: str,
     msa_pairing_strategy: str,
+    msa_server_username: Optional[str],
+    msa_server_password: Optional[str],
+    api_key_header: Optional[str],
+    api_key_value: Optional[str],
     max_msa_seqs: int,
     processed_msa_dir: Path,
     processed_constraints_dir: Path,
@@ -545,6 +590,10 @@ def process_input(  # noqa: C901, PLR0912, PLR0915, D103
                 msa_dir=msa_dir,
                 msa_server_url=msa_server_url,
                 msa_pairing_strategy=msa_pairing_strategy,
+                msa_server_username=msa_server_username,
+                msa_server_password=msa_server_password,
+                api_key_header=api_key_header,
+                api_key_value=api_key_value,
             )
 
         # Parse MSA data
@@ -621,6 +670,10 @@ def process_inputs(
     msa_pairing_strategy: str,
     max_msa_seqs: int = 8192,
     use_msa_server: bool = False,
+    msa_server_username: Optional[str] = None,
+    msa_server_password: Optional[str] = None,
+    api_key_header: Optional[str] = None,
+    api_key_value: Optional[str] = None,
     boltz2: bool = False,
     preprocessing_threads: int = 1,
 ) -> Manifest:
@@ -638,6 +691,14 @@ def process_inputs(
         Max number of MSA sequences, by default 4096.
     use_msa_server : bool, optional
         Whether to use the MMSeqs2 server for MSA generation, by default False.
+    msa_server_username : str, optional
+        Username for basic authentication with MSA server, by default None.
+    msa_server_password : str, optional
+        Password for basic authentication with MSA server, by default None.
+    api_key_header : str, optional
+        Custom header key for API key authentication (default: X-API-Key).
+    api_key_value : str, optional
+        Custom header value for API key authentication (overrides --api_key if set).
     boltz2: bool, optional
         Whether to use Boltz2, by default False.
     preprocessing_threads: int, optional
@@ -649,6 +710,16 @@ def process_inputs(
         The manifest of the processed input data.
 
     """
+    # Validate mutually exclusive authentication methods
+    has_basic_auth = msa_server_username and msa_server_password
+    has_api_key = api_key_value is not None
+    
+    if has_basic_auth and has_api_key:
+        raise ValueError(
+            "Cannot use both basic authentication (--msa_server_username/--msa_server_password) "
+            "and API key authentication (--api_key_header/--api_key_value). Please use only one authentication method."
+        )
+
     # Check if records exist at output path
     records_dir = out_dir / "processed" / "records"
     if records_dir.exists():
@@ -706,6 +777,10 @@ def process_inputs(
         use_msa_server=use_msa_server,
         msa_server_url=msa_server_url,
         msa_pairing_strategy=msa_pairing_strategy,
+        msa_server_username=msa_server_username,
+        msa_server_password=msa_server_password,
+        api_key_header=api_key_header,
+        api_key_value=api_key_value,
         max_msa_seqs=max_msa_seqs,
         processed_msa_dir=processed_msa_dir,
         processed_constraints_dir=processed_constraints_dir,
@@ -866,6 +941,30 @@ def cli() -> None:
     default="greedy",
 )
 @click.option(
+    "--msa_server_username",
+    type=str,
+    help="MSA server username for basic auth. Used only if --use_msa_server is set. Can also be set via BOLTZ_MSA_USERNAME environment variable.",
+    default=None,
+)
+@click.option(
+    "--msa_server_password",
+    type=str,
+    help="MSA server password for basic auth. Used only if --use_msa_server is set. Can also be set via BOLTZ_MSA_PASSWORD environment variable.",
+    default=None,
+)
+@click.option(
+    "--api_key_header",
+    type=str,
+    help="Custom header key for API key authentication (default: X-API-Key).",
+    default=None,
+)
+@click.option(
+    "--api_key_value",
+    type=str,
+    help="Custom header value for API key authentication.",
+    default=None,
+)
+@click.option(
     "--use_potentials",
     is_flag=True,
     help="Whether to not use potentials for steering. Default is False.",
@@ -934,6 +1033,11 @@ def cli() -> None:
     is_flag=True,
     help="Whether to disable the kernels. Default False",
 )
+@click.option(
+    "--write_embeddings",
+    is_flag=True,
+    help=" to dump the s and z embeddings into a npz file. Default is False.",
+)
 def predict(  # noqa: C901, PLR0915, PLR0912
     data: str,
     out_dir: str,
@@ -958,6 +1062,10 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     use_msa_server: bool = False,
     msa_server_url: str = "https://api.colabfold.com",
     msa_pairing_strategy: str = "greedy",
+    msa_server_username: Optional[str] = None,
+    msa_server_password: Optional[str] = None,
+    api_key_header: Optional[str] = None,
+    api_key_value: Optional[str] = None,
     use_potentials: bool = False,
     model: Literal["boltz1", "boltz2"] = "boltz2",
     method: Optional[str] = None,
@@ -967,6 +1075,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     subsample_msa: bool = True,
     num_subsampled_msa: int = 1024,
     no_kernels: bool = False,
+    write_embeddings: bool = False,
 ) -> None:
     """Run predictions with Boltz."""
     # If cpu, write a friendly warning
@@ -1000,6 +1109,23 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     # Set cache path
     cache = Path(cache).expanduser()
     cache.mkdir(parents=True, exist_ok=True)
+
+    # Get MSA server credentials from environment variables if not provided
+    if use_msa_server:
+        if msa_server_username is None:
+            msa_server_username = os.environ.get("BOLTZ_MSA_USERNAME")
+        if msa_server_password is None:
+            msa_server_password = os.environ.get("BOLTZ_MSA_PASSWORD")
+        if api_key_value is None:
+            api_key_value = os.environ.get("MSA_API_KEY_VALUE")
+        
+        click.echo(f"MSA server enabled: {msa_server_url}")
+        if api_key_value:
+            click.echo("MSA server authentication: using API key header")
+        elif msa_server_username and msa_server_password:
+            click.echo("MSA server authentication: using basic auth")
+        else:
+            click.echo("MSA server authentication: no credentials provided")
 
     # Create output directories
     data = Path(data).expanduser()
@@ -1040,6 +1166,10 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         use_msa_server=use_msa_server,
         msa_server_url=msa_server_url,
         msa_pairing_strategy=msa_pairing_strategy,
+        msa_server_username=msa_server_username,
+        msa_server_password=msa_server_password,
+        api_key_header=api_key_header,
+        api_key_value=api_key_value,
         boltz2=model == "boltz2",
         preprocessing_threads=preprocessing_threads,
         max_msa_seqs=max_msa_seqs,
@@ -1081,7 +1211,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     if (isinstance(devices, int) and devices > 1) or (
         isinstance(devices, list) and len(devices) > 1
     ):
-        start_method = "fork" if platform.system() != "win32" else "spawn"
+        start_method = "fork" if platform.system() != "win32" and platform.system() != "Windows" else "spawn"
         strategy = DDPStrategy(start_method=start_method)
         if len(filtered_manifest.records) < devices:
             msg = (
@@ -1118,6 +1248,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         output_dir=out_dir / "predictions",
         output_format=output_format,
         boltz2=model == "boltz2",
+        write_embeddings=write_embeddings,
     )
 
     # Set up trainer
@@ -1176,7 +1307,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
 
         steering_args = BoltzSteeringParams()
         steering_args.fk_steering = use_potentials
-        steering_args.guidance_update = use_potentials
+        steering_args.physical_guidance_update = use_potentials
 
         model_cls = Boltz2 if model == "boltz2" else Boltz1
         model_module = model_cls.load_from_checkpoint(
@@ -1251,6 +1382,12 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         if affinity_checkpoint is None:
             affinity_checkpoint = cache / "boltz2_aff.ckpt"
 
+        steering_args = BoltzSteeringParams()
+        steering_args.fk_steering = False
+        steering_args.guidance_update = False
+        steering_args.physical_guidance_update = False
+        steering_args.contact_guidance_update = False
+        
         model_module = Boltz2.load_from_checkpoint(
             affinity_checkpoint,
             strict=True,
@@ -1260,7 +1397,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             ema=False,
             pairformer_args=asdict(pairformer_args),
             msa_args=asdict(msa_args),
-            steering_args={"fk_steering": False, "guidance_update": False},
+            steering_args=asdict(steering_args),
             affinity_mw_correction=affinity_mw_correction,
         )
         model_module.eval()

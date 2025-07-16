@@ -22,7 +22,6 @@ Before diving into more details about the input formats, here are the key differ
 | Affinity | :x:                | :white_check_mark:   |
 
 
-
 ## YAML format
 
 The YAML format is more flexible and allows for more complex inputs, particularly around covalent bonds. The schema of the YAML is the following:
@@ -50,13 +49,18 @@ constraints:
         binder: CHAIN_ID
         contacts: [[CHAIN_ID, RES_IDX/ATOM_NAME], [CHAIN_ID, RES_IDX/ATOM_NAME]]
         max_distance: DIST_ANGSTROM
+        force: false # if force is set to true (default is false), a potential will be used to enforce the pocket constraint
     - contact:
         token1: [CHAIN_ID, RES_IDX/ATOM_NAME]
         token2: [CHAIN_ID, RES_IDX/ATOM_NAME]
         max_distance: DIST_ANGSTROM
+        force: false # if force is set to true (default is false), a potential will be used to enforce the pocket constraint
 
 templates:
     - cif: CIF_PATH  # if only a path is provided, Boltz will find the best matchings
+    - cif: CIF_PATH
+      force: true # optional, if force is set to true (default is false), a potential will be used to enforce the template
+      threshold: DISTANCE_THRESHOLD # optional, controls the distance (in Angstroms) that the prediction can deviate from the template
     - cif: CIF_PATH
       chain_id: CHAIN_ID   # optional, specify which chain to find a template for
     - cif: CIF_PATH
@@ -67,7 +71,8 @@ properties:
         binder: CHAIN_ID
 
 ```
-`sequences` has one entry for every unique chain/molecule in the input. Each polymer entity as a `ENTITY_TYPE`  either `protein`, `dna` or `rna` and have a `sequence` attribute. Non-polymer entities are indicated by `ENTITY_TYPE` equal to `ligand` and have a `smiles` or `ccd` attribute. `CHAIN_ID` is the unique identifier for each chain/molecule, and it should be set as a list in case of multiple identical entities in the structure. For proteins, the `msa` key is required by default but can be omited by passing the `--use_msa_server` flag which will auto-generate the MSA using the mmseqs2 server. If you wish to use a precomputed MSA, use the `msa` attribute with `MSA_PATH` indicating the path to the `.a3m` file containing the MSA for that protein. If you wish to explicitly run single sequence mode (which is generally advised against as it will hurt model performance), you may do so by using the special keyword `empty` for that protein (ex: `msa: empty`). For custom MSA, you may wish to indicate pairing keys to the model. You can do so by using a CSV format instead of a3m with two columns: `sequence` with the protein sequences and `key` which is a unique identifier indicating matching rows across CSV files of each protein chain.
+
+`sequences` has one entry for every unique chain/molecule in the input. Each polymer entity as a `ENTITY_TYPE`  either `protein`, `dna` or `rna` and have a `sequence` attribute. Non-polymer entities are indicated by `ENTITY_TYPE` equal to `ligand` and have a `smiles` or `ccd` attribute. `CHAIN_ID` is the unique identifier for each chain/molecule, and it should be set as a list in case of multiple identical entities in the structure. For proteins, the `msa` key is required by default but can be omitted by passing the `--use_msa_server` flag which will auto-generate the MSA using the mmseqs2 server. If you wish to use a precomputed MSA, use the `msa` attribute with `MSA_PATH` indicating the path to the `.a3m` file containing the MSA for that protein. If you wish to explicitly run single sequence mode (which is generally advised against as it will hurt model performance), you may do so by using the special keyword `empty` for that protein (ex: `msa: empty`). For custom MSA, you may wish to indicate pairing keys to the model. You can do so by using a CSV format instead of a3m with two columns: `sequence` with the protein sequences and `key` which is a unique identifier indicating matching rows across CSV files of each protein chain.
 
 The `modifications` field is an optional field that allows you to specify modified residues in the polymer (`protein`, `dna` or`rna`). The `position` field specifies the index (starting from 1) of the residue, and `ccd` is the CCD code of the modified residue. This field is currently only supported for CCD ligands. The `cyclic` flag should be used to specify polymer chains (not ligands) that are cyclic. 
 
@@ -78,7 +83,7 @@ The `modifications` field is an optional field that allows you to specify modifi
 
 * The `pocket` constraint specifies the residues associated with a ligand, where `binder` refers to the chain binding to the pocket (which can be a molecule, protein, DNA or RNA) and `contacts` is the list of chain and residue indices (starting from 1) associated with the pocket. The model currently only supports the specification of a single `binder` chain (and any number of `contacts` residues in other chains).
 
-`templates` is an otional field that allows you to specify structural templates for your prediction. At minimum, you must provide the path to the structural template, which must provided as a CIF file. If you wish to explicitly define which of the chains in your YAML should be templated using this CIF file, you can use the `chain_id` entry to specify them. Whether a set of ids is provided or not, Boltz will find the best matching chains from the provided template. If you wish to explicitly define the mapping yourself, you may provide the corresponding template_id. Note that only protein chains can be templated.
+`templates` is an optional field that allows you to specify structural templates for your prediction. At minimum, you must provide the path to the structural template, which must provided as a CIF file. If you wish to explicitly define which of the chains in your YAML should be templated using this CIF file, you can use the `chain_id` entry to specify them. Whether a set of ids is provided or not, Boltz will find the best matching chains from the provided template. If you wish to explicitly define the mapping yourself, you may provide the corresponding template_id. Note that only protein chains can be templated.
 
 `properties` is an optional field that allows you to specify whether you want to compute the affinity. If enabled, you must also provide the chain_id corresponding to the small molecule against which the affinity will be computed. Only one single molecule can be specified for affinity computation, and it must be a ligand chain (not a protein, DNA or RNA).
 
@@ -147,7 +152,7 @@ As an example, to predict a structure using 10 recycling steps and 25 samples (t
 | **Option**               | **Type**        | **Default**                 | **Description**                                                                                                                                                                     |
 |--------------------------|-----------------|-----------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `--out_dir`              | `PATH`          | `./`                        | The path where to save the predictions.                                                                                                                                             |
-| `--cache`                | `PATH`          | `~/.boltz`                  | The directory where to download the data and model. Will use environmnet variable `BOLTZ_CACHE` as an absolute path if set                                                          |
+| `--cache`                | `PATH`          | `~/.boltz`                  | The directory where to download the data and model. Will use environment variable `BOLTZ_CACHE` as an absolute path if set                                                          |
 | `--checkpoint`           | `PATH`          | None                        | An optional checkpoint. Uses the provided Boltz-2 model by default.                                                                                                                 |
 | `--devices`              | `INTEGER`       | `1`                         | The number of devices to use for prediction.                                                                                                                                        |
 | `--accelerator`          | `[gpu,cpu,tpu]` | `gpu`                       | The accelerator to use for prediction.                                                                                                                                              |
@@ -167,7 +172,7 @@ As an example, to predict a structure using 10 recycling steps and 25 samples (t
 | `--max_msa_seqs`          | `INTEGER`       | `8192` |The maximum number of MSA sequences to use for prediction.                                                                                                                             |
 | `--subsample_msa`          | `FLAG`       | `False` | Whether to subsample the MSA.                                                                                                                             |
 | `--num_subsampled_msa`          | `INTEGER`       | `1024` | The number of MSA sequences to subsample.                                                                                                                             |
-| `--no_trifast`          | `FLAG`       | `False` | Whether to not use trifast kernels for triangular updates..                                                                                                                             |
+| `--no_kernels`          | `FLAG`       | `False` | Whether to not use trifast kernels for triangular updates..                                                                                                                             |
 | `--override`             | `FLAG`          | `False`                     | Whether to override existing predictions if found.                                                                                                                                  |
 | `--use_msa_server`       | `FLAG`          | `False`                     | Whether to use the msa server to generate msa's.                                                                                                                                    |
 | `--msa_server_url`       | str             | `https://api.colabfold.com` | MSA server url. Used only if --use_msa_server is set.                                                                                                                               |
@@ -241,9 +246,10 @@ The output affinity `.json` file is organized as follows:
     "affinity_probability_binary2": 0.8402,    # Predicted binding likelihood from the second model in the ensemble
 }
 ```
-There are two main predictions in the affinity output: `affinity_pred_value` and `affinity_probability_binary`. They are trained on largely different datasets, with different supervisions, and should be used in different contexts. Add commentMore actions
 
-The `affinity_probability_binary` field should be used to detect binders from decoys, for example in a hit-discovery stage. Its value ranges from 0 to 1 and represents the predicted probability that the ligand is a binder.
+There are two main predictions in the affinity output: `affinity_pred_value` and `affinity_probability_binary`. They are trained on largely different datasets, with different supervisions, and should be used in different contexts. 
+
+The `affinity_probability_binary` field should be used to detect binders from decoys, for example in a hit-discovery stage. It's value ranges from 0 to 1 and represents the predicted probability that the ligand is a binder.
 
 The `affinity_pred_value` aims to measure the specific affinity of different binders and how this changes with small modifications of the molecule. This should be used in ligand optimization stages such as hit-to-lead and lead-optimization. It reports a binding affinity value as `log(IC50)`, derived from an `IC50` measured in `μM`. Lower values indicate stronger predicted binding, for instance:
 - IC50 of $10^{-9}$ M $\longrightarrow$ our model outputs $-3$ (strong binder)
@@ -251,3 +257,55 @@ The `affinity_pred_value` aims to measure the specific affinity of different bin
 - IC50 of $10^{-4}$ M $\longrightarrow$ our model outputs $2$ (weak binder / decoy)
 
 You can convert the model's output to pIC50 in `kcal/mol` by using `y --> (6 - y) * 1.364` where `y` is the model's prediction.
+
+
+## Authentication to MSA Server
+
+When using the `--use_msa_server` option with a server that requires authentication, you can provide credentials in one of two ways:
+
+### 1. Basic Authentication
+
+- Use the CLI options `--msa_server_username` and `--msa_server_password`.
+- Or, set the environment variables:
+  - `BOLTZ_MSA_USERNAME` (for the username)
+  - `BOLTZ_MSA_PASSWORD` (for the password, recommended for security)
+
+**Example:**
+```bash
+export BOLTZ_MSA_USERNAME=myuser
+export BOLTZ_MSA_PASSWORD=mypassword
+boltz predict ... --use_msa_server
+```
+Or:
+```bash
+boltz predict ... --use_msa_server --msa_server_username myuser --msa_server_password mypassword
+```
+
+### 2. API Key Authentication
+
+- Use the CLI options `--api_key_header` (default: `X-API-Key`) and `--api_key_value` to specify the header and value for API key authentication.
+- Or, set the API key value via the environment variable `MSA_API_KEY_VALUE` (recommended for security).
+
+**Example using CLI:**
+```bash
+boltz predict ... --use_msa_server --api_key_header X-API-Key --api_key_value <your-api-key>
+```
+
+**Example using environment variable:**
+```bash
+export MSA_API_KEY_VALUE=<your-api-key>
+boltz predict ... --use_msa_server --api_key_header X-API-Key
+```
+If both the CLI option and environment variable are set, the CLI option takes precedence.
+
+> If your server expects a different header, set `--api_key_header` accordingly (e.g., `--api_key_header X-Gravitee-Api-Key`).
+
+---
+
+**Note:**  
+Only one authentication method (basic or API key) can be used at a time. If both are provided, the program will raise an error.
+
+
+## Troubleshooting
+
+ - When running on old NVIDIA GPUs, you may encounter an error related to the `cuequivariance` library. In this case, you should run the model with the `--no_kernels` flag, which will disable the use of the `cuequivariance` library and allow the model to run without it. This may result in slightly lower performance, but it will allow you to run the model on older hardware.

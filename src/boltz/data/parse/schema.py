@@ -544,6 +544,8 @@ def get_template_records_from_search(
     sequences: dict[str, str],
     template_chain_ids: list[str],
     template_sequences: dict[str, str],
+    force: bool = False,
+    threshold: Optional[float] = None,
 ) -> list[TemplateInfo]:
     """Get template records from an alignment."""
     # Compute pairwise scores
@@ -579,6 +581,8 @@ def get_template_records_from_search(
                 template_chain=template_chain_id,
                 template_st=alignment.template_st,
                 template_en=alignment.template_en,
+                force=force,
+                threshold=threshold,
             )
             template_records.append(template_record)
 
@@ -591,6 +595,8 @@ def get_template_records_from_matching(
     sequences: dict[str, str],
     template_chain_ids: list[str],
     template_sequences: dict[str, str],
+    force: bool = False,
+    threshold: Optional[float] = None,
 ) -> list[TemplateInfo]:
     """Get template records from a given matching."""
     template_records = []
@@ -609,6 +615,8 @@ def get_template_records_from_matching(
                 template_chain=template_chain_id,
                 template_st=alignment.template_st,
                 template_en=alignment.template_en,
+                force=force,
+                threshold=threshold,
             )
             template_records.append(template_record)
 
@@ -708,7 +716,7 @@ def parse_ccd_residue(
         atom_name = atom.GetProp("name")
 
         # Drop leaving atoms for non-canonical amino acids.
-        if drop_leaving_atoms and int(atom.GetProp('leaving_atom')):
+        if drop_leaving_atoms and int(atom.GetProp("leaving_atom")):
             continue
 
         charge = atom.GetFormalCharge()
@@ -919,14 +927,13 @@ def parse_polymer(
 def token_spec_to_ids(
     chain_name, residue_index_or_atom_name, chain_to_idx, atom_idx_map, chains
 ):
-    # TODO: unfinished
     if chains[chain_name].type == const.chain_type_ids["NONPOLYMER"]:
         # Non-polymer chains are indexed by atom name
         _, _, atom_idx = atom_idx_map[(chain_name, 0, residue_index_or_atom_name)]
         return (chain_to_idx[chain_name], atom_idx)
     else:
         # Polymer chains are indexed by residue index
-        contacts.append((chain_to_idx[chain_name], residue_index_or_atom_name - 1))
+        return chain_to_idx[chain_name], residue_index_or_atom_name - 1
 
 
 def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
@@ -1211,9 +1218,9 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 affinity_mw=affinity_mw,
             )
 
-            assert not items[0][entity_type].get(
-                "cyclic", False
-            ), "Cyclic flag is not supported for ligands"
+            assert not items[0][entity_type].get("cyclic", False), (
+                "Cyclic flag is not supported for ligands"
+            )
 
         elif (entity_type == "ligand") and ("smiles" in items[0][entity_type]):
             seq = items[0][entity_type]["smiles"]
@@ -1261,9 +1268,9 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 affinity_mw=affinity_mw,
             )
 
-            assert not items[0][entity_type].get(
-                "cyclic", False
-            ), "Cyclic flag is not supported for ligands"
+            assert not items[0][entity_type].get("cyclic", False), (
+                "Cyclic flag is not supported for ligands"
+            )
 
         else:
             msg = f"Invalid entity type: {entity_type}"
@@ -1519,18 +1526,17 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             for chain_name, residue_index_or_atom_name in constraint["pocket"][
                 "contacts"
             ]:
-                if chains[chain_name].type == const.chain_type_ids["NONPOLYMER"]:
-                    # Non-polymer chains are indexed by atom name
-                    _, _, atom_idx = atom_idx_map[
-                        (chain_name, 0, residue_index_or_atom_name)
-                    ]
-                    contact = (chain_to_idx[chain_name], atom_idx)
-                else:
-                    # Polymer chains are indexed by residue index
-                    contact = (chain_to_idx[chain_name], residue_index_or_atom_name - 1)
+                contact = token_spec_to_ids(
+                    chain_name,
+                    residue_index_or_atom_name,
+                    chain_to_idx,
+                    atom_idx_map,
+                    chains,
+                )
                 contacts.append(contact)
 
-            pocket_constraints.append((binder, contacts, max_distance))
+            force = constraint["pocket"].get("force", False)
+            pocket_constraints.append((binder, contacts, max_distance, force))
         elif "contact" in constraint:
             if (
                 "token1" not in constraint["contact"]
@@ -1546,17 +1552,24 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             max_distance = constraint["contact"].get("max_distance", 6.0)
 
             chain_name1, residue_index_or_atom_name1 = constraint["contact"]["token1"]
-            if chains[chain_name1].type == const.chain_type_ids["NONPOLYMER"]:
-                # Non-polymer chains are indexed by atom name
-                _, _, atom_idx = atom_idx_map[
-                    (chain_name1, 0, residue_index_or_atom_name1)
-                ]
-                token1 = (chain_to_idx[chain_name1], atom_idx)
-            else:
-                # Polymer chains are indexed by residue index
-                token1 = (chain_to_idx[chain_name1], residue_index_or_atom_name1 - 1)
+            token1 = token_spec_to_ids(
+                chain_name1,
+                residue_index_or_atom_name1,
+                chain_to_idx,
+                atom_idx_map,
+                chains,
+            )
+            chain_name2, residue_index_or_atom_name2 = constraint["contact"]["token2"]
+            token2 = token_spec_to_ids(
+                chain_name2,
+                residue_index_or_atom_name2,
+                chain_to_idx,
+                atom_idx_map,
+                chains,
+            )
+            force = constraint["contact"].get("force", False)
 
-            pocket_constraints.append((binder, contacts, max_distance))
+            contact_constraints.append((token1, token2, max_distance, force))
         else:
             msg = f"Invalid constraint: {constraint}"
             raise ValueError(msg)
@@ -1593,15 +1606,17 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         if (
             template_chain_ids is not None
             and chain_ids is not None
-            and len(template_chain_ids) != len(chain_ids)
         ):
-            matched = True
-            if len(template_chain_ids) != len(chain_ids):
-                msg = (
-                    "When providing both the chain_id and template_id, the number of"
-                    "template_ids provided must match the number of chain_ids!"
-                )
-                raise ValueError(msg)
+           
+                if len(template_chain_ids) == len(chain_ids):
+                     if len(template_chain_ids) > 0 and len(chain_ids) > 0:
+                        matched = True
+                else:
+                    msg = (
+                        "When providing both the chain_id and template_id, the number of"
+                        "template_ids provided must match the number of chain_ids!"
+                    )
+                    raise ValueError(msg)
 
         # Get relevant chains ids
         if chain_ids is None:
@@ -1639,7 +1654,17 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 )
                 raise ValueError(msg)
 
+        force = template.get("force", False)
+        if force:
+            if "threshold" in template:
+                threshold = template["threshold"]
+            else:
+                msg = f"Template {template_id} must have threshold specified if force is set to True"
+                raise ValueError(msg)
+        else:
+            threshold = float("inf")
         # Compute template records
+
         if matched:
             template_records.extend(
                 get_template_records_from_matching(
@@ -1648,6 +1673,8 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                     sequences=protein_seqs,
                     template_chain_ids=template_chain_ids,
                     template_sequences=parsed_template.sequences,
+                    force=force,
+                    threshold=threshold,
                 )
             )
         else:
@@ -1658,6 +1685,8 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                     sequences=protein_seqs,
                     template_chain_ids=template_chain_ids,
                     template_sequences=parsed_template.sequences,
+                    force=force,
+                    threshold=threshold,
                 )
             )
         # Save template
@@ -1738,7 +1767,9 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         )
         chain_infos.append(chain_info)
 
-    options = InferenceOptions(pocket_constraints=pocket_constraints)
+    options = InferenceOptions(
+        pocket_constraints=pocket_constraints, contact_constraints=contact_constraints
+    )
     record = Record(
         id=name,
         structure=struct_info,
@@ -1757,7 +1788,6 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         planar_ring_5_constraints=planar_ring_5_constraints,
         planar_ring_6_constraints=planar_ring_6_constraints,
     )
-
     return Target(
         record=record,
         structure=data,

@@ -299,6 +299,7 @@ def to_mmcif(
 
     model_group = ModelGroup([model], name="All models")
     system.model_groups.append(model_group)
+    ihm.dumper.set_line_wrap(False)
 
     fh = io.StringIO()
     dumper.write(fh, [system])

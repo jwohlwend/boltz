@@ -23,6 +23,7 @@ class BoltzWriter(BasePredictionWriter):
         output_dir: str,
         output_format: Literal["pdb", "mmcif"] = "mmcif",
         boltz2: bool = False,
+        write_embeddings: bool = False,
     ) -> None:
         """Initialize the writer.
 
@@ -43,6 +44,7 @@ class BoltzWriter(BasePredictionWriter):
         self.failed = 0
         self.boltz2 = boltz2
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.write_embeddings = write_embeddings
 
     def write_on_batch_end(
         self,
@@ -243,6 +245,17 @@ class BoltzWriter(BasePredictionWriter):
                         / f"pde_{record.id}_model_{idx_to_rank[model_idx]}.npz"
                     )
                     np.savez_compressed(path, pde=pde.cpu().numpy())
+                
+            # Save embeddings
+            if self.write_embeddings and "s" in prediction and "z" in prediction:
+                s = prediction["s"].cpu().numpy()
+                z = prediction["z"].cpu().numpy()
+
+                path = (
+                    struct_dir
+                    / f"embeddings_{record.id}.npz"
+                )
+                np.savez_compressed(path, s=s, z=z)
 
     def on_predict_epoch_end(
         self,

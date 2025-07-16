@@ -301,14 +301,23 @@ class AtomDiffusion(Module):
         steering_args=None,
         **network_condition_kwargs,
     ):
-        potentials = get_potentials()
+        if steering_args is not None and (
+            steering_args["fk_steering"]
+            or steering_args["physical_guidance_update"]
+            or steering_args["contact_guidance_update"]
+        ):
+            potentials = get_potentials(steering_args, boltz2=True)
+
         if steering_args["fk_steering"]:
             multiplicity = multiplicity * steering_args["num_particles"]
             energy_traj = torch.empty((multiplicity, 0), device=self.device)
             resample_weights = torch.ones(multiplicity, device=self.device).reshape(
                 -1, steering_args["num_particles"]
             )
-        if steering_args["guidance_update"]:
+        if (
+            steering_args["physical_guidance_update"]
+            or steering_args["contact_guidance_update"]
+        ):
             scaled_guidance_update = torch.zeros(
                 (multiplicity, *atom_mask.shape[1:], 3),
                 dtype=torch.float32,
@@ -352,7 +361,10 @@ class AtomDiffusion(Module):
                     torch.einsum("bmd,bds->bms", atom_coords_denoised, random_R)
                     + random_tr
                 )
-            if steering_args["guidance_update"] and scaled_guidance_update is not None:
+            if (
+                steering_args["physical_guidance_update"]
+                or steering_args["contact_guidance_update"]
+            ) and scaled_guidance_update is not None:
                 scaled_guidance_update = torch.einsum(
                     "bmd,bds->bms", scaled_guidance_update, random_R
                 )
@@ -410,7 +422,10 @@ class AtomDiffusion(Module):
                         log_G = energy_traj[:, -2] - energy_traj[:, -1]
 
                     # Compute ll difference between guided and unguided transition distribution
-                    if steering_args["guidance_update"] and noise_var > 0:
+                    if (
+                        steering_args["physical_guidance_update"]
+                        or steering_args["contact_guidance_update"]
+                    ) and noise_var > 0:
                         ll_difference = (
                             eps**2 - (eps + scaled_guidance_update) ** 2
                         ).sum(dim=(-1, -2)) / (2 * noise_var)
@@ -427,9 +442,9 @@ class AtomDiffusion(Module):
 
                 # Compute guidance update to x_0 prediction
                 if (
-                    steering_args["guidance_update"]
-                    and step_idx < num_sampling_steps - 1
-                ):
+                    steering_args["physical_guidance_update"]
+                    or steering_args["contact_guidance_update"]
+                ) and step_idx < num_sampling_steps - 1:
                     guidance_update = torch.zeros_like(atom_coords_denoised)
                     for guidance_step in range(steering_args["num_gd_steps"]):
                         energy_gradient = torch.zeros_like(atom_coords_denoised)
@@ -484,7 +499,10 @@ class AtomDiffusion(Module):
                     if atom_coords_denoised is not None:
                         atom_coords_denoised = atom_coords_denoised[resample_indices]
                     energy_traj = energy_traj[resample_indices]
-                    if steering_args["guidance_update"]:
+                    if (
+                        steering_args["physical_guidance_update"]
+                        or steering_args["contact_guidance_update"]
+                    ):
                         scaled_guidance_update = scaled_guidance_update[
                             resample_indices
                         ]
