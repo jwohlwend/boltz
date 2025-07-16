@@ -736,7 +736,7 @@ def devices_option_convert(value: str) -> int | list[int] | Literal["auto"]:
     """Convert the devices option value to an int or list of ints. raise ValueError if not convertible."""
     if value == "auto" or value == "0":
         return "auto"
-    elif value.isdigit():
+    elif isinstance(value,int) or value.isdigit():
         return int(value)
     else:
         try:
