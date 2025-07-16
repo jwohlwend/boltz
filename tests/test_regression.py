@@ -17,28 +17,32 @@ from boltz.model.model import Boltz1
 import test_utils
 
 tests_dir = os.path.dirname(os.path.abspath(__file__))
-test_data_dir = os.path.join(tests_dir, 'data')
+test_data_dir = os.path.join(tests_dir, "data")
+
 
 @pytest.mark.regression
 class RegressionTester(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        cache = os.path.expanduser('~/.boltz')
+        cache = os.path.expanduser("~/.boltz")
         checkpoint_url = MODEL_URL
         model_name = checkpoint_url.split("/")[-1]
         checkpoint = os.path.join(cache, model_name)
         if not os.path.exists(checkpoint):
             test_utils.download_file(checkpoint_url, checkpoint)
 
-        regression_feats_path = os.path.join(test_data_dir, 'ligand_regression_feats.pkl')
+        regression_feats_path = os.path.join(
+            test_data_dir, "ligand_regression_feats.pkl"
+        )
         if not os.path.exists(regression_feats_path):
             regression_feats_url = "https://www.dropbox.com/scl/fi/1avbcvoor5jcnvpt07tp6/ligand_regression_feats.pkl?rlkey=iwtm9gpxgrbp51jbizq937pqf&st=jnbky253&dl=1"
             test_utils.download_file(regression_feats_url, regression_feats_path)
 
         regression_feats = torch.load(regression_feats_path, map_location=device)
-        model_module: nn.Module = Boltz1.load_from_checkpoint(checkpoint, map_location=device)
+        model_module: nn.Module = Boltz1.load_from_checkpoint(
+            checkpoint, map_location=device
+        )
         model_module.to(device)
         model_module.eval()
 
@@ -74,7 +78,9 @@ class RegressionTester(unittest.TestCase):
         s_inputs = self.regression_feats["s_inputs"]
         feats = self.regression_feats["feats"]
         relative_position_encoding = self.regression_feats["relative_position_encoding"]
-        multiplicity_diffusion_train = self.regression_feats["multiplicity_diffusion_train"]
+        multiplicity_diffusion_train = self.regression_feats[
+            "multiplicity_diffusion_train"
+        ]
 
         self.model_module.structure_module.coordinate_augmentation = False
         self.model_module.structure_module.sigma_data = 0.0
@@ -103,5 +109,5 @@ class RegressionTester(unittest.TestCase):
             assert torch.allclose(exp_val, act_val, atol=1e-4)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

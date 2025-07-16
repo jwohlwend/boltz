@@ -72,6 +72,7 @@ data:
   max_dist: 22.0
   num_bins: 64
   atoms_per_window_queries: 32
+  compute_constraint_features: false
 
 model:
   _target_: boltz.model.model.Boltz1

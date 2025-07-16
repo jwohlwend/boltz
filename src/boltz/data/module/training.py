@@ -65,6 +65,7 @@ class DataConfig:
     binder_pocket_cutoff: float = 6.0
     binder_pocket_sampling_geometric_p: float = 0.0
     val_batch_size: int = 1
+    compute_constraint_features: bool = False
 
 
 @dataclass
@@ -123,7 +124,7 @@ def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
         atoms=structure["atoms"],
         bonds=structure["bonds"],
         residues=structure["residues"],
-        chains=chains, # chains var accounting for missing cyclic_period
+        chains=chains,  # chains var accounting for missing cyclic_period
         connections=structure["connections"].astype(Connection),
         interfaces=structure["interfaces"],
         mask=structure["mask"],
@@ -614,6 +615,7 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
             binder_pocket_cutoff=cfg.binder_pocket_cutoff,
             binder_pocket_sampling_geometric_p=cfg.binder_pocket_sampling_geometric_p,
             return_symmetries=cfg.return_train_symmetries,
+            compute_constraint_features=cfg.compute_constraint_features,
         )
         self._val_set = ValidationDataset(
             datasets=train if cfg.overfit is not None else val,
@@ -634,6 +636,7 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
             return_symmetries=cfg.return_val_symmetries,
             binder_pocket_conditioned_prop=cfg.val_binder_pocket_conditioned_prop,
             binder_pocket_cutoff=cfg.binder_pocket_cutoff,
+            compute_constraint_features=cfg.compute_constraint_features,
         )
 
     def setup(self, stage: Optional[str] = None) -> None:

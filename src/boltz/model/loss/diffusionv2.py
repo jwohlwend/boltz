@@ -15,15 +15,16 @@ def weighted_rigid_align(
     """Algorithm 28 : note there is a problem with the pseudocode in the paper where predicted and
     GT are swapped in algorithm 28, but correct in equation (2)."""
 
-    batch_size, num_points, dim = true_coords.shape
+    out_shape = torch.broadcast_shapes(true_coords.shape, pred_coords.shape)
+    *batch_size, num_points, dim = out_shape
     weights = (mask * weights).unsqueeze(-1)
 
     # Compute weighted centroids
-    true_centroid = (true_coords * weights).sum(dim=1, keepdim=True) / weights.sum(
-        dim=1, keepdim=True
+    true_centroid = (true_coords * weights).sum(dim=-2, keepdim=True) / weights.sum(
+        dim=-2, keepdim=True
     )
-    pred_centroid = (pred_coords * weights).sum(dim=1, keepdim=True) / weights.sum(
-        dim=1, keepdim=True
+    pred_centroid = (pred_coords * weights).sum(dim=-2, keepdim=True) / weights.sum(
+        dim=-2, keepdim=True
     )
 
     # Center the coordinates
@@ -38,7 +39,9 @@ def weighted_rigid_align(
 
     # Compute the weighted covariance matrix
     cov_matrix = einsum(
-        weights * pred_coords_centered, true_coords_centered, "b n i, b n j -> b i j"
+        weights * pred_coords_centered,
+        true_coords_centered,
+        "... n i, ... n j -> ... i j",
     )
 
     # Compute the SVD of the covariance matrix, required float32 for svd and determinant
@@ -59,19 +62,21 @@ def weighted_rigid_align(
         )
 
     # Compute the rotation matrix
-    rot_matrix = torch.einsum("b i j, b k j -> b i k", U, V).to(dtype=torch.float32)
+    rot_matrix = torch.einsum("... i j, ... k j -> ... i k", U, V).to(
+        dtype=torch.float32
+    )
 
     # Ensure proper rotation matrix with determinant 1
     F = torch.eye(dim, dtype=cov_matrix_32.dtype, device=cov_matrix.device)[
         None
-    ].repeat(batch_size, 1, 1)
-    F[:, -1, -1] = torch.det(rot_matrix)
-    rot_matrix = einsum(U, F, V, "b i j, b j k, b l k -> b i l")
+    ].repeat(*batch_size, 1, 1)
+    F[..., -1, -1] = torch.det(rot_matrix)
+    rot_matrix = einsum(U, F, V, "... i j, ... j k, ... l k -> ... i l")
     rot_matrix = rot_matrix.to(dtype=original_dtype)
 
     # Apply the rotation and translation
     aligned_coords = (
-        einsum(true_coords_centered, rot_matrix, "b n i, b j i -> b n j")
+        einsum(true_coords_centered, rot_matrix, "... n i, ... j i -> ... n j")
         + pred_centroid
     )
     aligned_coords.detach_()
