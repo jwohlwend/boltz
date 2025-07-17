@@ -817,6 +817,8 @@ def devices_option_convert(value: str | int) -> int | list[int] | Literal["auto"
     """Convert the devices option value to an int or list of ints. raise ValueError if not convertible."""
     if value == "auto" or value == "0":
         return "auto"
+    elif value == "-1":
+        return -1
     elif isinstance(value,int) or value.isdigit():
         return int(value)
     else:
@@ -855,7 +857,11 @@ def devices_option_convert(value: str | int) -> int | list[int] | Literal["auto"
 @click.option(
     "--devices",
     type=devices_option_convert,
-    help="The number of devices to use for prediction. Default is 1.",
+    help=(
+        "The number of devices, the list of devices, or 'auto' to use for prediction."
+        "Examples: 1, [0, 1, 2], [2], auto\n"
+        "Default is 1."
+    ),
     default=1,
 )
 @click.option(
