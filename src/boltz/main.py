@@ -813,7 +813,7 @@ def cli() -> None:
     """Boltz."""
     return
 
-def devices_option_convert(value: str) -> int | list[int] | Literal["auto"]:
+def devices_option_convert(value: str | int) -> int | list[int] | Literal["auto"]:
     """Convert the devices option value to an int or list of ints. raise ValueError if not convertible."""
     if value == "auto" or value == "0":
         return "auto"
