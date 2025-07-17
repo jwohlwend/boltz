@@ -818,7 +818,7 @@ def devices_option_convert(value: str | int) -> int | list[int] | Literal["auto"
     if value == "auto" or value == "0":
         return "auto"
     elif value == "-1":
-        return -1
+        raise ValueError("Using -1 would cause issues, please use 'auto' instead.")
     elif isinstance(value,int) or value.isdigit():
         return int(value)
     else:
