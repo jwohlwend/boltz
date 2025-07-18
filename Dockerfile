@@ -17,7 +17,7 @@ COPY . /app/boltz/
 
 # Install from local source
 WORKDIR /app/boltz
-RUN . /opt/venv/bin/activate && pip install -e .
+RUN . /opt/venv/bin/activate && pip install -e .[cuda]
 
 # Clean up
 RUN apt-get purge -y git \
