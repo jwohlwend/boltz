@@ -1056,14 +1056,22 @@ class Boltz2(LightningModule):
 
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> dict:
         try:
-            out = self(
-                batch,
-                recycling_steps=self.predict_args["recycling_steps"],
-                num_sampling_steps=self.predict_args["sampling_steps"],
-                diffusion_samples=self.predict_args["diffusion_samples"],
-                max_parallel_samples=self.predict_args["max_parallel_samples"],
-                run_confidence_sequentially=True,
-            )
+            outs = []
+            samples_per_trunk_resampling = self.predict_args["samples_per_trunk_resampling"]
+            diffusion_samples = self.predict_args["diffusion_samples"]
+            for i in range((diffusion_samples - 1) // samples_per_trunk_resampling + 1):
+                outs.append(
+                        self(
+                        batch,
+                        recycling_steps=self.predict_args["recycling_steps"],
+                        num_sampling_steps=self.predict_args["sampling_steps"],
+                        diffusion_samples=min(samples_per_trunk_resampling, diffusion_samples - i * samples_per_trunk_resampling),
+                        max_parallel_samples=self.predict_args["max_parallel_samples"],
+                        run_confidence_sequentially=True,
+                    )
+                )
+            assert not (len(outs) > 1 and self.affinity_prediction)
+
             pred_dict = {"exception": False}
             if "keys_dict_batch" in self.predict_args:
                 for key in self.predict_args["keys_dict_batch"]:
@@ -1071,51 +1079,59 @@ class Boltz2(LightningModule):
 
             pred_dict["masks"] = batch["atom_pad_mask"]
             pred_dict["token_masks"] = batch["token_pad_mask"]
-            pred_dict["s"] = out["s"]
-            pred_dict["z"] = out["z"]
+            pred_dict["s"] = outs[0]["s"]
+            pred_dict["z"] = outs[0]["z"]
 
             if "keys_dict_out" in self.predict_args:
                 for key in self.predict_args["keys_dict_out"]:
-                    pred_dict[key] = out[key]
-            pred_dict["coords"] = out["sample_atom_coords"]
+                    pred_dict[key] = outs[0][key]
+            pred_dict["coords"] = torch.cat([out["sample_atom_coords"] for out in outs], dim=0)
             if self.confidence_prediction:
                 # pred_dict["confidence"] = out.get("ablation_confidence", None)
-                pred_dict["pde"] = out["pde"]
-                pred_dict["plddt"] = out["plddt"]
-                pred_dict["confidence_score"] = (
-                    4 * out["complex_plddt"]
-                    + (
-                        out["iptm"]
-                        if not torch.allclose(
-                            out["iptm"], torch.zeros_like(out["iptm"])
+                pred_dict["pde"] = torch.cat([out["pde"] for out in outs], dim=0)
+                pred_dict["plddt"] = torch.cat([out["plddt"] for out in outs], dim=0)
+                pred_dict["complex_plddt"] = torch.cat([out["complex_plddt"] for out in outs], dim=0)
+                pred_dict["complex_iplddt"] = torch.cat([out["complex_iplddt"] for out in outs], dim=0)
+                pred_dict["complex_pde"] = torch.cat([out["complex_pde"] for out in outs], dim=0)
+                pred_dict["complex_ipde"] = torch.cat([out["complex_ipde"] for out in outs], dim=0)
+                pred_dict["pae"] = torch.cat([out["pae"] for out in outs], dim=0)
+                pred_dict["ptm"] = torch.cat([out["ptm"] for out in outs], dim=0)
+                pred_dict["iptm"] = torch.cat([out["iptm"] for out in outs], dim=0)
+                pred_dict["ligand_iptm"] = torch.cat([out["ligand_iptm"] for out in outs], dim=0)
+                pred_dict["protein_iptm"] = torch.cat([out["protein_iptm"] for out in outs], dim=0)
+
+                pred_dict["pair_chains_iptm"] = {key: {} for key in outs[0]["pair_chains_iptm"]}
+                for key in outs[0]["pair_chains_iptm"]:
+                    pred_dict["pair_chains_iptm"][key] = {
+                        key2: torch.cat(
+                            [out["pair_chains_iptm"][key][key2] for out in outs], dim=0
                         )
-                        else out["ptm"]
+                        for key2 in outs[0]["pair_chains_iptm"][key]
+                    }
+
+                pred_dict["confidence_score"] = (
+                    4 * pred_dict["complex_plddt"]
+                    + (
+                        pred_dict["iptm"]
+                        if not torch.allclose(
+                            pred_dict["iptm"], torch.zeros_like(pred_dict["iptm"])
+                        )
+                        else pred_dict["ptm"]
                     )
                 ) / 5
 
-                pred_dict["complex_plddt"] = out["complex_plddt"]
-                pred_dict["complex_iplddt"] = out["complex_iplddt"]
-                pred_dict["complex_pde"] = out["complex_pde"]
-                pred_dict["complex_ipde"] = out["complex_ipde"]
-                if self.alpha_pae > 0:
-                    pred_dict["pae"] = out["pae"]
-                    pred_dict["ptm"] = out["ptm"]
-                    pred_dict["iptm"] = out["iptm"]
-                    pred_dict["ligand_iptm"] = out["ligand_iptm"]
-                    pred_dict["protein_iptm"] = out["protein_iptm"]
-                    pred_dict["pair_chains_iptm"] = out["pair_chains_iptm"]
             if self.affinity_prediction:
-                pred_dict["affinity_pred_value"] = out["affinity_pred_value"]
-                pred_dict["affinity_probability_binary"] = out[
+                pred_dict["affinity_pred_value"] = outs[0]["affinity_pred_value"]
+                pred_dict["affinity_probability_binary"] = outs[0][
                     "affinity_probability_binary"
                 ]
                 if self.affinity_ensemble:
-                    pred_dict["affinity_pred_value1"] = out["affinity_pred_value1"]
-                    pred_dict["affinity_probability_binary1"] = out[
+                    pred_dict["affinity_pred_value1"] = outs[0]["affinity_pred_value1"]
+                    pred_dict["affinity_probability_binary1"] = outs[0][
                         "affinity_probability_binary1"
                     ]
-                    pred_dict["affinity_pred_value2"] = out["affinity_pred_value2"]
-                    pred_dict["affinity_probability_binary2"] = out[
+                    pred_dict["affinity_pred_value2"] = outs[0]["affinity_pred_value2"]
+                    pred_dict["affinity_probability_binary2"] = outs[0][
                         "affinity_probability_binary2"
                     ]
             return pred_dict

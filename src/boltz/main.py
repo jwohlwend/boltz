@@ -855,6 +855,12 @@ def cli() -> None:
     default=3,
 )
 @click.option(
+    "--samples_per_trunk_resampling",
+    type=int,
+    help="The number of diffusion samples to take before resampling the trunk. Default is 5.",
+    default=5,
+)
+@click.option(
     "--sampling_steps",
     type=int,
     help="The number of sampling steps to use for prediction. Default is 200.",
@@ -884,6 +890,11 @@ def cli() -> None:
         "If not provided, the default step size will be used."
     ),
     default=None,
+)
+@click.option(
+    "--high",
+    is_flag=True,
+    help="Whether to not use the set of parameters designed for high-quality, but slow, predictions. Default is False.",
 )
 @click.option(
     "--write_full_pae",
@@ -1020,7 +1031,7 @@ def cli() -> None:
 @click.option(
     "--subsample_msa",
     is_flag=True,
-    help="Whether to subsample the MSA. Default is True.",
+    help="Whether to subsample the MSA. ",
 )
 @click.option(
     "--num_subsampled_msa",
@@ -1051,6 +1062,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     diffusion_samples: int = 1,
     sampling_steps_affinity: int = 200,
     diffusion_samples_affinity: int = 3,
+    samples_per_trunk_resampling: int = 5,
     max_parallel_samples: Optional[int] = None,
     step_scale: Optional[float] = None,
     write_full_pae: bool = False,
@@ -1072,12 +1084,20 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     affinity_mw_correction: Optional[bool] = False,
     preprocessing_threads: int = 1,
     max_msa_seqs: int = 8192,
-    subsample_msa: bool = True,
+    subsample_msa: bool = False,
     num_subsampled_msa: int = 1024,
     no_kernels: bool = False,
     write_embeddings: bool = False,
+    high: bool = False,
 ) -> None:
     """Run predictions with Boltz."""
+    # Apply --high settings
+    if high:
+        recycling_steps = 10
+        diffusion_samples = 25
+        subsample_msa = True
+        num_subsampled_msa = 2048
+
     # If cpu, write a friendly warning
     if accelerator == "cpu":
         msg = "Running on CPU, this will be slow. Consider using a GPU."
@@ -1299,6 +1319,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             "recycling_steps": recycling_steps,
             "sampling_steps": sampling_steps,
             "diffusion_samples": diffusion_samples,
+            "samples_per_trunk_resampling": samples_per_trunk_resampling,
             "max_parallel_samples": max_parallel_samples,
             "write_confidence_summary": True,
             "write_full_pae": write_full_pae,
