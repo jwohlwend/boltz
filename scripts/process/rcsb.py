@@ -20,7 +20,7 @@ from boltz.data.filter.static.ligand import ExcludedLigands
 from boltz.data.filter.static.polymer import (
     ClashingChainsFilter,
     ConsecutiveCA,
-    MinimumLengthFilter,
+    LengthFilter,
     UnknownFilter,
 )
 from boltz.data.types import ChainInfo, InterfaceInfo, Record, Target
@@ -258,7 +258,7 @@ def process(args) -> None:
     # Load filters
     filters = [
         ExcludedLigands(),
-        MinimumLengthFilter(min_len=4, max_len=5000),
+        LengthFilter(min_len=4, max_len=5000),
         UnknownFilter(),
         ConsecutiveCA(max_dist=10.0),
         ClashingChainsFilter(freq=0.3, dist=1.7),
