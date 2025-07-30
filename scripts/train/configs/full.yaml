@@ -73,6 +73,7 @@ data:
   max_dist: 22.0
   num_bins: 64
   atoms_per_window_queries: 32
+  compute_constraint_features: false
 
 model:
   _target_: boltz.model.model.Boltz1
@@ -195,5 +196,5 @@ model:
     num_particles: 3
     fk_lambda: 4.0
     fk_resampling_interval: 3
-    guidance_update: False
+    physical_guidance_update: False
     num_gd_steps: 16 

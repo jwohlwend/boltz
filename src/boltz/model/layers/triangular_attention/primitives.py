@@ -202,6 +202,7 @@ def _attention(
 
 @torch.compiler.disable
 def kernel_triangular_attn(q, k, v, tri_bias, mask, scale):
+    from cuequivariance_torch.primitives.triangle import triangle_attention
     return triangle_attention(q, k, v, tri_bias, mask=mask, scale=scale)
 
 

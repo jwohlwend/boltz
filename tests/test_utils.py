@@ -2,6 +2,7 @@ import os
 
 import requests
 
+
 def download_file(url, filepath, verbose=True):
     if verbose:
         print(f"Downloading {url} to {filepath}")
@@ -13,7 +14,7 @@ def download_file(url, filepath, verbose=True):
 
     # Check if the request was successful
     if response.status_code == 200:
-        with open(filepath, 'wb') as file:
+        with open(filepath, "wb") as file:
             file.write(response.content)
     else:
         print(f"Failed to download file. Status code: {response.status_code}")

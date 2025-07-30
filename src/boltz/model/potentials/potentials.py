@@ -1,28 +1,30 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Optional, Dict, Any, Set, List, Union
 
 import torch
-
+import numpy as np
 from boltz.data import const
 from boltz.model.potentials.schedules import (
-    ExponentialInterpolation,
     ParameterSchedule,
+    ExponentialInterpolation,
     PiecewiseStepFunction,
 )
+from boltz.model.loss.diffusionv2 import weighted_rigid_align
 
 
 class Potential(ABC):
     def __init__(
         self,
         parameters: Optional[
-            dict[str, Union[ParameterSchedule, float, int, bool]]
+            Dict[str, Union[ParameterSchedule, float, int, bool]]
         ] = None,
     ):
         self.parameters = parameters
 
     def compute(self, coords, feats, parameters):
-        index, args, com_args = self.compute_args(feats, parameters)
+        index, args, com_args, ref_args, operator_args = self.compute_args(
+            feats, parameters
+        )
 
         if index.shape[1] == 0:
             return torch.zeros(coords.shape[:-2], device=coords.device)
@@ -40,21 +42,61 @@ class Potential(ABC):
                 unpad_coords,
                 "mean",
             )
-        value = self.compute_variable(coords, index, compute_gradient=False)
-        energy = self.compute_function(value, *args)
-        return energy.sum(dim=-1)
-
-    def compute_gradient(self, coords, feats, parameters):
-        index, args, com_args = self.compute_args(feats, parameters)
-        if com_args is not None:
-            com_index, atom_pad_mask = com_args
         else:
             com_index, atom_pad_mask = None, None
 
+        if ref_args is not None:
+            ref_coords, ref_mask, ref_atom_index, ref_token_index = ref_args
+            coords = coords[..., ref_atom_index, :]
+        else:
+            ref_coords, ref_mask, ref_atom_index, ref_token_index = (
+                None,
+                None,
+                None,
+                None,
+            )
+
+        if operator_args is not None:
+            negation_mask, union_index = operator_args
+        else:
+            negation_mask, union_index = None, None
+
+        value = self.compute_variable(
+            coords,
+            index,
+            ref_coords=ref_coords,
+            ref_mask=ref_mask,
+            compute_gradient=False,
+        )
+        energy = self.compute_function(
+            value, *args, negation_mask=negation_mask, compute_derivative=False
+        )
+
+        if union_index is not None:
+            neg_exp_energy = torch.exp(-1 * parameters["union_lambda"] * energy)
+            Z = torch.zeros(
+                (*energy.shape[:-1], union_index.max() + 1), device=union_index.device
+            ).scatter_reduce(
+                -1,
+                union_index.expand_as(neg_exp_energy),
+                neg_exp_energy,
+                "sum",
+            )
+            softmax_energy = neg_exp_energy / Z[..., union_index]
+            softmax_energy[Z[..., union_index] == 0] = 0
+            return (energy * softmax_energy).sum(dim=-1)
+
+        return energy.sum(dim=tuple(range(1, energy.dim())))
+
+    def compute_gradient(self, coords, feats, parameters):
+        index, args, com_args, ref_args, operator_args = self.compute_args(
+            feats, parameters
+        )
         if index.shape[1] == 0:
             return torch.zeros_like(coords)
 
-        if com_index is not None:
+        if com_args is not None:
+            com_index, atom_pad_mask = com_args
             unpad_coords = coords[..., atom_pad_mask, :]
             unpad_com_index = com_index[atom_pad_mask]
             coords = torch.zeros(
@@ -67,22 +109,93 @@ class Potential(ABC):
                 "mean",
             )
             com_counts = torch.bincount(com_index[atom_pad_mask])
+        else:
+            com_index, atom_pad_mask = None, None
 
-        value, grad_value = self.compute_variable(coords, index, compute_gradient=True)
-        energy, dEnergy = self.compute_function(value, *args, compute_derivative=True)
+        if ref_args is not None:
+            ref_coords, ref_mask, ref_atom_index, ref_token_index = ref_args
+            coords = coords[..., ref_atom_index, :]
+        else:
+            ref_coords, ref_mask, ref_atom_index, ref_token_index = (
+                None,
+                None,
+                None,
+                None,
+            )
 
-        grad_atom = torch.zeros_like(coords).scatter_reduce(
-            -2,
-            index.flatten(start_dim=0, end_dim=1)
-            .unsqueeze(-1)
-            .expand((*coords.shape[:-2], -1, 3)),
-            dEnergy.tile(grad_value.shape[-3]).unsqueeze(-1)
-            * grad_value.flatten(start_dim=-3, end_dim=-2),
-            "sum",
+        if operator_args is not None:
+            negation_mask, union_index = operator_args
+        else:
+            negation_mask, union_index = None, None
+
+        value, grad_value = self.compute_variable(
+            coords,
+            index,
+            ref_coords=ref_coords,
+            ref_mask=ref_mask,
+            compute_gradient=True,
         )
+        energy, dEnergy = self.compute_function(
+            value, *args, negation_mask=negation_mask, compute_derivative=True
+        )
+        if union_index is not None:
+            neg_exp_energy = torch.exp(-1 * parameters["union_lambda"] * energy)
+            Z = torch.zeros(
+                (*energy.shape[:-1], union_index.max() + 1), device=union_index.device
+            ).scatter_reduce(
+                -1,
+                union_index.expand_as(energy),
+                neg_exp_energy,
+                "sum",
+            )
+            softmax_energy = neg_exp_energy / Z[..., union_index]
+            softmax_energy[Z[..., union_index] == 0] = 0
+            f = torch.zeros(
+                (*energy.shape[:-1], union_index.max() + 1), device=union_index.device
+            ).scatter_reduce(
+                -1,
+                union_index.expand_as(energy),
+                energy * softmax_energy,
+                "sum",
+            )
+            dSoftmax = (
+                dEnergy
+                * softmax_energy
+                * (1 + parameters["union_lambda"] * (energy - f[..., union_index]))
+            )
+            prod = dSoftmax.tile(grad_value.shape[-3]).unsqueeze(
+                -1
+            ) * grad_value.flatten(start_dim=-3, end_dim=-2)
+            if prod.dim() > 3:
+                prod = prod.sum(dim=list(range(1, prod.dim() - 2)))
+            grad_atom = torch.zeros_like(coords).scatter_reduce(
+                -2,
+                index.flatten(start_dim=0, end_dim=1)
+                .unsqueeze(-1)
+                .expand((*coords.shape[:-2], -1, 3)),
+                dSoftmax.tile(grad_value.shape[-3]).unsqueeze(-1)
+                * grad_value.flatten(start_dim=-3, end_dim=-2),
+                "sum",
+            )
+        else:
+            prod = dEnergy.tile(grad_value.shape[-3]).unsqueeze(
+                -1
+            ) * grad_value.flatten(start_dim=-3, end_dim=-2)
+            if prod.dim() > 3:
+                prod = prod.sum(dim=list(range(1, prod.dim() - 2)))
+            grad_atom = torch.zeros_like(coords).scatter_reduce(
+                -2,
+                index.flatten(start_dim=0, end_dim=1)
+                .unsqueeze(-1)
+                .expand((*coords.shape[:-2], -1, 3)),  # 9 x 516 x 3
+                prod,
+                "sum",
+            )
 
         if com_index is not None:
             grad_atom = grad_atom[..., com_index, :]
+        elif ref_token_index is not None:
+            grad_atom = grad_atom[..., ref_token_index, :]
 
         return grad_atom
 
@@ -98,7 +211,9 @@ class Potential(ABC):
         return parameters
 
     @abstractmethod
-    def compute_function(self, value, *args, compute_derivative=False):
+    def compute_function(
+        self, value, *args, negation_mask=None, compute_derivative=False
+    ):
         raise NotImplementedError
 
     @abstractmethod
@@ -109,15 +224,38 @@ class Potential(ABC):
     def compute_args(self, t, feats, **parameters):
         raise NotImplementedError
 
+    def get_reference_coords(self, feats, parameters):
+        return None, None
+
 
 class FlatBottomPotential(Potential):
     def compute_function(
-        self, value, k, lower_bounds, upper_bounds, compute_derivative=False
+        self,
+        value,
+        k,
+        lower_bounds,
+        upper_bounds,
+        negation_mask=None,
+        compute_derivative=False,
     ):
         if lower_bounds is None:
-            lower_bounds = torch.full_like(value, float("-inf"))
+            lower_bounds = torch.full(value.shape[1:], float("-inf")).to(value)
         if upper_bounds is None:
-            upper_bounds = torch.full_like(value, float("inf"))
+            upper_bounds = torch.full(value.shape[1:], float("inf")).to(value)
+
+        if negation_mask is not None:
+            unbounded_below_mask = torch.isneginf(lower_bounds)
+            unbounded_above_mask = torch.isposinf(upper_bounds)
+            unbounded_mask = unbounded_below_mask + unbounded_above_mask
+            assert torch.all(unbounded_mask + negation_mask)
+            lower_bounds[~unbounded_above_mask * ~negation_mask] = upper_bounds[
+                ~unbounded_above_mask * ~negation_mask
+            ]
+            upper_bounds[~unbounded_above_mask * ~negation_mask] = float("inf")
+            upper_bounds[~unbounded_below_mask * ~negation_mask] = lower_bounds[
+                ~unbounded_below_mask * ~negation_mask
+            ]
+            lower_bounds[~unbounded_below_mask * ~negation_mask] = float("-inf")
 
         neg_overflow_mask = value < lower_bounds
         pos_overflow_mask = value > upper_bounds
@@ -139,8 +277,32 @@ class FlatBottomPotential(Potential):
         return energy, dEnergy
 
 
+class ReferencePotential(Potential):
+    def compute_variable(
+        self, coords, index, ref_coords, ref_mask, compute_gradient=False
+    ):
+        aligned_ref_coords = weighted_rigid_align(
+            ref_coords.float(),
+            coords[:, index].float(),
+            ref_mask,
+            ref_mask,
+        )
+
+        r = coords[:, index] - aligned_ref_coords
+        r_norm = torch.linalg.norm(r, dim=-1)
+
+        if not compute_gradient:
+            return r_norm
+
+        r_hat = r / r_norm.unsqueeze(-1)
+        grad = (r_hat * ref_mask.unsqueeze(-1)).unsqueeze(1)
+        return r_norm, grad
+
+
 class DistancePotential(Potential):
-    def compute_variable(self, coords, index, compute_gradient=False):
+    def compute_variable(
+        self, coords, index, ref_coords=None, ref_mask=None, compute_gradient=False
+    ):
         r_ij = coords.index_select(-2, index[0]) - coords.index_select(-2, index[1])
         r_ij_norm = torch.linalg.norm(r_ij, dim=-1)
         r_hat_ij = r_ij / r_ij_norm.unsqueeze(-1)
@@ -151,12 +313,13 @@ class DistancePotential(Potential):
         grad_i = r_hat_ij
         grad_j = -1 * r_hat_ij
         grad = torch.stack((grad_i, grad_j), dim=1)
-
         return r_ij_norm, grad
 
 
 class DihedralPotential(Potential):
-    def compute_variable(self, coords, index, compute_gradient=False):
+    def compute_variable(
+        self, coords, index, ref_coords=None, ref_mask=None, compute_gradient=False
+    ):
         r_ij = coords.index_select(-2, index[0]) - coords.index_select(-2, index[1])
         r_kj = coords.index_select(-2, index[2]) - coords.index_select(-2, index[1])
         r_kl = coords.index_select(-2, index[2]) - coords.index_select(-2, index[3])
@@ -199,7 +362,9 @@ class DihedralPotential(Potential):
 
 
 class AbsDihedralPotential(DihedralPotential):
-    def compute_variable(self, coords, index, compute_gradient=False):
+    def compute_variable(
+        self, coords, index, ref_coords=None, ref_mask=None, compute_gradient=False
+    ):
         if not compute_gradient:
             phi = super().compute_variable(
                 coords, index, compute_gradient=compute_gradient
@@ -229,17 +394,17 @@ class PoseBustersPotential(FlatBottomPotential, DistancePotential):
         lower_bounds[~bond_mask * angle_mask] *= 1.0 - parameters["angle_buffer"]
         upper_bounds[~bond_mask * angle_mask] *= 1.0 + parameters["angle_buffer"]
         lower_bounds[bond_mask * angle_mask] *= 1.0 - min(
-            parameters["angle_buffer"], parameters["angle_buffer"]
+            parameters["bond_buffer"], parameters["angle_buffer"]
         )
         upper_bounds[bond_mask * angle_mask] *= 1.0 + min(
-            parameters["angle_buffer"], parameters["angle_buffer"]
+            parameters["bond_buffer"], parameters["angle_buffer"]
         )
         lower_bounds[~bond_mask * ~angle_mask] *= 1.0 - parameters["clash_buffer"]
         upper_bounds[~bond_mask * ~angle_mask] = float("inf")
 
         k = torch.ones_like(lower_bounds)
 
-        return pair_index, (k, lower_bounds, upper_bounds), None
+        return pair_index, (k, lower_bounds, upper_bounds), None, None, None
 
 
 class ConnectionsPotential(FlatBottomPotential, DistancePotential):
@@ -251,7 +416,7 @@ class ConnectionsPotential(FlatBottomPotential, DistancePotential):
         )
         k = torch.ones_like(upper_bounds)
 
-        return pair_index, (k, lower_bounds, upper_bounds), None
+        return pair_index, (k, lower_bounds, upper_bounds), None, None, None
 
 
 class VDWOverlapPotential(FlatBottomPotential, DistancePotential):
@@ -312,7 +477,7 @@ class VDWOverlapPotential(FlatBottomPotential, DistancePotential):
         upper_bounds = None
         k = torch.ones_like(lower_bounds)
 
-        return pair_index, (k, lower_bounds, upper_bounds), None
+        return pair_index, (k, lower_bounds, upper_bounds), None, None, None
 
 
 class SymmetricChainCOMPotential(FlatBottomPotential, DistancePotential):
@@ -344,6 +509,8 @@ class SymmetricChainCOMPotential(FlatBottomPotential, DistancePotential):
             pair_index,
             (k, lower_bounds, upper_bounds),
             (atom_chain_id, atom_pad_mask),
+            None,
+            None,
         )
 
 
@@ -365,7 +532,7 @@ class StereoBondPotential(FlatBottomPotential, AbsDihedralPotential):
 
         k = torch.ones_like(lower_bounds)
 
-        return stereo_bond_index, (k, lower_bounds, upper_bounds), None
+        return stereo_bond_index, (k, lower_bounds, upper_bounds), None, None, None
 
 
 class ChiralAtomPotential(FlatBottomPotential, DihedralPotential):
@@ -385,7 +552,7 @@ class ChiralAtomPotential(FlatBottomPotential, DihedralPotential):
         lower_bounds[~chiral_atom_orientations] = float("-inf")
 
         k = torch.ones_like(lower_bounds)
-        return chiral_atom_index, (k, lower_bounds, upper_bounds), None
+        return chiral_atom_index, (k, lower_bounds, upper_bounds), None, None, None
 
 
 class PlanarBondPotential(FlatBottomPotential, AbsDihedralPotential):
@@ -411,87 +578,195 @@ class PlanarBondPotential(FlatBottomPotential, AbsDihedralPotential):
         )
         k = torch.ones_like(upper_bounds)
 
-        return improper_index, (k, lower_bounds, upper_bounds), None
+        return improper_index, (k, lower_bounds, upper_bounds), None, None, None
 
 
-def get_potentials():
-    potentials = [
-        SymmetricChainCOMPotential(
-            parameters={
-                "guidance_interval": 4,
-                "guidance_weight": 0.5,
-                "resampling_weight": 0.5,
-                "buffer": ExponentialInterpolation(start=1.0, end=5.0, alpha=-2.0),
-            }
-        ),
-        VDWOverlapPotential(
-            parameters={
-                "guidance_interval": 5,
-                "guidance_weight": PiecewiseStepFunction(
-                    thresholds=[0.4], values=[0.125, 0.0]
+class TemplateReferencePotential(FlatBottomPotential, ReferencePotential):
+    def compute_args(self, feats, parameters):
+        if "template_mask_cb" not in feats or "template_force" not in feats:
+            return torch.empty([1, 0]), None, None, None, None
+
+        template_mask = feats["template_mask_cb"][feats["template_force"]]
+        if template_mask.shape[0] == 0:
+            return torch.empty([1, 0]), None, None, None, None
+
+        ref_coords = feats["template_cb"][feats["template_force"]].clone()
+        ref_mask = feats["template_mask_cb"][feats["template_force"]].clone()
+        ref_atom_index = (
+            torch.bmm(
+                feats["token_to_rep_atom"].float(),
+                torch.arange(
+                    feats["atom_pad_mask"].shape[1],
+                    device=feats["atom_pad_mask"].device,
+                    dtype=torch.float32,
+                )[None, :, None],
+            )
+            .squeeze(-1)
+            .long()
+        )[0]
+        ref_token_index = (
+            torch.bmm(
+                feats["atom_to_token"].float(),
+                feats["token_index"].unsqueeze(-1).float(),
+            )
+            .squeeze(-1)
+            .long()
+        )[0]
+
+        index = torch.arange(
+            template_mask.shape[-1], dtype=torch.long, device=template_mask.device
+        )[None]
+        upper_bounds = torch.full(
+            template_mask.shape, float("inf"), device=index.device, dtype=torch.float32
+        )
+        ref_idxs = torch.argwhere(template_mask).T
+        upper_bounds[ref_idxs.unbind()] = feats["template_force_threshold"][
+            feats["template_force"]
+        ][ref_idxs[0]]
+
+        lower_bounds = None
+        k = torch.ones_like(upper_bounds)
+        return (
+            index,
+            (k, lower_bounds, upper_bounds),
+            None,
+            (ref_coords, ref_mask, ref_atom_index, ref_token_index),
+            None,
+        )
+
+
+class ContactPotentital(FlatBottomPotential, DistancePotential):
+    def compute_args(self, feats, parameters):
+        index = feats["contact_pair_index"][0]
+        union_index = feats["contact_union_index"][0]
+        negation_mask = feats["contact_negation_mask"][0]
+        lower_bounds = None
+        upper_bounds = feats["contact_thresholds"][0].clone()
+        k = torch.ones_like(upper_bounds)
+        return (
+            index,
+            (k, lower_bounds, upper_bounds),
+            None,
+            None,
+            (negation_mask, union_index),
+        )
+
+
+def get_potentials(steering_args, boltz2=False):
+    potentials = []
+    if steering_args["fk_steering"] or steering_args["physical_guidance_update"]:
+        potentials.extend(
+            [
+                SymmetricChainCOMPotential(
+                    parameters={
+                        "guidance_interval": 4,
+                        "guidance_weight": 0.5
+                        if steering_args["contact_guidance_update"]
+                        else 0.0,
+                        "resampling_weight": 0.5,
+                        "buffer": ExponentialInterpolation(
+                            start=1.0, end=5.0, alpha=-2.0
+                        ),
+                    }
                 ),
-                "resampling_weight": PiecewiseStepFunction(
-                    thresholds=[0.6], values=[0.01, 0.0]
+                VDWOverlapPotential(
+                    parameters={
+                        "guidance_interval": 5,
+                        "guidance_weight": (
+                            PiecewiseStepFunction(thresholds=[0.4], values=[0.125, 0.0])
+                            if steering_args["contact_guidance_update"]
+                            else 0.0
+                        ),
+                        "resampling_weight": PiecewiseStepFunction(
+                            thresholds=[0.6], values=[0.01, 0.0]
+                        ),
+                        "buffer": 0.225,
+                    }
                 ),
-                "buffer": 0.225,
-            }
-        ),
-        ConnectionsPotential(
-            parameters={
-                "guidance_interval": 1,
-                "guidance_weight": 0.15,
-                "resampling_weight": 1.0,
-                "buffer": 2.0,
-            }
-        ),
-        PoseBustersPotential(
-            parameters={
-                "guidance_interval": 1,
-                "guidance_weight": 0.05,
-                "resampling_weight": 0.1,
-                "bond_buffer": 0.20,
-                "angle_buffer": 0.20,
-                "clash_buffer": 0.15,
-            }
-        ),
-        ChiralAtomPotential(
-            parameters={
-                "guidance_interval": 1,
-                "guidance_weight": 0.10,
-                "resampling_weight": 1.0,
-                "buffer": 0.52360,
-            }
-        ),
-        StereoBondPotential(
-            parameters={
-                "guidance_interval": 1,
-                "guidance_weight": 0.05,
-                "resampling_weight": 1.0,
-                "buffer": 0.52360,
-            }
-        ),
-        PlanarBondPotential(
-            parameters={
-                "guidance_interval": 1,
-                "guidance_weight": 0.05,
-                "resampling_weight": 1.0,
-                "buffer": 0.26180,
-            }
-        ),
-    ]
+                ConnectionsPotential(
+                    parameters={
+                        "guidance_interval": 1,
+                        "guidance_weight": 0.15
+                        if steering_args["contact_guidance_update"]
+                        else 0.0,
+                        "resampling_weight": 1.0,
+                        "buffer": 2.0,
+                    }
+                ),
+                PoseBustersPotential(
+                    parameters={
+                        "guidance_interval": 1,
+                        "guidance_weight": 0.01
+                        if steering_args["contact_guidance_update"]
+                        else 0.0,
+                        "resampling_weight": 0.1,
+                        "bond_buffer": 0.2,
+                        "angle_buffer": 0.2,
+                        "clash_buffer": 0.15,
+                    }
+                ),
+                ChiralAtomPotential(
+                    parameters={
+                        "guidance_interval": 1,
+                        "guidance_weight": 0.1
+                        if steering_args["contact_guidance_update"]
+                        else 0.0,
+                        "resampling_weight": 1.0,
+                        "buffer": 0.52360,
+                    }
+                ),
+                StereoBondPotential(
+                    parameters={
+                        "guidance_interval": 1,
+                        "guidance_weight": 0.05
+                        if steering_args["contact_guidance_update"]
+                        else 0.0,
+                        "resampling_weight": 1.0,
+                        "buffer": 0.52360,
+                    }
+                ),
+                PlanarBondPotential(
+                    parameters={
+                        "guidance_interval": 1,
+                        "guidance_weight": 0.05
+                        if steering_args["contact_guidance_update"]
+                        else 0.0,
+                        "resampling_weight": 1.0,
+                        "buffer": 0.26180,
+                    }
+                ),
+            ]
+        )
+    if boltz2 and (
+        steering_args["fk_steering"] or steering_args["contact_guidance_update"]
+    ):
+        potentials.extend(
+            [
+                ContactPotentital(
+                    parameters={
+                        "guidance_interval": 4,
+                        "guidance_weight": (
+                            PiecewiseStepFunction(
+                                thresholds=[0.25, 0.75], values=[0.0, 0.5, 1.0]
+                            )
+                            if steering_args["contact_guidance_update"]
+                            else 0.0
+                        ),
+                        "resampling_weight": 1.0,
+                        "union_lambda": ExponentialInterpolation(
+                            start=8.0, end=0.0, alpha=-2.0
+                        ),
+                    }
+                ),
+                TemplateReferencePotential(
+                    parameters={
+                        "guidance_interval": 2,
+                        "guidance_weight": 0.1
+                        if steering_args["contact_guidance_update"]
+                        else 0.0,
+                        "resampling_weight": 1.0,
+                    }
+                ),
+            ]
+        )
     return potentials
-
-
-@dataclass
-class GuidanceConfig:
-    """Guidance configuration."""
-
-    potentials: Optional[list[Potential]] = None
-    guidance_update: Optional[bool] = None
-    num_guidance_gd_steps: Optional[int] = None
-    guidance_gd_step_size: Optional[int] = None
-    fk_steering: Optional[bool] = None
-    fk_resampling_interval: Optional[int] = 1
-    fk_lambda: Optional[float] = 1.0
-    fk_method: Optional[str] = None
-    fk_batch_size: Optional[int] = 2
