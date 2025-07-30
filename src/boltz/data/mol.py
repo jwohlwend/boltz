@@ -2,6 +2,8 @@ import itertools
 import pickle
 import random
 from pathlib import Path
+from rdkit import Chem
+import os
 
 import numpy as np
 import torch
@@ -12,6 +14,27 @@ from boltz.data import const
 from boltz.data.pad import pad_dim
 from boltz.model.loss.confidence import lddt_dist
 
+def load_mol_from_pdb(pdb_path: str) -> Chem.Mol:
+    # 1) Check the file is where you think it is
+    if not os.path.isfile(pdb_path):
+        raise FileNotFoundError(f"[PDB loader] Cannot find PDB at: {os.path.abspath(pdb_path)}")
+
+    # 2) Try loading
+    mol = Chem.MolFromPDBFile(pdb_path, removeHs=False, proximityBonding=False)
+    if mol is None:
+        raise ValueError(f"[PDB loader] RDKit failed to parse PDB (MolFromPDBFile returned None) at: {os.path.abspath(pdb_path)}")
+
+    # 3) Propagate atom names
+    for atom in mol.GetAtoms():
+        info = atom.GetPDBResidueInfo()
+        if info:
+            atom.SetProp("name", info.GetName().strip())
+        else:
+            atom.SetProp("name", f"{atom.GetSymbol()}{atom.GetIdx()}")
+
+    # 4) (Optional) sanitize if you need to run RDKit on it later
+    Chem.SanitizeMol(mol)
+    return mol
 
 def load_molecules(moldir: str, molecules: list[str]) -> dict[str, Mol]:
     """Load the given input data.
