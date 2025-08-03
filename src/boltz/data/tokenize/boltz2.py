@@ -1,4 +1,4 @@
-from dataclasses import astuple, dataclass
+from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
@@ -41,6 +41,34 @@ class TokenData:
     frame_mask: bool
     cyclic_period: int
     affinity_mask: bool = False
+
+
+def token_astuple(token: TokenData) -> tuple:
+    """Convert a TokenData object to a tuple."""
+    return (
+        token.token_idx,
+        token.atom_idx,
+        token.atom_num,
+        token.res_idx,
+        token.res_type,
+        token.res_name,
+        token.sym_id,
+        token.asym_id,
+        token.entity_id,
+        token.mol_type,
+        token.center_idx,
+        token.disto_idx,
+        token.center_coords,
+        token.disto_coords,
+        token.resolved_mask,
+        token.disto_mask,
+        token.modified,
+        token.frame_rot,
+        token.frame_t,
+        token.frame_mask,
+        token.cyclic_period,
+        token.affinity_mask,
+    )
 
 
 def compute_frame(
@@ -219,11 +247,12 @@ def tokenize_structure(  # noqa: C901, PLR0915
                     cyclic_period=chain["cyclic_period"],
                     affinity_mask=affinity_mask,
                 )
-                token_data.append(astuple(token))
+                token_data.append(token_astuple(token))
 
                 # Update atom_idx to token_idx
-                for atom_idx in range(atom_start, atom_end):
-                    atom_to_token[atom_idx] = token_idx
+                atom_to_token.update(
+                    dict.fromkeys(range(atom_start, atom_end), token_idx)
+                )
 
                 token_idx += 1
 
@@ -271,7 +300,7 @@ def tokenize_structure(  # noqa: C901, PLR0915
                         cyclic_period=chain["cyclic_period"],
                         affinity_mask=affinity_mask,
                     )
-                    token_data.append(astuple(token))
+                    token_data.append(token_astuple(token))
 
                     # Update atom_idx to token_idx
                     atom_to_token[index] = token_idx
@@ -318,11 +347,12 @@ def tokenize_structure(  # noqa: C901, PLR0915
                     cyclic_period=chain["cyclic_period"],
                     affinity_mask=affinity_mask,
                 )
-                token_data.append(astuple(token))
+                token_data.append(token_astuple(token))
 
                 # Update atom_idx to token_idx
-                for atom_idx in range(atom_start, atom_end):
-                    atom_to_token[atom_idx] = token_idx
+                atom_to_token.update(
+                    dict.fromkeys(range(atom_start, atom_end), token_idx)
+                )
 
                 token_idx += 1
 

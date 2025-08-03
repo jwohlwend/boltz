@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "boltz"
-version = "2.1.1"
+version = "2.2.0"
 requires-python = ">=3.10,<3.13"
 description = "Boltz"
 readme = "README.md"
@@ -32,9 +32,6 @@ dependencies = [
     "gemmi==0.6.5",
     "scikit-learn==1.6.1",
     "chembl_structure_pipeline==1.2.2",
-    "cuequivariance_ops_cu12>=0.5.0",
-    "cuequivariance_ops_torch_cu12>=0.5.0",
-    "cuequivariance_torch>=0.5.0",
 ]
 
 [project.scripts]
@@ -43,6 +40,11 @@ boltz = "boltz.main:cli"
 [project.optional-dependencies]
 lint = ["ruff"]
 test = ["pytest", "requests"]
+cuda = [
+    "cuequivariance_ops_cu12>=0.5.0",
+    "cuequivariance_ops_torch_cu12>=0.5.0",
+    "cuequivariance_torch>=0.5.0",
+]
 
 [tool.ruff]
 src = ["src"]
