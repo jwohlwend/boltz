@@ -845,7 +845,7 @@ def cli() -> None:
 )
 @click.option(
     "--accelerator",
-    type=click.Choice(["gpu", "cpu", "tpu"]),
+    type=click.Choice(["gpu", "cpu", "tpu", "mps"]),
     help="The accelerator to use for prediction. Default is gpu.",
     default="gpu",
 )
