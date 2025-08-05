@@ -240,9 +240,14 @@ class FlatBottomPotential(Potential):
         compute_derivative=False,
     ):
         if lower_bounds is None:
-            upper_bounds = torch.full_like(value, float("-inf"))
+            lower_bounds = torch.full_like(value, float("-inf"))
+        elif lower_bounds.shape != value.shape:
+            lower_bounds = lower_bounds.expand_as(value).clone()
+
         if upper_bounds is None:
             upper_bounds = torch.full_like(value, float("inf"))
+        elif upper_bounds.shape != value.shape:
+            upper_bounds = upper_bounds.expand_as(value).clone()
 
         if negation_mask is not None:
             unbounded_below_mask = torch.isneginf(lower_bounds)
