@@ -16,7 +16,8 @@ RUN apt-get clean && \
         g++
 
 ## Install Boltz (+ dependencies)
-RUN pip install boltz==2.1.1 -U
+# RUN pip install boltz==2.1.1 -U
+RUN pip install boltz[cuda] -U
 
 ## Download CCD data and model weights 
 # RUN mkdir ~/.boltz && \
