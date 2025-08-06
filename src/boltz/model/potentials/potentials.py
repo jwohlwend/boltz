@@ -240,7 +240,7 @@ class FlatBottomPotential(Potential):
         compute_derivative=False,
     ):
         if lower_bounds is None:
-            upper_bounds = torch.full_like(value, float("-inf"))
+            lower_bounds = torch.full_like(value, float("-inf"))
         if upper_bounds is None:
             upper_bounds = torch.full_like(value, float("inf"))
 
