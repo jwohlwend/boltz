@@ -234,13 +234,13 @@ class FlatBottomPotential(Potential):
         self,
         value,
         k,
-        lower_bounds,
-        upper_bounds,
+        lower_bounds=None,
+        upper_bounds=None,
         negation_mask=None,
         compute_derivative=False,
     ):
         if lower_bounds is None:
-            upper_bounds = torch.full_like(value, float("-inf"))
+            lower_bounds = torch.full_like(value, float("-inf"))
         if upper_bounds is None:
             upper_bounds = torch.full_like(value, float("inf"))
 
