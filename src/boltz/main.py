@@ -457,7 +457,6 @@ def compute_msa(
         key = api_key_header if api_key_header else "X-API-Key"
         value = api_key_value
         auth_headers = {
-            "Content-Type": "application/json",
             key: value
         }
         click.echo(f"Using API key authentication for MSA server (header: {key})")
