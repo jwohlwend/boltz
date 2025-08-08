@@ -72,6 +72,18 @@ To encourage reproducibility and facilitate comparison with other models, on top
 If you're interested in retraining the model, currently for Boltz-1 but soon for Boltz-2, see our [training instructions](docs/training.md).
 
 
+## Docker
+
+Build locally:
+```bash
+docker build -t boltz .
+```
+
+Run locally with GPUs and mounted volume:
+```bash
+docker run --gpus all -v ./:/mnt/ --name boltz --rm -it boltz /bin/bash
+```
+
 ## Contributing
 
 We welcome external contributions and are eager to engage with the community. Connect with us on our [Slack channel](https://boltz.bio/join-slack) to discuss advancements, share insights, and foster collaboration around Boltz-2.
