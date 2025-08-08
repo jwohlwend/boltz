@@ -9,7 +9,7 @@ from boltz.data.filter.static.filter import StaticFilter
 from boltz.data.types import Structure
 
 
-class MinimumLengthFilter(StaticFilter):
+class LengthFilter(StaticFilter):
     """Filter polymers based on their length.
 
     We use the number of resolved residues when considering
