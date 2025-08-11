@@ -1233,6 +1233,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
 
             # Set atom names
             canonical_order = AllChem.CanonicalRankAtoms(mol)
+            Chem.AssignStereochemistry(mol, force=True, cleanIt=True)
             for atom, can_idx in zip(mol.GetAtoms(), canonical_order):
                 atom_name = atom.GetSymbol().upper() + str(can_idx + 1)
                 if len(atom_name) > 4:
