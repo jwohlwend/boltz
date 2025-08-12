@@ -33,6 +33,8 @@ from boltz.data.write.writer import BoltzAffinityWriter, BoltzWriter
 from boltz.model.models.boltz1 import Boltz1
 from boltz.model.models.boltz2 import Boltz2
 
+from boltz import __version__
+
 CCD_URL = "https://huggingface.co/boltz-community/boltz-1/resolve/main/ccd.pkl"
 MOL_URL = "https://huggingface.co/boltz-community/boltz-2/resolve/main/mols.tar"
 
@@ -808,10 +810,10 @@ def process_inputs(
     manifest.dump(out_dir / "processed" / "manifest.json")
 
 
-@click.group()
+@click.group(help=f"Boltz v{__version__}")
+@click.version_option(__version__)
 def cli() -> None:
-    """Boltz."""
-    return
+    click.echo(f"Boltz v{__version__}")
 
 
 @cli.command()
