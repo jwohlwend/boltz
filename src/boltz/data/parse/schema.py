@@ -939,7 +939,7 @@ def token_spec_to_ids(
 
 
 def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
-    name: str,
+    path: Path,
     schema: dict,
     ccd: Mapping[str, Mol],
     mol_dir: Optional[Path] = None,
@@ -985,8 +985,8 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
 
     Parameters
     ----------
-    name : str
-        A name for the input.
+    path : Path
+        Path to the input file.
     schema : dict
         The input schema.
     components : dict
@@ -1002,6 +1002,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         The parsed target.
 
     """
+    name, parent = path.stem, path.parent
     # Assert version 1
     version = schema.get("version", 1)
     if version != 1:
@@ -1112,12 +1113,16 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             msa = items[0][entity_type].get("msa", 0)
             if (msa is None) or (msa == ""):
                 msa = 0
+            if msa != 0:
+                msa = str((parent / msa).resolve())
 
             # Check if all MSAs are the same within the same entity
             for item in items:
                 item_msa = item[entity_type].get("msa", 0)
                 if (item_msa is None) or (item_msa == ""):
                     item_msa = 0
+                if item_msa != 0:
+                    item_msa = str((parent / item_msa).resolve())
 
                 if item_msa != msa:
                     msg = "All proteins with the same sequence must share the same MSA!"
