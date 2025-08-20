@@ -1,0 +1,5 @@
+version: 1
+sequences:
+  - ligand:
+      id: A
+      smiles: "*Nc1ccc(C2=CC[C@](N*)(c3ccc(-c4ccccc4)cc3)C=C2)cc1"

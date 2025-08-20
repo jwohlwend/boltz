@@ -1,0 +1,5 @@
+version: 1
+sequences:
+  - ligand:
+      id: A
+      smiles: "*CCP(Cl)(Cl)=Nc1ccc(N=P(*)(Cl)Cl)cc1"

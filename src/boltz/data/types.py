@@ -570,6 +570,20 @@ class AffinityInfo:
 
 
 @dataclass(frozen=True)
+class PolymerProperties:
+    """Optional polymer properties for multi-task regression.
+
+    All fields are optional and may be missing depending on dataset.
+    """
+
+    Tg: Optional[float] = None
+    FFV: Optional[float] = None
+    Tc: Optional[float] = None
+    Density: Optional[float] = None
+    Rg: Optional[float] = None
+
+
+@dataclass(frozen=True)
 class Record(JSONSerializable):
     """Record datatype."""
 
@@ -581,6 +595,7 @@ class Record(JSONSerializable):
     templates: Optional[list[TemplateInfo]] = None
     md: Optional[MDInfo] = None
     affinity: Optional[AffinityInfo] = None
+    polymer_properties: Optional[PolymerProperties] = None
 
 
 ####################################################################################################

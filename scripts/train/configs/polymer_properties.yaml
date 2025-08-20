@@ -1,0 +1,169 @@
+trainer:
+  accelerator: gpu
+  devices: 1
+  precision: 32
+  gradient_clip_val: 10.0
+  max_epochs: -1
+  accumulate_grad_batches: 128
+  num_sanity_val_steps: 0
+
+output: SET_PATH_HERE
+pretrained: null
+resume: null
+disable_checkpoint: false
+matmul_precision: null
+save_top_k: -1
+
+data:
+  # For CSV-based polymer-only training, provide csv_path at runtime via CLI.
+  # The manifest-based datasets block is not required.
+  datasets: []
+  tokenizer:
+    _target_: boltz.data.tokenize.boltz.BoltzTokenizer
+  featurizer:
+    _target_: boltz.data.feature.featurizer.BoltzFeaturizer
+
+  symmetries: PATH_TO_SYMMETRY_FILE
+  max_tokens: 512
+  max_atoms: 4608
+  max_seqs: 2048
+  pad_to_max_tokens: true
+  pad_to_max_atoms: true
+  pad_to_max_seqs: true
+  atoms_per_window_queries: 32
+  min_dist: 2.0
+  max_dist: 22.0
+  num_bins: 64
+  samples_per_epoch: 100000
+  batch_size: 1
+  num_workers: 4
+  random_seed: 42
+  pin_memory: true
+  overfit: null
+  crop_validation: true
+  return_train_symmetries: false
+  return_val_symmetries: false
+
+model:
+  _target_: boltz.model.models.boltz2.Boltz2
+  atom_s: 128
+  atom_z: 16
+  token_s: 384
+  token_z: 128
+  num_bins: 64
+  atom_feature_dim: 388
+  atoms_per_window_queries: 32
+  atoms_per_window_keys: 128
+  compile_pairformer: false
+  ema: false
+  ema_decay: 0.999
+
+  embedder_args:
+    atom_encoder_depth: 3
+    atom_encoder_heads: 4
+
+  msa_args:
+    msa_s: 64
+    msa_blocks: 0
+    msa_dropout: 0.15
+    z_dropout: 0.25
+    pairwise_head_width: 32
+    pairwise_num_heads: 4
+    activation_checkpointing: true
+    offload_to_cpu: false
+
+  pairformer_args:
+    num_blocks: 2
+    num_heads: 8
+    dropout: 0.15
+    activation_checkpointing: true
+    offload_to_cpu: false
+
+  score_model_args:
+    sigma_data: 16
+    dim_fourier: 256
+    atom_encoder_depth: 3
+    atom_encoder_heads: 4
+    token_transformer_depth: 6
+    token_transformer_heads: 8
+    atom_decoder_depth: 3
+    atom_decoder_heads: 4
+    conditioning_transition_layers: 2
+    activation_checkpointing: true
+
+  # IMPORTANT: only property training
+  # Do not train structure/confidence; compute sampling so polymer head can use predicted coords.
+  structure_prediction_training: false
+  validate_structure: false
+  confidence_prediction: false
+  affinity_prediction: false
+  polymer_prediction: true
+  polymer_only_training: true
+  affinity_ensemble: false
+
+  affinity_model_args:
+    num_dist_bins: 64
+    max_dist: 22
+    use_cross_transformer: false
+    groups: {}
+    pairformer_args:
+      num_blocks: 6
+      num_heads: 8
+      dropout: 0.15
+      activation_checkpointing: true
+      offload_to_cpu: false
+    transformer_args:
+      token_s: 384
+      num_blocks: 4
+      num_heads: 8
+      activation_checkpointing: true
+
+  training_args:
+    recycling_steps: 0
+    sampling_steps: 50
+    diffusion_multiplicity: 1
+    diffusion_samples: 1
+    confidence_loss_weight: 0.0
+    diffusion_loss_weight: 0.0
+    distogram_loss_weight: 0.0
+    polymer_properties_loss_weight: 1.0
+    adam_beta_1: 0.9
+    adam_beta_2: 0.95
+    adam_eps: 0.00000001
+    lr_scheduler: af3
+    base_lr: 0.0
+    max_lr: 0.001
+    lr_warmup_no_steps: 1000
+    lr_start_decay_after_n_steps: 50000
+    lr_decay_every_n_steps: 50000
+    lr_decay_factor: 0.95
+    # Provide empty steering args to satisfy diffusionv2.sample checks
+    steering_args:
+      fk_steering: false
+      physical_guidance_update: false
+      contact_guidance_update: false
+      num_particles: 1
+
+  validation_args:
+    recycling_steps: 0
+    sampling_steps: 50
+    diffusion_samples: 1
+
+  diffusion_process_args:
+    sigma_min: 0.0004
+    sigma_max: 160.0
+    sigma_data: 16.0
+    rho: 7
+    P_mean: -1.2
+    P_std: 1.5
+    gamma_0: 0.8
+    gamma_min: 1.0
+    noise_scale: 1.0
+    step_scale: 1.0
+    coordinate_augmentation: false
+    alignment_reverse_diff: false
+    synchronize_sigmas: true
+
+  diffusion_loss_args: {}
+
+

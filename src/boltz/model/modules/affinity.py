@@ -221,3 +221,134 @@ class AffinityHeadsTransformer(nn.Module):
             "affinity_logits_binary": affinity_logits_binary,
         }
         return out_dict
+
+
+
+class PolymerPropertyHeadsTransformer(nn.Module):
+    def __init__(
+        self,
+        token_z,
+        input_token_s,
+        num_blocks,
+        num_heads,
+        activation_checkpointing,
+        use_cross_transformer,
+        groups={},
+    ):
+        super().__init__()
+        self.out_mlp = nn.Sequential(
+            nn.Linear(token_z, token_z),
+            nn.ReLU(),
+            nn.Linear(token_z, input_token_s),
+            nn.ReLU(),
+        )
+
+        # Multi-task polymer properties regression head: [Tg, FFV, Tc, Density, Rg]
+        self.to_polymer_properties = nn.Sequential(
+            nn.Linear(input_token_s, input_token_s),
+            nn.ReLU(),
+            nn.Linear(input_token_s, 5),
+        )
+
+    def forward(self, z, feats, multiplicity=1):
+        # Use all valid tokens (no ligand/receptor masking); only exclude padding
+        pad_token_mask = feats["token_pad_mask"].repeat_interleave(multiplicity, 0)
+        pair_mask = pad_token_mask[:, :, None] * pad_token_mask[:, None, :]
+        g_z = torch.sum(z * pair_mask.unsqueeze(-1), dim=(1, 2)) / (
+            torch.sum(pair_mask, dim=(1, 2)).unsqueeze(-1) + 1e-7
+        )
+
+        g = self.out_mlp(g_z)
+
+        polymer_properties_pred = self.to_polymer_properties(g)
+        return {"polymer_properties_pred": polymer_properties_pred}
+
+
+class PolymerPropertiesModule(nn.Module):
+    """Polymer properties prediction module (multi-task regression)."""
+
+    def __init__(
+        self,
+        token_s,
+        token_z,
+        pairformer_args: dict,
+        transformer_args: dict,
+        num_dist_bins=64,
+        max_dist=22,
+        use_cross_transformer: bool = False,
+        groups: dict = {},
+    ):
+        super().__init__()
+        boundaries = torch.linspace(2, max_dist, num_dist_bins - 1)
+        self.register_buffer("boundaries", boundaries)
+        self.dist_bin_pairwise_embed = nn.Embedding(num_dist_bins, token_z)
+        init.gating_init_(self.dist_bin_pairwise_embed.weight)
+
+        self.s_to_z_prod_in1 = LinearNoBias(token_s, token_z)
+        self.s_to_z_prod_in2 = LinearNoBias(token_s, token_z)
+
+        self.z_norm = nn.LayerNorm(token_z)
+        self.z_linear = LinearNoBias(token_z, token_z)
+
+        self.pairwise_conditioner = PairwiseConditioning(
+            token_z=token_z,
+            dim_token_rel_pos_feats=token_z,
+            num_transitions=2,
+        )
+
+        self.pairformer_stack = PairformerNoSeqModule(token_z, **pairformer_args)
+        self.polymer_heads = PolymerPropertyHeadsTransformer(
+            token_z,
+            transformer_args["token_s"],
+            transformer_args["num_blocks"],
+            transformer_args["num_heads"],
+            transformer_args["activation_checkpointing"],
+            False,
+            groups=groups,
+        )
+
+    def forward(
+        self,
+        s_inputs,
+        z,
+        x_pred,
+        feats,
+        multiplicity=1,
+        use_kernels=False,
+    ):
+        z = self.z_linear(self.z_norm(z))
+        z = z.repeat_interleave(multiplicity, 0)
+
+        z = (
+            z
+            + self.s_to_z_prod_in1(s_inputs)[:, :, None, :]
+            + self.s_to_z_prod_in2(s_inputs)[:, None, :, :]
+        )
+
+        token_to_rep_atom = feats["token_to_rep_atom"]
+        token_to_rep_atom = token_to_rep_atom.repeat_interleave(multiplicity, 0)
+        if len(x_pred.shape) == 4:
+            B, mult, N, _ = x_pred.shape
+            x_pred = x_pred.reshape(B * mult, N, -1)
+        else:
+            BM, N, _ = x_pred.shape
+            B = BM // multiplicity
+            mult = multiplicity
+        x_pred_repr = torch.bmm(token_to_rep_atom.float(), x_pred)
+        d = torch.cdist(x_pred_repr, x_pred_repr)
+
+        distogram = (d.unsqueeze(-1) > self.boundaries).sum(dim=-1).long()
+        distogram = self.dist_bin_pairwise_embed(distogram)
+
+        z = z + self.pairwise_conditioner(z_trunk=z, token_rel_pos_feats=distogram)
+
+        # Use all valid token pairs (no ligand/receptor masking); only exclude padding
+        pad_token_mask = feats["token_pad_mask"].repeat_interleave(multiplicity, 0)
+        pair_mask = pad_token_mask[:, :, None] * pad_token_mask[:, None, :]
+        z = self.pairformer_stack(z, pair_mask=pair_mask, use_kernels=use_kernels)
+
+        # polymer heads
+        out_dict = self.polymer_heads(
+            z=z, feats=feats, multiplicity=multiplicity
+        )
+        return out_dict

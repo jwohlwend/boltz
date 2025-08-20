@@ -15,7 +15,14 @@ from boltz.data.filter.dynamic.filter import DynamicFilter
 from boltz.data.pad import pad_to_max
 from boltz.data.sample.sampler import Sample, Sampler
 from boltz.data.tokenize.tokenizer import Tokenizer
-from boltz.data.types import MSA, Connection, Input, Manifest, Record, Structure
+from boltz.data.types import (
+    MSA,
+    Connection,
+    Input,
+    Manifest,
+    Record,
+    Structure,
+)
 
 
 @dataclass
@@ -318,6 +325,22 @@ class TrainingDataset(torch.utils.data.Dataset):
                 binder_pocket_sampling_geometric_p=self.binder_pocket_sampling_geometric_p,
                 compute_constraint_features=self.compute_constraint_features,
             )
+            # Optional: attach polymer property labels if present in record
+            if sample.record and sample.record.polymer_properties is not None:
+                props = sample.record.polymer_properties
+                # Order: [Tg, FFV, Tc, Density, Rg]
+                values = [
+                    getattr(props, "Tg", None),
+                    getattr(props, "FFV", None),
+                    getattr(props, "Tc", None),
+                    getattr(props, "Density", None),
+                    getattr(props, "Rg", None),
+                ]
+                tensor = torch.tensor(
+                    [float("nan") if v is None else float(v) for v in values],
+                    dtype=torch.float,
+                )
+                features["polymer_properties"] = tensor.unsqueeze(0)
         except Exception as e:
             print(f"Featurizer failed on {sample.record.id} with error {e}. Skipping.")
             return self.__getitem__(idx)

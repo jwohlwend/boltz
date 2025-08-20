@@ -661,6 +661,9 @@ def process_token_features(
         "pocket_feature": pocket_feature,
         "cyclic_period": cyclic_period,
     }
+    # Affinity/ligand mask for downstream affinity/property heads: mark ligand tokens
+    affinity_token_mask = (mol_type == const.chain_type_ids["NONPOLYMER"]).float()
+    token_features["affinity_token_mask"] = affinity_token_mask
     return token_features
 
 

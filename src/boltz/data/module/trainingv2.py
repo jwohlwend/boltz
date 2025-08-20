@@ -23,10 +23,10 @@ class DatasetConfig:
     """Dataset configuration."""
 
     target_dir: str
-    msa_dir: str
-    prob: float
     sampler: Sampler
     cropper: Cropper
+    prob: float = 1.0
+    msa_dir: Optional[str] = None
     filters: Optional[list] = None
     split: Optional[str] = None
     manifest_path: Optional[str] = None
@@ -72,7 +72,7 @@ class Dataset:
     """Data holder."""
 
     target_dir: Path
-    msa_dir: Path
+    msa_dir: Optional[Path]
     manifest: Manifest
     prob: float
     sampler: Sampler
@@ -81,7 +81,7 @@ class Dataset:
     featurizer: BoltzFeaturizer
 
 
-def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
+def load_input(record: Record, target_dir: Path, msa_dir: Optional[Path]) -> Input:
     """Load the given input data.
 
     Parameters
@@ -112,12 +112,13 @@ def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
     )
 
     msas = {}
-    for chain in record.chains:
-        msa_id = chain.msa_id
-        # Load the MSA for this chain, if any
-        if msa_id != -1 and msa_id != "":
-            msa = np.load(msa_dir / f"{msa_id}.npz")
-            msas[chain.chain_id] = MSA(**msa)
+    if msa_dir is not None:
+        for chain in record.chains:
+            msa_id = chain.msa_id
+            # Load the MSA for this chain, if any
+            if msa_id != -1 and msa_id != "":
+                msa = np.load(msa_dir / f"{msa_id}.npz")
+                msas[chain.chain_id] = MSA(**msa)
 
     return Input(structure, msas)
 
@@ -296,6 +297,21 @@ class TrainingDataset(torch.utils.data.Dataset):
                 binder_pocket_cutoff=self.binder_pocket_cutoff,
                 binder_pocket_sampling_geometric_p=self.binder_pocket_sampling_geometric_p,
             )
+            # Attach polymer property regression targets if present on record
+            if sample.record and sample.record.polymer_properties is not None:
+                props = sample.record.polymer_properties
+                values = [
+                    getattr(props, "Tg", None),
+                    getattr(props, "FFV", None),
+                    getattr(props, "Tc", None),
+                    getattr(props, "Density", None),
+                    getattr(props, "Rg", None),
+                ]
+                tensor = torch.tensor(
+                    [float("nan") if v is None else float(v) for v in values],
+                    dtype=torch.float,
+                )
+                features["polymer_properties"] = tensor.unsqueeze(0)
         except Exception as e:
             print(f"Featurizer failed on {sample.record.id} with error {e}. Skipping.")
             return self.__getitem__(idx)
@@ -441,6 +457,21 @@ class ValidationDataset(torch.utils.data.Dataset):
                 binder_pocket_sampling_geometric_p=1.0,  # this will only sample a single pocket token
                 only_ligand_binder_pocket=True,
             )
+            # Attach polymer properties to validation features if present
+            if record and record.polymer_properties is not None:
+                props = record.polymer_properties
+                values = [
+                    getattr(props, "Tg", None),
+                    getattr(props, "FFV", None),
+                    getattr(props, "Tc", None),
+                    getattr(props, "Density", None),
+                    getattr(props, "Rg", None),
+                ]
+                tensor = torch.tensor(
+                    [float("nan") if v is None else float(v) for v in values],
+                    dtype=torch.float,
+                )
+                features["polymer_properties"] = tensor.unsqueeze(0)
         except Exception as e:
             print(f"Featurizer failed on {record.id} with error {e}. Skipping.")
             return self.__getitem__(0)
@@ -491,7 +522,7 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
         for data_config in cfg.datasets:
             # Set target_dir
             target_dir = Path(data_config.target_dir)
-            msa_dir = Path(data_config.msa_dir)
+            msa_dir = Path(data_config.msa_dir) if data_config.msa_dir else None
 
             # Load manifest
             if data_config.manifest_path is not None:

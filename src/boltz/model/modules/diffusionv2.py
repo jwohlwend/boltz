@@ -301,6 +301,14 @@ class AtomDiffusion(Module):
         steering_args=None,
         **network_condition_kwargs,
     ):
+        # Ensure steering args is a valid dictionary with required keys
+        if steering_args is None:
+            steering_args = {
+                "fk_steering": False,
+                "physical_guidance_update": False,
+                "contact_guidance_update": False,
+                "num_particles": 1,
+            }
         if steering_args is not None and (
             steering_args["fk_steering"]
             or steering_args["physical_guidance_update"]

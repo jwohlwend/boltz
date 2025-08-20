@@ -19,7 +19,7 @@ from boltz.model.loss.confidencev2 import (
     confidence_loss,
 )
 from boltz.model.loss.distogramv2 import distogram_loss
-from boltz.model.modules.affinity import AffinityModule
+from boltz.model.modules.affinity import AffinityModule, PolymerPropertiesModule
 from boltz.model.modules.confidencev2 import ConfidenceModule
 from boltz.model.modules.diffusion_conditioning import DiffusionConditioning
 from boltz.model.modules.diffusionv2 import AtomDiffusion
@@ -65,6 +65,7 @@ class Boltz2(LightningModule):
         template_args: Optional[dict] = None,
         confidence_prediction: bool = True,
         affinity_prediction: bool = False,
+        polymer_prediction: bool = False,
         affinity_ensemble: bool = False,
         affinity_mw_correction: bool = True,
         run_trunk_and_structure: bool = True,
@@ -104,6 +105,7 @@ class Boltz2(LightningModule):
         checkpoint_diffusion_conditioning: bool = False,
         use_templates_v2: bool = False,
         use_kernels: bool = False,
+        polymer_only_training: bool = False,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["validators"])
@@ -111,7 +113,8 @@ class Boltz2(LightningModule):
         # No random recycling
         self.no_random_recycling_training = no_random_recycling_training
 
-        if validate_structure:
+        self.validate_structure = validate_structure
+        if self.validate_structure:
             # Late init at setup time
             self.val_group_mapper = {}  # maps a dataset index to a validation group name
             self.validator_mapper = {}  # maps a dataset index to a validator
@@ -122,6 +125,7 @@ class Boltz2(LightningModule):
 
         self.num_val_datasets = num_val_datasets
         self.log_loss_every_steps = log_loss_every_steps
+        self.polymer_only_training = polymer_only_training
 
         # EMA
         self.use_ema = ema
@@ -135,7 +139,7 @@ class Boltz2(LightningModule):
         self.steering_args = steering_args
 
         # Training metrics
-        if validate_structure:
+        if self.validate_structure:
             self.train_confidence_loss_logger = MeanMetric()
             self.train_confidence_loss_dict_logger = nn.ModuleDict()
             for m in [
@@ -293,6 +297,7 @@ class Boltz2(LightningModule):
 
         self.confidence_prediction = confidence_prediction
         self.affinity_prediction = affinity_prediction
+        self.polymer_prediction = polymer_prediction
         self.affinity_ensemble = affinity_ensemble
         self.affinity_mw_correction = affinity_mw_correction
         self.run_trunk_and_structure = run_trunk_and_structure
@@ -300,6 +305,7 @@ class Boltz2(LightningModule):
         self.token_level_confidence = token_level_confidence
         self.alpha_pae = alpha_pae
         self.structure_prediction_training = structure_prediction_training
+        # validate_structure is already set from the init args above; do not override here
 
         if self.confidence_prediction:
             self.confidence_module = ConfidenceModule(
@@ -347,15 +353,37 @@ class Boltz2(LightningModule):
                     self.affinity_module = torch.compile(
                         self.affinity_module, dynamic=False, fullgraph=False
                     )
+            # Affinity-specific setup complete
+
+        # Separate module for polymer properties prediction (decoupled from affinity)
+        if self.polymer_prediction:
+            self.polymer_module = PolymerPropertiesModule(
+                token_s,
+                token_z,
+                **(affinity_model_args or {}),
+            )
+            if compile_affinity:
+                self.polymer_module = torch.compile(
+                    self.polymer_module, dynamic=False, fullgraph=False
+                )
 
         # Remove grad from weights they are not trained for ddp
-        if not structure_prediction_training:
+        if not structure_prediction_training and not self.polymer_only_training:
             for name, param in self.named_parameters():
                 if (
                     name.split(".")[0] not in ["confidence_module", "affinity_module"]
                     and "out_token_feat_update" not in name
                 ):
                     param.requires_grad = False
+        # In polymer-only mode, keep polymer head (and trunk) trainable
+        if self.polymer_only_training:
+            for name, param in self.named_parameters():
+                if name.startswith("polymer_module"):
+                    param.requires_grad = True
+            # Optionally keep trunk/trainable to adapt features
+            for name, param in self.named_parameters():
+                if name.startswith("pairformer_module") or name.startswith("msa_module") or name.startswith("s_init") or name.startswith("z_init_"):
+                    param.requires_grad = True
 
     def setup(self, stage: str) -> None:
         """Set the model for training, validation and inference."""
@@ -369,6 +397,7 @@ class Boltz2(LightningModule):
             stage != "predict"
             and hasattr(self.trainer, "datamodule")
             and self.trainer.datamodule
+            and hasattr(self, "validate_structure")
             and self.validate_structure
         ):
             self.val_group_mapper.update(self.trainer.datamodule.val_group_mapper)
@@ -409,7 +438,8 @@ class Boltz2(LightningModule):
         run_confidence_sequentially: bool = False,
     ) -> dict[str, Tensor]:
         with torch.set_grad_enabled(
-            self.training and self.structure_prediction_training
+            self.training
+            and (self.structure_prediction_training or self.polymer_only_training)
         ):
             s_inputs = self.input_embedder(feats)
 
@@ -439,7 +469,7 @@ class Boltz2(LightningModule):
                 for i in range(recycling_steps + 1):
                     with torch.set_grad_enabled(
                         self.training
-                        and self.structure_prediction_training
+                        and (self.structure_prediction_training or self.polymer_only_training)
                         and (i == recycling_steps)
                     ):
                         # Issue with unused parameters in autocast
@@ -497,7 +527,12 @@ class Boltz2(LightningModule):
 
             if (
                 self.run_trunk_and_structure
-                and ((not self.training) or self.confidence_prediction)
+                and (
+                    (not self.training)
+                    or self.confidence_prediction
+                    or self.affinity_prediction
+                    or self.polymer_prediction
+                )
                 and (not self.skip_run_structure)
             ):
                 if self.checkpoint_diffusion_conditioning and self.training:
@@ -554,7 +589,7 @@ class Boltz2(LightningModule):
                 )
 
             # Compute structure module
-            if self.training and self.structure_prediction_training:
+            if self.training and self.structure_prediction_training and not self.polymer_only_training:
                 atom_coords = feats["coords"]
                 B, K, L = atom_coords.shape[0:3]
                 assert K in (
@@ -578,11 +613,11 @@ class Boltz2(LightningModule):
                     )
                     dict_out.update(struct_out)
 
-            elif self.training:
+            elif self.training and not self.polymer_only_training:
                 feats["coords"] = feats["coords"].squeeze(1)
                 assert len(feats["coords"].shape) == 3
 
-        if self.confidence_prediction:
+        if self.confidence_prediction and not self.polymer_only_training:
             dict_out.update(
                 self.confidence_module(
                     s_inputs=s_inputs.detach(),
@@ -618,8 +653,11 @@ class Boltz2(LightningModule):
             )
             z_affinity = z * cross_pair_mask[None, :, :, None]
 
-            argsort = torch.argsort(dict_out["iptm"], descending=True)
-            best_idx = argsort[0].item()
+            if "iptm" in dict_out:
+                argsort = torch.argsort(dict_out["iptm"], descending=True)
+                best_idx = argsort[0].item()
+            else:
+                best_idx = 0
             coords_affinity = dict_out["sample_atom_coords"].detach()[best_idx][
                 None, None
             ]
@@ -710,14 +748,55 @@ class Boltz2(LightningModule):
                     )
                     dict_out.update(
                         {
-                            "affinity_pred_value": dict_out_affinity[
-                                "affinity_pred_value"
-                            ],
+                            "affinity_pred_value": dict_out_affinity["affinity_pred_value"],
                             "affinity_probability_binary": torch.nn.functional.sigmoid(
                                 dict_out_affinity["affinity_logits_binary"]
                             ),
                         }
                     )
+
+        # Polymer properties prediction (separate from affinity)
+        if self.polymer_prediction:
+            z_poly = z
+
+            # Rank samples by confidence score instead of raw iptm
+            if ("complex_plddt" in dict_out) and ("iptm" in dict_out or "ptm" in dict_out):
+                if "iptm" in dict_out and not torch.allclose(
+                    dict_out["iptm"], torch.zeros_like(dict_out["iptm"])
+                ):
+                    metric = dict_out["iptm"]
+                else:
+                    metric = dict_out.get("ptm", None)
+                if metric is not None:
+                    confidence_score = (4 * dict_out["complex_plddt"] + metric) / 5
+                    argsort = torch.argsort(confidence_score, descending=True)
+                    best_idx = argsort[0].item()
+                else:
+                    best_idx = 0
+            elif "iptm" in dict_out:
+                argsort = torch.argsort(dict_out["iptm"], descending=True)
+                best_idx = argsort[0].item()
+            else:
+                best_idx = 0
+
+            coords_poly = dict_out["sample_atom_coords"].detach()[best_idx][None, None]
+            s_inputs_poly = self.input_embedder(feats, affinity=False)
+
+            with torch.autocast("cuda", enabled=False):
+                # Enable grads for polymer head even when structure training is disabled
+                with torch.set_grad_enabled(self.training):
+                    dict_out_poly = self.polymer_module(
+                        s_inputs=(s_inputs_poly if self.polymer_only_training else s_inputs_poly.detach()),
+                        z=(z_poly if self.polymer_only_training else z_poly.detach()),
+                        x_pred=coords_poly,
+                        feats=feats,
+                        multiplicity=1,
+                        use_kernels=self.use_kernels,
+                    )
+                if "polymer_properties_pred" in dict_out_poly:
+                    dict_out["polymer_properties_pred"] = dict_out_poly[
+                        "polymer_properties_pred"
+                    ]
 
         return dict_out
 
@@ -892,15 +971,32 @@ class Boltz2(LightningModule):
                 "loss_breakdown": {},
             }
 
+        # Multi-task polymer properties loss (optional)
+        polymer_prop_loss = torch.tensor(0.0, device=batch["token_index"].device)
+        if self.polymer_prediction and ("polymer_properties" in batch):
+            props = batch["polymer_properties"]
+            pred = out.get("polymer_properties_pred", None)
+            if (pred is not None) and (props is not None):
+                mask = ~torch.isnan(props)
+                if mask.any():
+                    diff = pred - torch.nan_to_num(props, nan=0.0)
+                    diff = diff * mask.float()
+                    denom = mask.float().sum().clamp(min=1.0)
+                    polymer_prop_loss = (diff.pow(2).sum() / denom)
+
         # Aggregate losses
         # NOTE: we already have an implicit weight in the losses induced by dataset sampling
         # NOTE: this logic works only for datasets with confidence labels
-        loss = (
-            self.training_args.confidence_loss_weight * confidence_loss_dict["loss"]
-            + self.training_args.diffusion_loss_weight * diffusion_loss_dict["loss"]
-            + self.training_args.distogram_loss_weight * disto_loss
-            + self.training_args.get("bfactor_loss_weight", 0.0) * bfactor_loss
-        )
+        if getattr(self, "polymer_only_training", False):
+            loss = polymer_prop_loss
+        else:
+            loss = (
+                self.training_args.confidence_loss_weight * confidence_loss_dict["loss"]
+                + self.training_args.diffusion_loss_weight * diffusion_loss_dict["loss"]
+                + self.training_args.distogram_loss_weight * disto_loss
+                + self.training_args.get("bfactor_loss_weight", 0.0) * bfactor_loss
+                + self.training_args.get("polymer_properties_loss_weight", 0.0) * polymer_prop_loss
+            )
 
         if not (self.global_step % self.log_loss_every_steps):
             # Log losses
@@ -924,6 +1020,8 @@ class Boltz2(LightningModule):
                             else confidence_loss_dict["loss_breakdown"][k]
                         )
                     )
+            if self.polymer_prediction:
+                self.log("train/polymer_properties_loss", polymer_prop_loss)
             self.log("train/loss", loss)
             self.training_log()
         return loss
@@ -1000,7 +1098,7 @@ class Boltz2(LightningModule):
         return norm
 
     def validation_step(self, batch: dict[str, Tensor], batch_idx: int):
-        if self.validate_structure:
+        if getattr(self, "validate_structure", False):
             try:
                 msg = "Only batch=1 is supported for validation"
                 assert batch["idx_dataset"].shape[0] == 1, msg
@@ -1049,7 +1147,7 @@ class Boltz2(LightningModule):
 
     def on_validation_epoch_end(self):
         """Aggregate all metrics for each validator."""
-        if self.validate_structure:
+        if getattr(self, "validate_structure", False):
             for validator in self.validator_mapper.values():
                 # This will aggregate, compute and log all metrics
                 validator.on_epoch_end(model=self)
@@ -1118,6 +1216,8 @@ class Boltz2(LightningModule):
                     pred_dict["affinity_probability_binary2"] = out[
                         "affinity_probability_binary2"
                     ]
+            if self.polymer_prediction and ("polymer_properties_pred" in out):
+                pred_dict["polymer_properties_pred"] = out["polymer_properties_pred"]
             return pred_dict
 
         except RuntimeError as e:  # catch out of memory exceptions
@@ -1133,7 +1233,7 @@ class Boltz2(LightningModule):
         """Configure the optimizer."""
         param_dict = dict(self.named_parameters())
 
-        if self.structure_prediction_training:
+        if self.structure_prediction_training or getattr(self, "polymer_only_training", False):
             all_parameter_names = [
                 pn for pn, p in self.named_parameters() if p.requires_grad
             ]
