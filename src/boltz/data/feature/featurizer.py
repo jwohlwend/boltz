@@ -644,6 +644,7 @@ def process_token_features(
             resolved_mask = pad_dim(resolved_mask, 0, pad_len)
             disto_mask = pad_dim(disto_mask, 0, pad_len)
             pocket_feature = pad_dim(pocket_feature, 0, pad_len)
+            cyclic_period = pad_dim(cyclic_period, 0, pad_len)
 
     token_features = {
         "token_index": token_index,

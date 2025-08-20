@@ -1,30 +1,18 @@
 # Prediction
 
-Once you have installed `boltz`, you can start making predictions by simply running:
+Once `boltz` is installed, you can run predictions with:
 
-`boltz predict <INPUT_PATH> --use_msa_server`
+`boltz predict <INPUT_PATH> [OPTIONS]`
 
-where `<INPUT_PATH>` is a path to the input file or a directory. The input file can either be in fasta (enough for most use cases) or YAML  format (for more complex inputs). If you specify a directory, `boltz` will run predictions on each `.yaml` or `.fasta` file in the directory. Passing the `--use_msa_server` flag will auto-generate the MSA using the mmseqs2 server, otherwise you can provide a precomputed MSA. 
-
-The Boltz model includes an option to use inference time potentials that significantly improve the physical quality of the poses. If you find any physical issues with the model predictions, please let us know by opening an issue and including the YAML/FASTA file to replicate, the structure output and a description of the problem. If you want to run the Boltz model with the potentials you can do so with the `--use_potentials` flag. 
-
-Before diving into more details about the input formats, here are the key differences in what they each support:
-
-| Feature  | Fasta              | YAML    |
-| -------- |--------------------| ------- |
-| Polymers | :white_check_mark: | :white_check_mark:   |
-| Smiles   | :white_check_mark: | :white_check_mark:   |
-| CCD code | :white_check_mark: | :white_check_mark:   |
-| Custom MSA | :white_check_mark: | :white_check_mark:   |
-| Modified Residues | :x:                |  :white_check_mark: |
-| Covalent bonds | :x:                | :white_check_mark:   |
-| Pocket conditioning | :x:                | :white_check_mark:   |
-| Affinity | :x:                | :white_check_mark:   |
+* `<INPUT_PATH>` can be either a single .yaml or .fasta file (YAML is preferred; FASTA is deprecated), or a directory, in which case predictions will be run on all `.yaml` and `.fasta` files inside.
+* If you include `--use_msa_server`, the MSA will be generated automatically via the mmseqs2 server. Without this flag, you must provide a pre-computed MSA.
+* If you include `--use_potentials`, Boltz will apply inference-time potentials to improve the physical plausibility of the predicted poses.
 
 
-## YAML format
+## Input format
 
-The YAML format is more flexible and allows for more complex inputs, particularly around covalent bonds. The schema of the YAML is the following:
+Boltz takes inputs in `.yaml` format, which specifies the components of the complex.  
+Below is the full schema (each section is described in detail afterward):
 
 ```yaml
 sequences:
@@ -74,22 +62,48 @@ properties:
 
 ```
 
-`sequences` has one entry for every unique chain/molecule in the input. Each polymer entity as a `ENTITY_TYPE`  either `protein`, `dna` or `rna` and have a `sequence` attribute. Non-polymer entities are indicated by `ENTITY_TYPE` equal to `ligand` and have a `smiles` or `ccd` attribute. `CHAIN_ID` is the unique identifier for each chain/molecule, and it should be set as a list in case of multiple identical entities in the structure. For proteins, the `msa` key is required by default but can be omitted by passing the `--use_msa_server` flag which will auto-generate the MSA using the mmseqs2 server. If you wish to use a precomputed MSA, use the `msa` attribute with `MSA_PATH` indicating the path to the `.a3m` file containing the MSA for that protein. If you wish to explicitly run single sequence mode (which is generally advised against as it will hurt model performance), you may do so by using the special keyword `empty` for that protein (ex: `msa: empty`). For custom MSA, you may wish to indicate pairing keys to the model. You can do so by using a CSV format instead of a3m with two columns: `sequence` with the protein sequences and `key` which is a unique identifier indicating matching rows across CSV files of each protein chain.
+### Sequences and molecules
 
-The `modifications` field is an optional field that allows you to specify modified residues in the polymer (`protein`, `dna` or`rna`). The `position` field specifies the index (starting from 1) of the residue, and `ccd` is the CCD code of the modified residue. This field is currently only supported for CCD ligands. The `cyclic` flag should be used to specify polymer chains (not ligands) that are cyclic. 
+The sequences section has one entry per unique chain or molecule.
+* Polymers: use `ENTITY_TYPE` equals to `protein`, `dna`, or `rna`, and provide a `sequence`.
+* Ligands (non-polymers): use `ENTITY_TYPE` equals `ligand`, and provide either a `smiles` string or a `ccd` code (but not both).
+* `CHAIN_ID`: unique identifier for each chain/molecule. If multiple identical entities exist, set id as a list (e.g. `[A, B]`).
+
+For proteins:
+* By default, an `msa` must be provided.
+* If `--use_msa_server` is set, the MSA is auto-generated (so `msa` can be omitted).
+* To use a precomputed custom MSA, set `msa: MSA_PATH` pointing to a `.a3m` file. To indicate pairing keys across chains, use a CSV format instead of a3m with two columns: `sequence` (protein sequence) and `key` (a unique identifier for matching rows across chains).
+* To force single-sequence mode (not recommended, as it reduces accuracy), set `msa: empty`.
+
+The `modifications` field is optional and allows specification of modified residues in polymers (`protein`, `dna`, or `rna`).  
+- `position`: index of the residue (starting from 1)  
+- `ccd`: CCD code of the modified residue (currently supported only for CCD ligands)  
+
+The `cyclic` flag indicates whether a polymer chain (not ligands) is cyclic.
+
+### Constraints
 
 `constraints` is an optional field that allows you to specify additional information about the input structure. 
 
 
 * The `bond` constraint specifies covalent bonds between two atoms (`atom1` and `atom2`). It is currently only supported for CCD ligands and canonical residues, `CHAIN_ID` refers to the id of the residue set above, `RES_IDX` is the index (starting from 1) of the residue (1 for ligands), and `ATOM_NAME` is the standardized atom name (can be verified in CIF file of that component on the RCSB website).
 
-* The `pocket` constraint specifies the residues associated with a ligand, where `binder` refers to the chain binding to the pocket (which can be a molecule, protein, DNA or RNA) and `contacts` is the list of chain and residue indices (starting from 1) associated with the pocket. The model currently only supports the specification of a single `binder` chain (and any number of `contacts` residues in other chains).
+* The `pocket` constraint specifies the residues associated with binding interaction, where `binder` refers to the chain binding to the pocket (which can be a molecule, protein, DNA or RNA) and `contacts` is the list of chain and residue indices (starting from 1, or atom names if the chain is a molecule) that form the binding site for the `binder`. `max_distance` specifies the maximum distance (in Angstrom, supported between 4A and 20A with 6A as default) between any atom in the `binder` and any atom in each of the `contacts` elements. If `force` is set to true, a potential will be used to enforce the pocket constraint.
 
-`templates` is an optional field that allows you to specify structural templates for your prediction. At minimum, you must provide the path to the structural template, which must provided as a CIF or PDB file. If you wish to explicitly define which of the chains in your YAML should be templated using this file, you can use the `chain_id` entry to specify them. If providing a PDB file, chain ids will be incrementally assigned to each subchain in a parent PDB chain resulting in template chain ids of A1, A2, B1, etc for PDB chains A and B. Make sure to look at the structure of the template PDB file to determine the corresponding value of `template_id` to provide. Whether a set of ids is provided or not, Boltz will find the best matching chains from the provided template. If you wish to explicitly define the mapping yourself, you may provide the corresponding template_id. Note that only protein chains can be templated.
+* The `contact` constraint specifies a contact between two residues or atoms, where `token1` and `token2` are the identifiers of the residues or atoms (in the format `[CHAIN_ID, RES_IDX/ATOM_NAME]`). `max_distance` specifies the maximum distance (in Angstrom, supported between 4A and 20A with 6A as default) between any pair of atoms in the two elements. If `force` is set to true, a potential will be used to enforce the contact constraint. 
 
-`properties` is an optional field that allows you to specify whether you want to compute the affinity. If enabled, you must also provide the chain_id corresponding to the small molecule against which the affinity will be computed. Only one single molecule can be specified for affinity computation, and it must be a ligand chain (not a protein, DNA or RNA).
+### Templates
+`templates` is optional and allows specification of structural templates for protein chains. At minimum, provide the path to a CIF or PDB file.
 
-As an example:
+If you wish to explicitly define which of the chains in your YAML should be templated using this file, you can use the `chain_id` entry to specify them. If providing a PDB file, chain ids will be incrementally assigned to each subchain in a parent PDB chain resulting in template chain ids of A1, A2, B1, etc for PDB chains A and B. Make sure to look at the structure of the template PDB file to determine the corresponding value of `template_id` to provide. Whether a set of ids is provided or not, Boltz will find the best matching chains from the provided template. If you wish to explicitly define the mapping yourself, you may provide the corresponding `template_id`. 
+
+For any template you provide, you can also specify a `force` flag which will use a potential to enforce that the backbone does not deviate excessively from the template during the prediction. When using `force` one must specify also the `threshold` field which controls the distance (in Angstroms) that the prediction can deviate from the template. 
+
+### Properties
+`properties` is an optional field that allows you to specify whether you want to compute the affinity. If enabled, you must also provide the chain_id corresponding to the small molecule against which the affinity will be computed. Only one single molecule can be specified for affinity computation, and it must be a ligand chain (not a protein, DNA or RNA). At this point, Boltz only supports the computation of affinity of small molecules to protein targets, if ran with an RNA/DNA/co-factor target, the code will not crash but the output will be unreliable.
+
+
+### Example
 
 ```yaml
 version: 1
@@ -107,35 +121,6 @@ sequences:
 ```
 
 
-## Fasta format
-
-The fasta format is a little simpler, and should contain entries as follows:
-
-```
->CHAIN_ID|ENTITY_TYPE|MSA_PATH
-SEQUENCE
-```
-
-The `CHAIN_ID` is a unique identifier for each input chain. The `ENTITY_TYPE` can be one of `protein`, `dna`, `rna`, `smiles`, `ccd` (note that we support both smiles and CCD code for ligands). The `MSA_PATH` is only applicable to proteins. By default, MSA's are required, but they can be omited by passing the `--use_msa_server` flag which will auto-generate the MSA using the mmseqs2 server. If you wish to use a custom MSA, use it to set the path to the `.a3m` file containing a pre-computed MSA for this protein. If you wish to explicitly run single sequence mode (which is generally advised against as it will hurt model performance), you may do so by using the special keyword `empty` for that protein (ex: `>A|protein|empty`). For custom MSA, you may wish to indicate pairing keys to the model. You can do so by using a CSV format instead of a3m with two columns: `sequence` with the protein sequences and `key` which is a unique identifier indicating matching rows across CSV files of each protein chain.
-
-For each of these cases, the corresponding `SEQUENCE` will contain an amino acid sequence (e.g. `EFKEAFSLF`), a sequence of nucleotide bases (e.g. `ATCG`), a smiles string (e.g. `CC1=CC=CC=C1`), or a CCD code (e.g. `ATP`), depending on the entity.
-
-As an example:
-
-```yaml
->A|protein|./examples/msa/seq1.a3m
-MVTPEGNVSLVDESLLVGVTDEDRAVRSAHQFYERLIGLWAPAVMEAAHELGVFAALAEAPADSGELARRLDCDARAMRVLLDALYAYDVIDRIHDTNGFRYLLSAEARECLLPGTLFSLVGKFMHDINVAWPAWRNLAEVVRHGARDTSGAESPNGIAQEDYESLVGGINFWAPPIVTTLSRKLRASGRSGDATASVLDVGCGTGLYSQLLLREFPRWTATGLDVERIATLANAQALRLGVEERFATRAGDFWRGGWGTGYDLVLFANIFHLQTPASAVRLMRHAAACLAPDGLVAVVDQIVDADREPKTPQDRFALLFAASMTNTGGGDAYTFQEYEEWFTAAGLQRIETLDTPMHRILLARRATEPSAVPEGQASENLYFQ
->B|protein|./examples/msa/seq1.a3m
-MVTPEGNVSLVDESLLVGVTDEDRAVRSAHQFYERLIGLWAPAVMEAAHELGVFAALAEAPADSGELARRLDCDARAMRVLLDALYAYDVIDRIHDTNGFRYLLSAEARECLLPGTLFSLVGKFMHDINVAWPAWRNLAEVVRHGARDTSGAESPNGIAQEDYESLVGGINFWAPPIVTTLSRKLRASGRSGDATASVLDVGCGTGLYSQLLLREFPRWTATGLDVERIATLANAQALRLGVEERFATRAGDFWRGGWGTGYDLVLFANIFHLQTPASAVRLMRHAAACLAPDGLVAVVDQIVDADREPKTPQDRFALLFAASMTNTGGGDAYTFQEYEEWFTAAGLQRIETLDTPMHRILLARRATEPSAVPEGQASENLYFQ
->C|ccd
-SAH
->D|ccd
-SAH
->E|smiles
-N[C@@H](Cc1ccc(O)cc1)C(=O)O
->F|smiles
-N[C@@H](Cc1ccc(O)cc1)C(=O)O
-```
 
 
 ## Options
@@ -144,11 +129,13 @@ The following options are available for the `predict` command:
 
     boltz predict input_path [OPTIONS]
 
-As an example, to predict a structure using 10 recycling steps and 25 samples (the default parameters for AlphaFold3) use:
+Examples of common options include:
 
-    boltz predict input_path --recycling_steps 10 --diffusion_samples 25
+* Adding `--use_msa_server` flag, Boltz auto-generates the MSA using the mmseqs2 server. 
 
-(note however that the prediction will take significantly longer)
+* Adding the `--use_potentials` flag, Boltz uses an inference time potential that significantly improve the physical quality of the poses. 
+
+* To predict a structure using 10 recycling steps and 25 samples (the default parameters for AlphaFold3) use (note however that the prediction will take significantly longer): `--recycling_steps 10 --diffusion_samples 25`
 
 
 | **Option**               | **Type**        | **Default**                 | **Description**                                                                                                                                                                     |
@@ -205,9 +192,9 @@ out_dir/
         ...
 └── processed/                                                 # Processed data used during execution 
 ```
-The `predictions` folder contains a unique folder for each input file. The input folders contain `diffusion_samples` predictions saved in the output_format ordered by confidence score as well as additional files containing the predictions of the confidence model and affinity model. The `processed` folder contains the processed input files that are used by the model during inference.
+The `predictions` folder contains a unique folder for each input file. The input folders contain `diffusion_samples` predictions saved in the output_format ordered by confidence score as well as additional files containing the predictions of the confidence model and affinity model. The `processed` folder contains the processed input files that the model uses during inference.
 
-The output confidence `.json` file contains various aggregated confidence scores for specific sample. The structure of the file is as follows:
+Each output folder includes a confidence `.json` file with aggregated confidence scores for that sample. Its structure is:
 ```yaml
 {
     "confidence_score": 0.8367,       # Aggregated score used to sort the predictions, corresponds to 0.8 * complex_plddt + 0.2 * iptm (ptm for single chains)
@@ -306,6 +293,52 @@ If both the CLI option and environment variable are set, the CLI option takes pr
 
 **Note:**  
 Only one authentication method (basic or API key) can be used at a time. If both are provided, the program will raise an error.
+
+
+## Fasta format (deprecated)
+
+FASTA format is still supported but is deprecated and only supports a limited subset of features compared to YAML.
+
+| Feature  | Fasta              | YAML    |
+| -------- |--------------------| ------- |
+| Polymers | :white_check_mark: | :white_check_mark:   |
+| Smiles   | :white_check_mark: | :white_check_mark:   |
+| CCD code | :white_check_mark: | :white_check_mark:   |
+| Custom MSA | :white_check_mark: | :white_check_mark:   |
+| Modified Residues | :x:                |  :white_check_mark: |
+| Covalent bonds | :x:                | :white_check_mark:   |
+| Pocket conditioning | :x:                | :white_check_mark:   |
+| Affinity | :x:                | :white_check_mark:   |
+
+
+It contain entries as follows:
+
+```
+>CHAIN_ID|ENTITY_TYPE|MSA_PATH
+SEQUENCE
+```
+
+The `CHAIN_ID` is a unique identifier for each input chain. The `ENTITY_TYPE` can be one of `protein`, `dna`, `rna`, `smiles`, `ccd` (note that we support both smiles and CCD code for ligands). The `MSA_PATH` is only applicable to proteins. By default, MSA's are required, but they can be omited by passing the `--use_msa_server` flag which will auto-generate the MSA using the mmseqs2 server. If you wish to use a custom MSA, use it to set the path to the `.a3m` file containing a pre-computed MSA for this protein. If you wish to explicitly run single sequence mode (which is generally advised against as it will hurt model performance), you may do so by using the special keyword `empty` for that protein (ex: `>A|protein|empty`). For custom MSA, you may wish to indicate pairing keys to the model. You can do so by using a CSV format instead of a3m with two columns: `sequence` with the protein sequences and `key` which is a unique identifier indicating matching rows across CSV files of each protein chain.
+
+For each of these cases, the corresponding `SEQUENCE` will contain an amino acid sequence (e.g. `EFKEAFSLF`), a sequence of nucleotide bases (e.g. `ATCG`), a smiles string (e.g. `CC1=CC=CC=C1`), or a CCD code (e.g. `ATP`), depending on the entity.
+
+As an example:
+
+```yaml
+>A|protein|./examples/msa/seq1.a3m
+MVTPEGNVSLVDESLLVGVTDEDRAVRSAHQFYERLIGLWAPAVMEAAHELGVFAALAEAPADSGELARRLDCDARAMRVLLDALYAYDVIDRIHDTNGFRYLLSAEARECLLPGTLFSLVGKFMHDINVAWPAWRNLAEVVRHGARDTSGAESPNGIAQEDYESLVGGINFWAPPIVTTLSRKLRASGRSGDATASVLDVGCGTGLYSQLLLREFPRWTATGLDVERIATLANAQALRLGVEERFATRAGDFWRGGWGTGYDLVLFANIFHLQTPASAVRLMRHAAACLAPDGLVAVVDQIVDADREPKTPQDRFALLFAASMTNTGGGDAYTFQEYEEWFTAAGLQRIETLDTPMHRILLARRATEPSAVPEGQASENLYFQ
+>B|protein|./examples/msa/seq1.a3m
+MVTPEGNVSLVDESLLVGVTDEDRAVRSAHQFYERLIGLWAPAVMEAAHELGVFAALAEAPADSGELARRLDCDARAMRVLLDALYAYDVIDRIHDTNGFRYLLSAEARECLLPGTLFSLVGKFMHDINVAWPAWRNLAEVVRHGARDTSGAESPNGIAQEDYESLVGGINFWAPPIVTTLSRKLRASGRSGDATASVLDVGCGTGLYSQLLLREFPRWTATGLDVERIATLANAQALRLGVEERFATRAGDFWRGGWGTGYDLVLFANIFHLQTPASAVRLMRHAAACLAPDGLVAVVDQIVDADREPKTPQDRFALLFAASMTNTGGGDAYTFQEYEEWFTAAGLQRIETLDTPMHRILLARRATEPSAVPEGQASENLYFQ
+>C|ccd
+SAH
+>D|ccd
+SAH
+>E|smiles
+N[C@@H](Cc1ccc(O)cc1)C(=O)O
+>F|smiles
+N[C@@H](Cc1ccc(O)cc1)C(=O)O
+```
+
 
 
 ## Troubleshooting
