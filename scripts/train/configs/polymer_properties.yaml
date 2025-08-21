@@ -7,23 +7,26 @@ trainer:
   accumulate_grad_batches: 128
   num_sanity_val_steps: 0
 
-output: SET_PATH_HERE
+output: /Users/willvith/Desktop/boltz/outputs/polymer_properties
 pretrained: null
+default_pretrained: true
+load_confidence_from_trunk: true
 resume: null
 disable_checkpoint: false
 matmul_precision: null
 save_top_k: -1
 
 data:
-  # For CSV-based polymer-only training, provide csv_path at runtime via CLI.
-  # The manifest-based datasets block is not required.
-  datasets: []
+  # CSV-based polymer-only training. Provide the path to your CSV here or via CLI override.
+  csv_path: /Users/willvith/Downloads/neurips-open-polymer-prediction-2025/train.csv
+  # Select which polymer properties to train/predict. Order defines output head order.
+  polymer_property_keys: [Tg, FFV, Tc, Density, Rg]
   tokenizer:
-    _target_: boltz.data.tokenize.boltz.BoltzTokenizer
+    _target_: boltz.data.tokenize.boltz2.Boltz2Tokenizer
   featurizer:
-    _target_: boltz.data.feature.featurizer.BoltzFeaturizer
+    _target_: boltz.data.feature.featurizerv2.Boltz2Featurizer
 
-  symmetries: PATH_TO_SYMMETRY_FILE
+  # symmetries: not used in CSV-only pipeline
   max_tokens: 512
   max_atoms: 4608
   max_seqs: 2048
@@ -34,15 +37,12 @@ data:
   min_dist: 2.0
   max_dist: 22.0
   num_bins: 64
-  samples_per_epoch: 100000
   batch_size: 1
+  val_batch_size: 1
   num_workers: 4
   random_seed: 42
   pin_memory: true
-  overfit: null
-  crop_validation: true
-  return_train_symmetries: false
-  return_val_symmetries: false
+  # Symmetry and cropping flags are not used in CSV-only pipeline
 
 model:
   _target_: boltz.model.models.boltz2.Boltz2
@@ -57,10 +57,13 @@ model:
   compile_pairformer: false
   ema: false
   ema_decay: 0.999
+  bond_type_feature: true
 
   embedder_args:
     atom_encoder_depth: 3
     atom_encoder_heads: 4
+    # add_method_conditioning: true
+    # add_modified_flag: true
 
   msa_args:
     msa_s: 64
@@ -73,9 +76,9 @@ model:
     offload_to_cpu: false
 
   pairformer_args:
-    num_blocks: 2
-    num_heads: 8
-    dropout: 0.15
+    num_blocks: 64
+    num_heads: 16
+    dropout: 0.25
     activation_checkpointing: true
     offload_to_cpu: false
 
@@ -84,8 +87,8 @@ model:
     dim_fourier: 256
     atom_encoder_depth: 3
     atom_encoder_heads: 4
-    token_transformer_depth: 6
-    token_transformer_heads: 8
+    token_transformer_depth: 24
+    token_transformer_heads: 16
     atom_decoder_depth: 3
     atom_decoder_heads: 4
     conditioning_transition_layers: 2
@@ -106,6 +109,8 @@ model:
     max_dist: 22
     use_cross_transformer: false
     groups: {}
+    # Mirror the selected polymer properties so the model head size matches.
+    polymer_property_keys: [Tg, FFV, Tc, Density, Rg]
     pairformer_args:
       num_blocks: 6
       num_heads: 8
@@ -137,6 +142,7 @@ model:
     lr_start_decay_after_n_steps: 50000
     lr_decay_every_n_steps: 50000
     lr_decay_factor: 0.95
+    load_confidence_from_trunk: true
     # Provide empty steering args to satisfy diffusionv2.sample checks
     steering_args:
       fk_steering: false

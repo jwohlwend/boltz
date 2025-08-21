@@ -8,42 +8,33 @@ import pytorch_lightning as pl
 import torch
 from torch.utils.data import DataLoader
 
-from boltz.data.feature.symmetry import get_symmetries
 from boltz.data.pad import pad_to_max
 from boltz.data.tokenize.boltz2 import Boltz2Tokenizer
 from boltz.data.feature.featurizerv2 import Boltz2Featurizer
 from boltz.data.parse.schema import parse_boltz_schema
 from boltz.data.types import Input
 
-
-POLYMER_PROPERTY_KEYS = ["Tg", "FFV", "Tc", "Density", "Rg"]
-
-
 @dataclass
 class DataConfig:
     csv_path: str
     tokenizer: Boltz2Tokenizer
     featurizer: Boltz2Featurizer
-    samples_per_epoch: int
     batch_size: int
     num_workers: int
     pin_memory: bool
     random_seed: int
-    symmetries: Optional[str] = None
     max_atoms: int = 0
     max_tokens: int = 0
     max_seqs: int = 0
     pad_to_max_tokens: bool = False
     pad_to_max_atoms: bool = False
     pad_to_max_seqs: bool = False
-    crop_validation: bool = False
-    return_train_symmetries: bool = False
-    return_val_symmetries: bool = True
     atoms_per_window_queries: int = 32
     min_dist: float = 2.0
     max_dist: float = 22.0
     num_bins: int = 64
     val_batch_size: int = 1
+    polymer_property_keys: Optional[List[str]] = None
 
 
 def collate(data: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
@@ -74,8 +65,6 @@ class PolymerCSVDataset(torch.utils.data.Dataset):
         rows: List[Dict[str, Any]],
         tokenizer: Boltz2Tokenizer,
         featurizer: Boltz2Featurizer,
-        symmetries: dict,
-        samples_per_epoch: int,
         max_atoms: int,
         max_tokens: int,
         max_seqs: int,
@@ -86,16 +75,13 @@ class PolymerCSVDataset(torch.utils.data.Dataset):
         min_dist: float,
         max_dist: float,
         num_bins: int,
-        crop_validation: bool,
-        return_symmetries: bool,
         random_seed: int,
+        polymer_property_keys: Optional[List[str]] = ["Tg", "FFV", "Tc", "Density", "Rg"],
     ) -> None:
         super().__init__()
         self.rows = rows
         self.tokenizer = tokenizer
         self.featurizer = featurizer
-        self.symmetries = symmetries
-        self.samples_per_epoch = samples_per_epoch
         self.max_atoms = max_atoms
         self.max_tokens = max_tokens
         self.max_seqs = max_seqs
@@ -106,15 +92,14 @@ class PolymerCSVDataset(torch.utils.data.Dataset):
         self.min_dist = min_dist
         self.max_dist = max_dist
         self.num_bins = num_bins
-        self.crop_validation = crop_validation
-        self.return_symmetries = return_symmetries
         self.random = np.random.default_rng(random_seed)
+        self.property_keys = polymer_property_keys
 
     def __len__(self) -> int:
-        return self.samples_per_epoch
+        return len(self.rows)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        row = self.rows[self.random.integers(0, len(self.rows))]
+        row = self.rows[idx]
         smiles = row["smiles"]
 
         # Build minimal schema and parse to Target (constructs structure from SMILES via RDKit)
@@ -136,10 +121,6 @@ class PolymerCSVDataset(torch.utils.data.Dataset):
         # Tokenize
         tokenized = self.tokenizer.tokenize(input_data)
 
-        # Optionally crop
-        # Note: cropping is usually handled by a Cropper, but for SMILES-only we can skip or rely on max tokens
-        # We simply enforce max token padding/truncation via featurizer args below
-
         # Featurize
         # Minimal molecules dict (empty) and RNG for v2 featurizer
         rng = np.random.default_rng(self.random.integers(0, 1 << 31))
@@ -159,12 +140,19 @@ class PolymerCSVDataset(torch.utils.data.Dataset):
             compute_symmetries=False,
         )
 
-        # Attach properties
-        values = [row.get(k, None) for k in POLYMER_PROPERTY_KEYS]
-        tensor = torch.tensor([
-            float("nan") if (v is None or v == "" ) else float(v) for v in values
-        ], dtype=torch.float)
-        features["polymer_properties"] = tensor.unsqueeze(0)
+        # Attach properties in configured order; allow case-insensitive CSV columns
+        values: List[Optional[float]] = []
+        row_lower = {k.lower(): v for k, v in row.items()}
+        for key in self.property_keys:
+            v = row.get(key, None)
+            if v is None:
+                v = row_lower.get(key.lower(), None)
+            try:
+                values.append(float(v))
+            except (TypeError, ValueError):
+                values.append(float("nan"))
+        tensor = torch.tensor(values, dtype=torch.float)
+        features["polymer_properties"] = tensor
 
         return features
 
@@ -180,7 +168,8 @@ class PolymerCSVDataModule(pl.LightningDataModule):
         csv_path = Path(self.cfg.csv_path)
         with csv_path.open("r") as f:
             reader = pycsv.DictReader(f)
-            # Normalize keys to match expected columns
+            fieldnames = [fn.strip() for fn in (reader.fieldnames or [])]
+            lower_to_actual = {fn.lower(): fn for fn in fieldnames}
             for row in reader:
                 norm = {k.strip(): v for k, v in row.items()}
                 # Unify case for smiles
@@ -191,26 +180,18 @@ class PolymerCSVDataModule(pl.LightningDataModule):
                             break
                 if "smiles" not in norm or not norm["smiles"]:
                     continue
-                # Collect properties
-                for k in POLYMER_PROPERTY_KEYS:
+                # Ensure canonical keys for properties exist (copy if only case-mismatch)
+                for k in self.cfg.polymer_property_keys:
                     if k not in norm:
-                        # try case-insensitive
-                        for key in list(norm.keys()):
-                            if key.lower() == k.lower():
-                                norm[k] = norm[key]
-                                break
+                        src = lower_to_actual.get(k.lower())
+                        if src and src in norm:
+                            norm[k] = norm[src]
                 self.rows.append(norm)
 
-        if self.cfg.symmetries is not None and Path(self.cfg.symmetries).exists():
-            self.symmetries = get_symmetries(self.cfg.symmetries)
-        else:
-            self.symmetries = {}
         self.train_set = PolymerCSVDataset(
             rows=self.rows,
             tokenizer=self.cfg.tokenizer,
             featurizer=self.cfg.featurizer,
-            symmetries=self.symmetries,
-            samples_per_epoch=self.cfg.samples_per_epoch,
             max_atoms=self.cfg.max_atoms,
             max_tokens=self.cfg.max_tokens,
             max_seqs=self.cfg.max_seqs,
@@ -221,9 +202,8 @@ class PolymerCSVDataModule(pl.LightningDataModule):
             min_dist=self.cfg.min_dist,
             max_dist=self.cfg.max_dist,
             num_bins=self.cfg.num_bins,
-            crop_validation=self.cfg.crop_validation,
-            return_symmetries=self.cfg.return_train_symmetries,
             random_seed=self.cfg.random_seed,
+            polymer_property_keys=self.cfg.polymer_property_keys
         )
 
     def train_dataloader(self) -> DataLoader:

@@ -368,21 +368,21 @@ class Boltz2(LightningModule):
                 )
 
         # Remove grad from weights they are not trained for ddp
-        if not structure_prediction_training and not self.polymer_only_training:
+        if not structure_prediction_training:
             for name, param in self.named_parameters():
                 if (
                     name.split(".")[0] not in ["confidence_module", "affinity_module"]
                     and "out_token_feat_update" not in name
                 ):
                     param.requires_grad = False
-        # In polymer-only mode, keep polymer head (and trunk) trainable
-        if self.polymer_only_training:
+        # Polymer-only mode: freeze everything except polymer head
+        if polymer_only_training:
+            if not getattr(self, "polymer_prediction", False) or not hasattr(self, "polymer_module"):
+                raise ValueError("polymer_only_training=True requires polymer_prediction=True to initialize polymer_module.")
+            for _, param in self.named_parameters():
+                param.requires_grad = False
             for name, param in self.named_parameters():
                 if name.startswith("polymer_module"):
-                    param.requires_grad = True
-            # Optionally keep trunk/trainable to adapt features
-            for name, param in self.named_parameters():
-                if name.startswith("pairformer_module") or name.startswith("msa_module") or name.startswith("s_init") or name.startswith("z_init_"):
                     param.requires_grad = True
 
     def setup(self, stage: str) -> None:
@@ -535,7 +535,13 @@ class Boltz2(LightningModule):
                 )
                 and (not self.skip_run_structure)
             ):
-                if self.checkpoint_diffusion_conditioning and self.training:
+                # Use checkpoint only when grads are required, pass use_reentrant explicitly
+                use_ckpt = (
+                    self.checkpoint_diffusion_conditioning
+                    and self.training
+                    and (s.requires_grad or z.requires_grad)
+                )
+                if use_ckpt:
                     # TODO decide whether this should be with bf16 or not
                     q, c, to_keys, atom_enc_bias, atom_dec_bias, token_trans_bias = (
                         torch.utils.checkpoint.checkpoint(
@@ -544,6 +550,7 @@ class Boltz2(LightningModule):
                             z,
                             relative_position_encoding,
                             feats,
+                            use_reentrant=False,
                         )
                     )
                 else:
@@ -783,7 +790,6 @@ class Boltz2(LightningModule):
             s_inputs_poly = self.input_embedder(feats, affinity=False)
 
             with torch.autocast("cuda", enabled=False):
-                # Enable grads for polymer head even when structure training is disabled
                 with torch.set_grad_enabled(self.training):
                     dict_out_poly = self.polymer_module(
                         s_inputs=(s_inputs_poly if self.polymer_only_training else s_inputs_poly.detach()),
@@ -1145,6 +1151,22 @@ class Boltz2(LightningModule):
                     return
                 raise e
 
+            # Optional polymer properties validation loss
+            try:
+                if self.polymer_prediction and ("polymer_properties" in batch):
+                    props = batch["polymer_properties"]
+                    pred = out.get("polymer_properties_pred", None)
+                    if (pred is not None) and (props is not None):
+                        mask = ~torch.isnan(props)
+                        if mask.any():
+                            diff = pred - torch.nan_to_num(props, nan=0.0)
+                            diff = diff * mask.float()
+                            denom = mask.float().sum().clamp(min=1.0)
+                            polymer_prop_loss = (diff.pow(2).sum() / denom)
+                            self.log("val/polymer_properties_loss", polymer_prop_loss, prog_bar=True)
+            except Exception:
+                pass
+
     def on_validation_epoch_end(self):
         """Aggregate all metrics for each validator."""
         if getattr(self, "validate_structure", False):
@@ -1340,7 +1362,7 @@ class Boltz2(LightningModule):
                 self.training_args.recycling_steps
             )
             checkpoint["hyper_parameters"]["training_args"]["weight_decay"] = (
-                self.training_args.weight_decay
+                self.training_args.get("weight_decay", 0.0)
             )
 
     def configure_callbacks(self) -> list[Callback]:

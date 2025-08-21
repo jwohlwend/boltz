@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from typing import Optional, List
 
 import boltz.model.layers.initialize as init
 from boltz.model.layers.pairformer import PairformerNoSeqModule
@@ -234,6 +235,7 @@ class PolymerPropertyHeadsTransformer(nn.Module):
         activation_checkpointing,
         use_cross_transformer,
         groups={},
+        property_keys: Optional[List[str]] = None,
     ):
         super().__init__()
         self.out_mlp = nn.Sequential(
@@ -247,7 +249,7 @@ class PolymerPropertyHeadsTransformer(nn.Module):
         self.to_polymer_properties = nn.Sequential(
             nn.Linear(input_token_s, input_token_s),
             nn.ReLU(),
-            nn.Linear(input_token_s, 5),
+            nn.Linear(input_token_s, len(property_keys)),
         )
 
     def forward(self, z, feats, multiplicity=1):
@@ -277,6 +279,7 @@ class PolymerPropertiesModule(nn.Module):
         max_dist=22,
         use_cross_transformer: bool = False,
         groups: dict = {},
+        polymer_property_keys: Optional[List[str]] = None,
     ):
         super().__init__()
         boundaries = torch.linspace(2, max_dist, num_dist_bins - 1)
@@ -305,6 +308,7 @@ class PolymerPropertiesModule(nn.Module):
             transformer_args["activation_checkpointing"],
             False,
             groups=groups,
+            property_keys=polymer_property_keys,
         )
 
     def forward(

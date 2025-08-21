@@ -18,13 +18,14 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.utilities import rank_zero_only
 
-from boltz.data.module.polymer_trainingv2 import (
-    PolymerTrainingDataModule,
-    DataConfig as PolymerDataConfig,
+from boltz.data.module.training_polymer import (
+    PolymerCSVDataModule,
+    DataConfig as PolymerCSVDataConfig
 )
-from boltz.data.module.polymer_csv import PolymerCSVDataModule, DataConfig as PolymerCSVDataConfig
-from boltz.data.tokenize.boltz2 import Boltz2Tokenizer
-from boltz.data.feature.featurizerv2 import Boltz2Featurizer
+from boltz.main import download_boltz2, get_cache_path
+"""
+Tokenizer and featurizer are provided via YAML (Hydra _target_), no direct imports here.
+"""
 
 
 @dataclass
@@ -81,6 +82,7 @@ class TrainConfig:
     debug: bool = False
     strict_loading: bool = True
     load_confidence_from_trunk: Optional[bool] = False
+    default_pretrained: Optional[bool] = False
 
 
 def train(raw_config: str, args: list[str]) -> None:  # noqa: C901, PLR0912, PLR0915
@@ -101,9 +103,33 @@ def train(raw_config: str, args: list[str]) -> None:  # noqa: C901, PLR0912, PLR
     args = omegaconf.OmegaConf.from_dotlist(args)
     raw_config = omegaconf.OmegaConf.merge(raw_config, args)
 
+    # Mirror user-provided polymer_property_keys into model.affinity_model_args if needed
+    try:
+        if raw_config.get("model", {}).get("polymer_only_training", False) and (
+            "csv_path" in raw_config.get("data", {})
+        ):
+            if raw_config.get("data", {}).get("polymer_property_keys", None):
+                model_args = raw_config.get("model", {})
+                affinity_args = model_args.get("affinity_model_args", {}) or {}
+                if "polymer_property_keys" not in affinity_args:
+                    affinity_args["polymer_property_keys"] = (
+                        raw_config.data.polymer_property_keys
+                    )
+                    raw_config.model.affinity_model_args = affinity_args
+    except Exception:
+        pass
+
     # Instantiate the task
     cfg = hydra.utils.instantiate(raw_config)
     cfg = TrainConfig(**cfg)
+
+    # If requested, use the default downloaded Boltz2 checkpoint when no pretrained is provided
+    if cfg.default_pretrained and not cfg.pretrained:
+        cache_dir = Path(get_cache_path()).expanduser()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure the default checkpoint is available
+        download_boltz2(cache_dir)
+        cfg.pretrained = str(cache_dir / "boltz2_conf.ckpt")
 
     # Set matmul precision
     if cfg.matmul_precision is not None:
@@ -130,52 +156,19 @@ def train(raw_config: str, args: list[str]) -> None:  # noqa: C901, PLR0912, PLR
 
     # Create objects
     model_module = cfg.model
-    polymer_only = getattr(model_module, "polymer_only_training", False)
-    if polymer_only:
-        # Allow CSV ingestion if user provides csv_path in data
-        if "csv_path" in cfg.data:
-            ds = cfg.data
-            csv_cfg = {
-                "csv_path": ds["csv_path"],
-                # For CSV/SMILES + StructureV2, use v2 tokenizer/featurizer regardless of YAML
-                "tokenizer": Boltz2Tokenizer(),
-                "featurizer": Boltz2Featurizer(),
-                "samples_per_epoch": ds["samples_per_epoch"],
-                "batch_size": ds["batch_size"],
-                "num_workers": ds["num_workers"],
-                "pin_memory": ds["pin_memory"],
-                "random_seed": ds["random_seed"],
-                "symmetries": ds.get("symmetries", None),
-                "max_atoms": ds["max_atoms"],
-                "max_tokens": ds["max_tokens"],
-                "max_seqs": ds["max_seqs"],
-                "pad_to_max_tokens": ds.get("pad_to_max_tokens", False),
-                "pad_to_max_atoms": ds.get("pad_to_max_atoms", False),
-                "pad_to_max_seqs": ds.get("pad_to_max_seqs", False),
-                "crop_validation": ds.get("crop_validation", False),
-                "return_train_symmetries": ds.get("return_train_symmetries", False),
-                "return_val_symmetries": ds.get("return_val_symmetries", True),
-                "atoms_per_window_queries": ds.get("atoms_per_window_queries", 32),
-                "min_dist": ds.get("min_dist", 2.0),
-                "max_dist": ds.get("max_dist", 22.0),
-                "num_bins": ds.get("num_bins", 64),
-                "val_batch_size": ds.get("val_batch_size", 1),
-            }
-            data_config = PolymerCSVDataConfig(**csv_cfg)
-            data_module = PolymerCSVDataModule(data_config)
-        else:
-            data_config = PolymerDataConfig(**cfg.data)
-            data_module = PolymerTrainingDataModule(data_config)
-    else:
-        data_config = FullDataConfig(**cfg.data)
-        data_module = BoltzTrainingDataModule(data_config)
+    # Always use CSV DataConfig/DataModule
+    if "csv_path" not in cfg.data or not cfg.data["csv_path"]:
+        raise ValueError("data.csv_path must be provided for CSV training")
+    data_config = PolymerCSVDataConfig(**cfg.data)
+    data_module = PolymerCSVDataModule(data_config)
 
     if cfg.pretrained and not cfg.resume:
-        # Load the pretrained weights into the confidence module
-        if cfg.load_confidence_from_trunk:
-            checkpoint = torch.load(cfg.pretrained, map_location="cpu")
+        # Load and optionally modify the checkpoint before loading
+        checkpoint = torch.load(cfg.pretrained, map_location="cpu")
+        modified = False
 
-            # Modify parameter names in the state_dict
+        # Optionally broadcast trunk weights into confidence module
+        if cfg.load_confidence_from_trunk:
             new_state_dict = {}
             for key, value in checkpoint["state_dict"].items():
                 if not key.startswith("structure_module") and not key.startswith(
@@ -184,29 +177,47 @@ def train(raw_config: str, args: list[str]) -> None:  # noqa: C901, PLR0912, PLR
                     new_key = "confidence_module." + key
                     new_state_dict[new_key] = value
             new_state_dict.update(checkpoint["state_dict"])
-
-            # Update the checkpoint with the new state_dict
             checkpoint["state_dict"] = new_state_dict
+            modified = True
 
-            # Save the modified checkpoint
-            random_string = "".join(
-                random.choices(string.ascii_lowercase + string.digits, k=10)
-            )
-            file_path = os.path.dirname(cfg.pretrained) + "/" + random_string + ".ckpt"
-            print(
-                f"Saving modified checkpoint to {file_path} created by broadcasting trunk of {cfg.pretrained} to confidence module."
-            )
-            torch.save(checkpoint, file_path)
-        else:
-            file_path = cfg.pretrained
+        # If polymer-only training, remap affinity head weights into polymer head if present
+        try:
+            is_polymer_only = getattr(model_module, "polymer_only_training", False)
+            if is_polymer_only:
+                sd = checkpoint["state_dict"]
+                has_aff = any(k.startswith("affinity_module.") for k in sd)
+                # If the pretrained has an affinity_module, map it to polymer_module
+                if has_aff:
+                    remapped = {}
+                    for k, v in sd.items():
+                        if k.startswith("affinity_module."):
+                            new_key = k.replace("affinity_module.", "polymer_module.", 1)
+                            remapped[new_key] = v
+                        else:
+                            remapped[k] = v
+                    checkpoint["state_dict"] = remapped
+                    modified = True
+        except Exception:
+            pass
 
-        print(f"Loading model from {file_path}")
-        model_module = type(model_module).load_from_checkpoint(
-            file_path, map_location="cpu", strict=False, **(model_module.hparams)
+        # Build a filtered state_dict that matches current model shapes
+        src_sd = checkpoint.get("state_dict", {})
+        tgt_sd = model_module.state_dict()
+        filtered = {}
+        skipped = []
+        for k, v in src_sd.items():
+            if k in tgt_sd and getattr(v, "shape", None) == getattr(tgt_sd[k], "shape", None):
+                filtered[k] = v
+            else:
+                skipped.append(k)
+        print(
+            f"Loading pretrained weights: matching={len(filtered)} skipped={len(skipped)}"
         )
-
-        if cfg.load_confidence_from_trunk:
-            os.remove(file_path)
+        missing, unexpected = model_module.load_state_dict(filtered, strict=False)
+        if missing:
+            print(f"Missing keys (not loaded): {len(missing)}")
+        if unexpected:
+            print(f"Unexpected keys (ignored): {len(unexpected)}")
 
     # Create checkpoint callback
     callbacks = []
