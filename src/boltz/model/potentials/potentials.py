@@ -174,8 +174,7 @@ class Potential(ABC):
                 index.flatten(start_dim=0, end_dim=1)
                 .unsqueeze(-1)
                 .expand((*coords.shape[:-2], -1, 3)),
-                dSoftmax.tile(grad_value.shape[-3]).unsqueeze(-1)
-                * grad_value.flatten(start_dim=-3, end_dim=-2),
+                prod,
                 "sum",
             )
         else:
