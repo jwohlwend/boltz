@@ -2309,7 +2309,7 @@ class Boltz2Featurizer:
 
         # Compute template features
         num_tokens = data.tokens.shape[0] if max_tokens is None else max_tokens
-        if data.templates:
+        if data.templates and not compute_affinity:
             template_features = process_template_features(
                 data=data,
                 max_tokens=num_tokens,

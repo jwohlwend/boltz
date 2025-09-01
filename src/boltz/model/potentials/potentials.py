@@ -243,6 +243,8 @@ class FlatBottomPotential(Potential):
             lower_bounds = torch.full_like(value, float("-inf"))
         if upper_bounds is None:
             upper_bounds = torch.full_like(value, float("inf"))
+        lower_bounds = lower_bounds.expand_as(value).clone()
+        upper_bounds = upper_bounds.expand_as(value).clone()
 
         if negation_mask is not None:
             unbounded_below_mask = torch.isneginf(lower_bounds)
