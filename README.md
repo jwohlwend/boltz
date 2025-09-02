@@ -37,6 +37,26 @@ cd boltz; pip install -e .[cuda]
 
 If you are installing on CPU-only or non-CUDA GPus hardware, remove `[cuda]` from the above commands. Note that the CPU version is significantly slower than the GPU version.
 
+## For Mac users
+
+Create a new conda environment for boltz with python 3.12, numba, lvmlite and numpy:
+
+```
+conda create --name boltz-2 python=3.12 llvmlite==0.44.0 numba==0.61.0 numpy==1.26.3
+conda activate boltz-2
+```
+
+Clone this repository
+```
+git clone https://github.com/fnachon/boltz.git
+cd boltz
+pip install -e .
+```
+Temporary workaround for using multiple libomp libraries:
+```
+export KMP_DUPLICATE_LIB_OK=TRUE
+```
+
 ## Inference
 
 You can run inference using Boltz with:

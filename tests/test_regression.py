@@ -24,8 +24,8 @@ test_data_dir = os.path.join(tests_dir, "data")
 class RegressionTester(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        cache = os.path.expanduser("~/.boltz")
+        device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
+        cache = os.path.expanduser('~/.boltz')
         checkpoint_url = MODEL_URL
         model_name = checkpoint_url.split("/")[-1]
         checkpoint = os.path.join(cache, model_name)

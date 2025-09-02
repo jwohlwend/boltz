@@ -116,7 +116,7 @@ class AttentionPairBias(nn.Module):
 
         g = self.proj_g(s).sigmoid()
 
-        with torch.autocast("cuda", enabled=False):
+        with torch.autocast(device_type=s.device.type, enabled=False):
             # Compute attention weights
             attn = torch.einsum("bihd,bjhd->bhij", q.float(), k.float())
             attn = attn / (self.head_dim**0.5) + z.float()
