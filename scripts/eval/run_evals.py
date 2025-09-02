@@ -67,7 +67,7 @@ def evaluate_structure(
                 output_path=str(out_path),
                 mount=mount,
             ),
-            shell=True,  # noqa: S602
+            shell=False,  # noqa: S602
             check=False,
             executable=executable,
             capture_output=True,
@@ -85,7 +85,7 @@ def evaluate_structure(
                 output_path=str(out_path),
                 mount=mount,
             ),
-            shell=True,  # noqa: S602
+            shell=False,  # noqa: S602
             check=False,
             executable=executable,
             capture_output=True,
