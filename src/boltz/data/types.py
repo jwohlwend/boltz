@@ -30,7 +30,7 @@ class NumpySerializable:
             The loaded object.
 
         """
-        return cls(**np.load(path, allow_pickle=True))
+        return cls(**np.load(path, allow_pickle=False))
 
     def dump(self, path: Path) -> None:
         """Dump the object to an NPZ file.
@@ -192,7 +192,7 @@ class Structure(NumpySerializable):
             The loaded structure.
 
         """
-        structure = np.load(path)
+        structure = np.load(path, allow_pickle=False)
         return cls(
             atoms=structure["atoms"],
             bonds=structure["bonds"],
