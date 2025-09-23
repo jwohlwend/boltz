@@ -76,9 +76,9 @@ def parse_fasta(  # noqa: C901, PLR0912
         header = seq_record.id.split("|")
         chain_id, entity_type = header[:2]
         if len(header) == 3 and header[2] != "":
-            assert (
-                entity_type.lower() == "protein"
-            ), "MSA_ID is only allowed for proteins"
+            assert entity_type.lower() == "protein", (
+                "MSA_ID is only allowed for proteins"
+            )
             msa_id = header[2]
         else:
             msa_id = None

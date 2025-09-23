@@ -29,6 +29,6 @@ def get_dropout_mask(
     """
     dropout = dropout * training
     v = z[:, 0:1, :, 0:1] if columnwise else z[:, :, 0:1, 0:1]
-    d = torch.rand_like(v) > dropout
+    d = torch.rand(v.shape, dtype=torch.float32, device=v.device) >= dropout
     d = d * 1.0 / (1.0 - dropout)
     return d

@@ -489,7 +489,11 @@ class Boltz2(LightningModule):
                         )
 
             pdistogram = self.distogram_module(z)
-            dict_out = {"pdistogram": pdistogram}
+            dict_out = {
+                "pdistogram": pdistogram,
+                "s": s,
+                "z": z,
+            }
 
             if (
                 self.run_trunk_and_structure
@@ -1067,6 +1071,8 @@ class Boltz2(LightningModule):
 
             pred_dict["masks"] = batch["atom_pad_mask"]
             pred_dict["token_masks"] = batch["token_pad_mask"]
+            pred_dict["s"] = out["s"]
+            pred_dict["z"] = out["z"]
 
             if "keys_dict_out" in self.predict_args:
                 for key in self.predict_args["keys_dict_out"]:

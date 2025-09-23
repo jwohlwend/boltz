@@ -19,8 +19,7 @@ class OuterProductMeanTest(unittest.TestCase):
 
         # Initialize layer
         for name, param in self.layer.named_parameters():
-            nn.init.normal_(param, mean=1., std=1.)
-
+            nn.init.normal_(param, mean=1.0, std=1.0)
 
     def test_chunk(self):
         chunk_sizes = [16, 33, 64, 100]

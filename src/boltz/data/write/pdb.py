@@ -85,6 +85,7 @@ def to_pdb(
                     atom_name = atom["name"]
                     atom_name = [chr(c + 32) for c in atom_name if c != 0]
                     atom_name = "".join(atom_name)
+                    name = atom_name
                     element = periodic_table.GetElementSymbol(atom["element"].item())
 
                 name = name if len(name) == 4 else f" {name}"  # noqa: PLR2004
@@ -151,9 +152,9 @@ def to_pdb(
             atom_index += 1
 
     # Dump CONECT records.
-    all_bonds = structure.bonds
+    all_bonds = list(structure.bonds)
     if hasattr(structure, "connections"):
-        all_bonds = all_bonds + structure.connections
+        all_bonds.extend(list(structure.connections))
 
     for bond in all_bonds:
         atom1 = structure.atoms[bond["atom_1"]]

@@ -243,6 +243,7 @@ class AtomTransformer(Module):
         q = q.view((B * NW, W, -1))
         c = c.view((B * NW, W, -1))
         mask = mask.view(B * NW, W)
+        bias = bias.repeat_interleave(multiplicity, 0)
         bias = bias.view((bias.shape[0] * NW, W, H, -1))
 
         to_keys_new = lambda x: to_keys(x.view(B, NW * W, -1)).view(B * NW, H, -1)
@@ -253,7 +254,7 @@ class AtomTransformer(Module):
             s=c,
             bias=bias,
             mask=mask.float(),
-            multiplicity=multiplicity,
+            multiplicity=1, # bias term already expanded with multiplicity
             to_keys=to_keys_new,
         )
 

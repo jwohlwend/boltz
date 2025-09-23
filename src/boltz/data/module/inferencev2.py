@@ -261,9 +261,12 @@ class PredictionDataset(torch.utils.data.Dataset):
         # Inference specific options
         options = record.inference_options
         if options is None:
-            pocket_constraints = None, None
+            pocket_constraints, contact_constraints = None, None
         else:
-            pocket_constraints = options.pocket_constraints
+            pocket_constraints, contact_constraints = (
+                options.pocket_constraints,
+                options.contact_constraints,
+            )
 
         # Get random seed
         seed = 42
@@ -283,6 +286,7 @@ class PredictionDataset(torch.utils.data.Dataset):
                 single_sequence_prop=0.0,
                 compute_frames=True,
                 inference_pocket_constraints=pocket_constraints,
+                inference_contact_constraints=contact_constraints,
                 compute_constraint_features=True,
                 override_method=self.override_method,
                 compute_affinity=self.affinity,

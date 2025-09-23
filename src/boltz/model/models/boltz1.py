@@ -340,7 +340,11 @@ class Boltz1(LightningModule):
                     )
 
             pdistogram = self.distogram_module(z)
-            dict_out = {"pdistogram": pdistogram}
+            dict_out = {
+                "pdistogram": pdistogram,
+                "s": s,
+                "z": z,
+            }
 
         # Compute structure module
         if self.training and self.structure_prediction_training:
@@ -1159,6 +1163,8 @@ class Boltz1(LightningModule):
             pred_dict = {"exception": False}
             pred_dict["masks"] = batch["atom_pad_mask"]
             pred_dict["coords"] = out["sample_atom_coords"]
+            pred_dict["s"] = out["s"]
+            pred_dict["z"] = out["z"]
             if self.predict_args.get("write_confidence_summary", True):
                 pred_dict["confidence_score"] = (
                     4 * out["complex_plddt"]

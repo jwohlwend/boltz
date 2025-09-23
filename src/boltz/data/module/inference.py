@@ -184,7 +184,10 @@ class PredictionDataset(torch.utils.data.Dataset):
         if options is None or len(options.pocket_constraints) == 0:
             binder, pocket = None, None
         else:
-            binder, pocket = options.pocket_constraints[0][0], options.pocket_constraints[0][1]
+            binder, pocket = (
+                options.pocket_constraints[0][0],
+                options.pocket_constraints[0][1],
+            )
 
         # Compute features
         try:
