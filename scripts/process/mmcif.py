@@ -72,7 +72,7 @@ class ParsedChain:
     entity: str
     type: str
     residues: list[ParsedResidue]
-    sequence: list[str]
+    sequence: Optional[list[str]] = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,7 +93,7 @@ class ParsedStructure:
 
     data: Structure
     info: StructureInfo
-    covalents: list[int]
+    covalents: Optional[list[int]] = None
 
 
 ####################################################################################################
