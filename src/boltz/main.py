@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Literal, Optional
 
 import click
+import requests
 import torch
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.strategies import DDPStrategy
