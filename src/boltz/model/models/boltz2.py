@@ -1080,7 +1080,8 @@ class Boltz2(LightningModule):
             pred_dict["coords"] = out["sample_atom_coords"]
             if self.confidence_prediction:
                 # pred_dict["confidence"] = out.get("ablation_confidence", None)
-                pred_dict["pde"] = out["pde"]
+                if self.predict_args.get("write_full_pde", True):
+                    pred_dict["pde"] = out["pde"]
                 pred_dict["plddt"] = out["plddt"]
                 pred_dict["confidence_score"] = (
                     4 * out["complex_plddt"]
@@ -1098,7 +1099,8 @@ class Boltz2(LightningModule):
                 pred_dict["complex_pde"] = out["complex_pde"]
                 pred_dict["complex_ipde"] = out["complex_ipde"]
                 if self.alpha_pae > 0:
-                    pred_dict["pae"] = out["pae"]
+                    if self.predict_args.get("write_full_pae", True):
+                        pred_dict["pae"] = out["pae"]
                     pred_dict["ptm"] = out["ptm"]
                     pred_dict["iptm"] = out["iptm"]
                     pred_dict["ligand_iptm"] = out["ligand_iptm"]
