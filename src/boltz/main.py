@@ -1214,12 +1214,15 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     try:
         if "," in devices:
             devices = [int(x) for x in devices.split(",") if len(x) >= 1]
+            if not all([0 <= x < torch.cuda.gpu_count() for x in devices]):
+                msg = "Device ids must be non-negative integers and less than GPU count."
+                raise ValueError(msg)
         else:
             devices = int(devices)
     except ValueError as e:
         msg = (
             "Unable to parse device count/list. Format should be an integer "
-            "or comma-separated list of integers."
+            f"or comma-separated list of integers. Last error: {e}"
         )
         raise ValueError(msg) from e
 
