@@ -446,16 +446,101 @@ class AtomDiffusion(Module):
         sigmas = F.pad(sigmas, (0, 1), value=0.0)  # last step is sigma value of 0.
         return sigmas
 
+    
     def sample(
-        self,
-        atom_mask,
-        num_sampling_steps=None,
-        multiplicity=1,
-        max_parallel_samples=None,
-        train_accumulate_token_repr=False,
-        steering_args=None,
-        **network_condition_kwargs,
-    ):
+    self,
+    atom_mask: torch.Tensor,
+    num_sampling_steps: Optional[int] = None,
+    multiplicity: int = 1,
+    max_parallel_samples: Optional[int] = None,
+    train_accumulate_token_repr: bool = False,
+    steering_args: Optional[SteeringArgs] = None,
+    **network_condition_kwargs: NetworkConditionKwargs
+) -> Dict[str, torch.Tensor]:
+
+
+    """
+    Generate atomic structures via reverse diffusion, optionally guided by external potentials (“steering”).
+
+    Parameters
+    ----------
+    atom_mask : torch.Tensor
+        Boolean or integer mask of shape (B, N) indicating which atoms are active for each of B input samples.
+        Atoms with mask value 0 are padded or omitted.
+    num_sampling_steps : Optional[int]
+        Number of reverse-SDE timesteps to use during sampling. If None, uses the default configured in this module.
+    multiplicity : int
+        Number of independent samples to produce per input sample. The input batch of size B will be expanded to B × multiplicity.
+    max_parallel_samples : Optional[int]
+        Maximum number of samples to process in parallel within each chunk of the loop. Used to control memory usage.
+    train_accumulate_token_repr : bool
+        If True, the sampler retains and returns token-level representations (token_repr) accumulated during sampling — typically used during training rather than inference.
+    steering_args : Optional[SteeringArgs]
+        Configuration for steering external potentials and resampling strategies. If provided and steering_args.fk_steering or steering_args.physical_guidance_update is True,
+        then potentials are computed (via get_potentials) and used to guide sampling toward specific structures, map-fits, or constraints.
+    **network_condition_kwargs : NetworkConditionKwargs
+        Keyword arguments describing the conditioning inputs for the diffusion network, including:
+        - feats: Dict[str, torch.Tensor] — feature tensors for tokens/atoms
+        - s_inputs: torch.Tensor — initial single-token representations
+        - s_trunk: torch.Tensor — trunk token representations
+        - z_trunk: torch.Tensor — pairwise token representations
+        - relative_position_encoding: torch.Tensor — relative positional encodings
+        - (other optional fields: model_cache, multiplicity, etc.)
+
+    Returns
+    -------
+    Dict[str, torch.Tensor]
+        A dictionary with keys:
+        - "sample_atom_coords": torch.Tensor of shape (B × multiplicity, N, 3) — final atomic coordinates for each sample.
+        - "diff_token_repr": torch.Tensor of token representations if `train_accumulate_token_repr=True`, else None.
+
+    Notes
+    -----
+    1. The sampling proceeds via a schedule of decreasing noise levels (σ_t) from `sigma_max` down to `sigma_min`.
+    2. At each timestep:
+        a. The current coordinates are perturbed by noise and optionally augmented by a random rigid transform.
+        b. The model predicts a denoised coordinate set (`denoised_coords`).
+        c. If `steering_args` is provided:
+           - `get_potentials(steering_args, boltz2=False)` builds a list of Potential objects.
+           - When fk_steering is enabled, energies (via potential.compute) and log-weights control resampling.
+           - When physical_guidance_update is enabled, gradients (via potential.compute_gradient) are used to update `denoised_coords`.
+        d. Coordinates are updated via an Euler‐style (or Heun‐style) reverse SDE step:
+           \[
+             \text{denoised\_over\_sigma} = \frac{x_t - \hat{x}_0}{\hat t}, \qquad
+             x_{t-\Delta t} = x_t + \text{step_scale}\cdot(\sigma_{t-\Delta t} - \hat t)\cdot (\text{denoised\_over\_sigma})
+           \]
+    3. The batch dimension expands by `multiplicity`, and optionally by `num_particles` if resampling is used.
+    4. Steering modifies the sampling behavior but retains the underlying generative framework: the model’s score remains the backbone, and steering potentials act as additional forces or resampling weights.
+    5. This method is intended for inference/generation; training uses the `forward(...)` method and `compute_loss(...)`.
+
+    Example
+    -------
+    ```python
+    steering_cfg = SteeringArgs(
+        fk_steering=True,
+        physical_guidance_update=False,
+        num_particles=8,
+        fk_resampling_interval=2,
+        num_gd_steps=0,
+        fk_lambda=0.8
+    )
+    output = diffusion_module.sample(
+        atom_mask=mask,
+        num_sampling_steps=100,
+        multiplicity=4,
+        steering_args=steering_cfg,
+        feats=feats,
+        s_inputs=s_inputs,
+        s_trunk=s_trunk,
+        z_trunk=z_trunk,
+        relative_position_encoding=rel_pos
+    )
+    coords = output["sample_atom_coords"]
+    ```
+
+    """
+    
+    
         if steering_args is not None and (
             steering_args["fk_steering"] or steering_args["physical_guidance_update"]
         ):
