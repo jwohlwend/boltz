@@ -1214,7 +1214,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     try:
         if "," in devices:
             devices = [int(x) for x in devices.split(",") if len(x) >= 1]
-            if not all([0 <= x < torch.cuda.gpu_count() for x in devices]):
+            if not all([0 <= x < torch.cuda.device_count() for x in devices]):
                 msg = "Device ids must be non-negative integers and less than GPU count."
                 raise ValueError(msg)
         else:
