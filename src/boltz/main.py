@@ -840,7 +840,9 @@ def cli() -> None:
 @click.option(
     "--devices",
     type=str,
-    help="The number of devices to use for prediction. Default is 1.",
+    help=(
+        "Either the number of devices to use for prediction, or a comma-separated "
+        "list of which devices to use. Default is 1."),
     default="1",
 )
 @click.option(
