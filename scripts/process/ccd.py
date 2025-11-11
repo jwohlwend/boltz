@@ -1,6 +1,7 @@
 """Compute conformers and symmetries for all the CCD molecules."""
 
 import argparse
+import copy
 import multiprocessing
 import pickle
 import sys
@@ -13,7 +14,7 @@ from p_tqdm import p_uimap
 from pdbeccdutils.core import ccd_reader
 from pdbeccdutils.core.component import ConformerType
 from rdkit import rdBase
-from rdkit.Chem import AllChem
+from rdkit import Chem
 from rdkit.Chem.rdchem import Conformer, Mol
 from tqdm import tqdm
 
@@ -124,45 +125,54 @@ def get_conformer(mol: Mol, c_type: ConformerType) -> Conformer:
     raise ValueError(msg)
 
 
-def compute_symmetries(mol: Mol) -> list[list[int]]:
+def compute_symmetries(mol: Mol, return_mol: bool = False) -> list[list[int]] | tuple[list[list[int]], Mol | None]:
     """Compute the symmetries of a molecule.
 
     Parameters
     ----------
     mol : Mol
         The molecule to process
+    return_mol : bool, optional
+        Whether to return the molecule with symmetries set as a prop, by default False
 
     Returns
     -------
     list[list[int]]
         The symmetries as a list of index permutations
-
+    Mol | None
+        The modified molecule, if return_mol is True
     """
-    mol = AllChem.RemoveHs(mol)
-    idx_map = {}
-    atom_idx = 0
-    for i, atom in enumerate(mol.GetAtoms()):
-        # Skip if leaving atoms
-        if int(atom.GetProp("leaving_atom")):
-            continue
-        idx_map[i] = atom_idx
-        atom_idx += 1
-
-    # Calculate self permutations
     permutations = []
-    raw_permutations = mol.GetSubstructMatches(mol, uniquify=False)
-    for raw_permutation in raw_permutations:
-        # Filter out permutations with leaving atoms
-        try:
-            if {raw_permutation[idx] for idx in idx_map} == set(idx_map.keys()):
-                permutation = [
-                    idx_map[idx] for idx in raw_permutation if idx in idx_map
-                ]
-                permutations.append(permutation)
-        except Exception:  # noqa: S110, PERF203, BLE001
-            pass
-    serialized_permutations = pickle.dumps(permutations)
-    mol.SetProp("symmetries", serialized_permutations.hex())
+    try:
+        mol = Chem.RemoveHs(mol)
+        idx_map = {}
+        atom_idx = 0
+        for i, atom in enumerate(mol.GetAtoms()):
+            # Skip if leaving atoms
+            if int(atom.GetProp("leaving_atom")):
+                continue
+            idx_map[i] = atom_idx
+            atom_idx += 1
+
+        # Calculate self permutations
+        raw_permutations = mol.GetSubstructMatches(mol, uniquify=False)
+        for raw_permutation in raw_permutations:
+            # Filter out permutations with leaving atoms
+            try:
+                if {raw_permutation[idx] for idx in idx_map} == set(idx_map.keys()):
+                    permutation = [
+                        idx_map[idx] for idx in raw_permutation if idx in idx_map
+                    ]
+                    permutations.append(permutation)
+            except Exception:  # noqa: S110, PERF203, BLE001
+                pass
+        serialized_permutations = pickle.dumps(permutations)
+        mol.SetProp("symmetries", serialized_permutations.hex())
+    except Exception:
+        mol = None
+
+    if return_mol:
+        return permutations, mol
     return permutations
 
 
@@ -281,6 +291,18 @@ def main(args: argparse.Namespace) -> None:
     with path.open("wb") as f:
         pickle.dump(molecules, f)
 
+    # Optionally compute and dump symmetries
+    if not args.with_symmetries:
+        return
+    print("Computing symmetries")  # noqa: T201
+    symmetries = copy.deepcopy(molecules)
+    for name in tqdm(symmetries):
+        symmetries[name] = compute_symmetries(symmetries[name], return_mol=True)[1]
+    # Dump the components
+    path = outdir / "symmetry.pkl"
+    with path.open("wb") as f:
+        pickle.dump(symmetries, f)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -290,6 +312,11 @@ if __name__ == "__main__":
         "--num_processes",
         type=int,
         default=multiprocessing.cpu_count(),
+    )
+    parser.add_argument(
+        "--with_symmetries",
+        action="store_true",
+        help="Whether to compute symmetries to additionally save the symmetry.pkl file.",
     )
     args = parser.parse_args()
     main(args)
