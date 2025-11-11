@@ -146,10 +146,21 @@ Unless you wish to do it again yourself, you can skip to the next step! If you d
 
 ```bash
 wget https://files.wwpdb.org/pub/pdb/data/monomers/components.cif
-python ccd.py --components components.cif --outdir ./ccd
+python ccd.py --components components.cif --outdir ./ccd --with_symmetries
 ```
 
 > Note: runs in parallel by default with as many threads as cpu cores on your machine, can be changed with `--num_processes`
+
+Later steps will use redis for memory-efficient parallel access to the pickled CCD dictionary. 
+To create a redis database from the pickled CCD file, run`:`
+```bash
+# in a separate terminal
+./redis-server --save "" --appendonly no --port 7777 --dbfilename ccd.rdb
+```
+And then to update the `ccd.rdb` file with the pickled data:
+```bash
+python3 ccd_to_redis.py --ccd-in ccd/symmetry.pkl
+```
 
 #### Step 4: Create sequence clusters
 
