@@ -64,7 +64,7 @@ if __name__ == "__main__":
       --dbfilename mydump.rdb
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ccd-in", type=str)
+    parser.add_argument("--ccd_in", type=str)
     args = parser.parse_args()
     load_pickled_dict_into_redis(
         path_in=args.ccd_in,

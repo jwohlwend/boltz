@@ -159,7 +159,7 @@ To create a redis database from the pickled CCD file, run`:`
 ```
 And then to update the `ccd.rdb` file with the pickled data:
 ```bash
-python3 ccd_to_redis.py --ccd-in ccd/symmetry.pkl
+python3 ccd_to_redis.py --ccd_in ccd/symmetry.pkl
 ```
 
 #### Step 4: Create sequence clusters
