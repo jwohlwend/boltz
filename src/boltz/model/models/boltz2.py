@@ -721,6 +721,233 @@ class Boltz2(LightningModule):
 
         return dict_out
 
+    def get_trunk_latents(
+        self,
+        feats: dict[str, Tensor],
+        recycling_steps: int = 0,
+    ) -> dict[str, Tensor]:
+        """
+        Run the trunk modules and return intermediate latents before diffusion.
+
+        This method is used for neural style transfer via diffusion latent steering.
+        It runs the input embedder, MSA, and pairformer modules to produce the
+        single (s) and pair (z) representations, along with diffusion conditioning.
+
+        Parameters
+        ----------
+        feats : dict[str, Tensor]
+            Input features dictionary.
+        recycling_steps : int
+            Number of recycling iterations through the trunk.
+
+        Returns
+        -------
+        dict[str, Tensor]
+            Dictionary containing:
+            - "s": Single representation [batch, num_tokens, token_s]
+            - "z": Pair representation [batch, num_tokens, num_tokens, token_z]
+            - "s_inputs": Initial embedded features
+            - "relative_position_encoding": Relative position encoding
+            - "diffusion_conditioning": Dict with conditioning for diffusion module
+            - "feats": Input features (for later use)
+        """
+        with torch.no_grad():
+            s_inputs = self.input_embedder(feats)
+
+            # Initialize the sequence embeddings
+            s_init = self.s_init(s_inputs)
+
+            # Initialize pairwise embeddings
+            z_init = (
+                self.z_init_1(s_inputs)[:, :, None]
+                + self.z_init_2(s_inputs)[:, None, :]
+            )
+            relative_position_encoding = self.rel_pos(feats)
+            z_init = z_init + relative_position_encoding
+            z_init = z_init + self.token_bonds(feats["token_bonds"].float())
+            if self.bond_type_feature:
+                z_init = z_init + self.token_bonds_type(feats["type_bonds"].long())
+            z_init = z_init + self.contact_conditioning(feats)
+
+            # Perform rounds of the pairwise stack
+            s = torch.zeros_like(s_init)
+            z = torch.zeros_like(z_init)
+
+            # Compute pairwise mask
+            mask = feats["token_pad_mask"].float()
+            pair_mask = mask[:, :, None] * mask[:, None, :]
+
+            for i in range(recycling_steps + 1):
+                # Apply recycling
+                s = s_init + self.s_recycle(self.s_norm(s))
+                z = z_init + self.z_recycle(self.z_norm(z))
+
+                # Compute pairwise stack
+                if self.use_templates:
+                    if self.is_template_compiled:
+                        template_module = self.template_module._orig_mod  # noqa: SLF001
+                    else:
+                        template_module = self.template_module
+
+                    z = z + template_module(
+                        z, feats, pair_mask, use_kernels=self.use_kernels
+                    )
+
+                if self.is_msa_compiled:
+                    msa_module = self.msa_module._orig_mod  # noqa: SLF001
+                else:
+                    msa_module = self.msa_module
+
+                z = z + msa_module(
+                    z, s_inputs, feats, use_kernels=self.use_kernels
+                )
+
+                # Revert to uncompiled version
+                if self.is_pairformer_compiled:
+                    pairformer_module = self.pairformer_module._orig_mod  # noqa: SLF001
+                else:
+                    pairformer_module = self.pairformer_module
+
+                s, z = pairformer_module(
+                    s,
+                    z,
+                    mask=mask,
+                    pair_mask=pair_mask,
+                    use_kernels=self.use_kernels,
+                )
+
+            # Compute diffusion conditioning
+            q, c, to_keys, atom_enc_bias, atom_dec_bias, token_trans_bias = (
+                self.diffusion_conditioning(
+                    s_trunk=s,
+                    z_trunk=z,
+                    relative_position_encoding=relative_position_encoding,
+                    feats=feats,
+                )
+            )
+            diffusion_conditioning = {
+                "q": q,
+                "c": c,
+                "to_keys": to_keys,
+                "atom_enc_bias": atom_enc_bias,
+                "atom_dec_bias": atom_dec_bias,
+                "token_trans_bias": token_trans_bias,
+            }
+
+        return {
+            "s": s,
+            "z": z,
+            "s_inputs": s_inputs,
+            "relative_position_encoding": relative_position_encoding,
+            "diffusion_conditioning": diffusion_conditioning,
+            "feats": feats,
+        }
+
+    def run_from_latents(
+        self,
+        s: Tensor,
+        z: Tensor,
+        s_inputs: Tensor,
+        relative_position_encoding: Tensor,
+        feats: dict[str, Tensor],
+        num_sampling_steps: Optional[int] = None,
+        diffusion_samples: int = 1,
+        recompute_conditioning: bool = False,
+        diffusion_conditioning: Optional[dict[str, Tensor]] = None,
+    ) -> dict[str, Tensor]:
+        """
+        Run diffusion and confidence modules from intermediate latents.
+
+        This method is used for neural style transfer via diffusion latent steering.
+        It takes the trunk latents (s, z) and runs the diffusion sampling and
+        confidence prediction modules.
+
+        Parameters
+        ----------
+        s : Tensor
+            Single representation [batch, num_tokens, token_s]
+        z : Tensor
+            Pair representation [batch, num_tokens, num_tokens, token_z]
+        s_inputs : Tensor
+            Initial embedded features
+        relative_position_encoding : Tensor
+            Relative position encoding for the input
+        feats : dict[str, Tensor]
+            Input features dictionary
+        num_sampling_steps : Optional[int]
+            Number of diffusion sampling steps
+        diffusion_samples : int
+            Number of structure samples to generate
+        recompute_conditioning : bool
+            If True, recompute diffusion conditioning from s and z.
+            If False, use provided diffusion_conditioning.
+        diffusion_conditioning : Optional[dict[str, Tensor]]
+            Pre-computed diffusion conditioning. Required if recompute_conditioning=False.
+
+        Returns
+        -------
+        dict[str, Tensor]
+            Dictionary containing:
+            - "sample_atom_coords": Predicted atom coordinates
+            - "plddt", "pae", "iptm", etc.: Confidence scores
+        """
+        dict_out = {}
+
+        # Optionally recompute diffusion conditioning from modified latents
+        if recompute_conditioning:
+            q, c, to_keys, atom_enc_bias, atom_dec_bias, token_trans_bias = (
+                self.diffusion_conditioning(
+                    s_trunk=s,
+                    z_trunk=z,
+                    relative_position_encoding=relative_position_encoding,
+                    feats=feats,
+                )
+            )
+            diffusion_conditioning = {
+                "q": q,
+                "c": c,
+                "to_keys": to_keys,
+                "atom_enc_bias": atom_enc_bias,
+                "atom_dec_bias": atom_dec_bias,
+                "token_trans_bias": token_trans_bias,
+            }
+        else:
+            assert diffusion_conditioning is not None, (
+                "diffusion_conditioning must be provided if recompute_conditioning=False"
+            )
+
+        # Run diffusion sampling
+        with torch.autocast("cuda", enabled=False):
+            struct_out = self.structure_module.sample(
+                s_trunk=s.float(),
+                s_inputs=s_inputs.float(),
+                feats=feats,
+                num_sampling_steps=num_sampling_steps,
+                atom_mask=feats["atom_pad_mask"].float(),
+                multiplicity=diffusion_samples,
+                steering_args=self.steering_args,
+                diffusion_conditioning=diffusion_conditioning,
+            )
+            dict_out.update(struct_out)
+
+        # Run confidence module
+        if self.confidence_prediction:
+            dict_out.update(
+                self.confidence_module(
+                    s_inputs=s_inputs.detach(),
+                    s=s.detach(),
+                    z=z.detach(),
+                    x_pred=dict_out["sample_atom_coords"].detach(),
+                    feats=feats,
+                    pred_distogram_logits=None,  # Not needed for confidence
+                    multiplicity=diffusion_samples,
+                    run_sequentially=True,
+                    use_kernels=self.use_kernels,
+                )
+            )
+
+        return dict_out
+
     def get_true_coordinates(
         self,
         batch: dict[str, Tensor],
