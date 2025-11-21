@@ -64,8 +64,22 @@ if __name__ == "__main__":
       --dbfilename mydump.rdb
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ccd_in", type=str)
+    parser.add_argument("--ccd_in", type=str, help="Input file to convert.")
+    parser.add_argument(
+        "--redis-host",
+        type=str,
+        default="localhost",
+        help="The Redis host.",
+    )
+    parser.add_argument(
+        "--redis-port",
+        type=int,
+        default=7777,
+        help="The Redis port.",
+    )
     args = parser.parse_args()
     load_pickled_dict_into_redis(
         path_in=args.ccd_in,
+        host=args.redis_host,
+        port=args.redis_port,
     )
