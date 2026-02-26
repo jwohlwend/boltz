@@ -296,7 +296,7 @@ def check_inputs(data: Path) -> list[Path]:
 
     # Check if data is a directory
     if data.is_dir():
-        data: list[Path] = list(data.glob("*"))
+        data: list[Path] = sorted(data.glob("*"))
 
         # Filter out non .fasta or .yaml files, raise
         # an error on directory and other file types
@@ -725,7 +725,7 @@ def process_inputs(
     records_dir = out_dir / "processed" / "records"
     if records_dir.exists():
         # Load existing records
-        existing = [Record.load(p) for p in records_dir.glob("*.json")]
+        existing = [Record.load(p) for p in sorted(records_dir.glob("*.json"))]
         processed_ids = {record.id for record in existing}
 
         # Filter to missing only
@@ -802,8 +802,8 @@ def process_inputs(
         for path in tqdm(data):
             process_input_partial(path)
 
-    # Load all records and write manifest
-    records = [Record.load(p) for p in records_dir.glob("*.json")]
+    # Load all records and write manifest (sorted for deterministic order)
+    records = [Record.load(p) for p in sorted(records_dir.glob("*.json"))]
     manifest = Manifest(records)
     manifest.dump(out_dir / "processed" / "manifest.json")
 
@@ -909,6 +909,12 @@ def cli() -> None:
     type=int,
     help="The number of dataloader workers to use for prediction. Default is 2.",
     default=2,
+)
+@click.option(
+    "--batch_size",
+    type=int,
+    help="The number of inputs to process in parallel per batch. Default is 1.",
+    default=1,
 )
 @click.option(
     "--override",
@@ -1058,6 +1064,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     write_full_pde: bool = False,
     output_format: Literal["pdb", "mmcif"] = "mmcif",
     num_workers: int = 2,
+    batch_size: int = 1,
     override: bool = False,
     seed: Optional[int] = None,
     use_msa_server: bool = False,
@@ -1275,6 +1282,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                 msa_dir=processed.msa_dir,
                 mol_dir=mol_dir,
                 num_workers=num_workers,
+                batch_size=batch_size,
                 constraints_dir=processed.constraints_dir,
                 template_dir=processed.template_dir,
                 extra_mols_dir=processed.extra_mols_dir,
@@ -1362,6 +1370,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             msa_dir=processed.msa_dir,
             mol_dir=mol_dir,
             num_workers=num_workers,
+            batch_size=batch_size,
             constraints_dir=processed.constraints_dir,
             template_dir=processed.template_dir,
             extra_mols_dir=processed.extra_mols_dir,

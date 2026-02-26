@@ -324,6 +324,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         msa_dir: Path,
         mol_dir: Path,
         num_workers: int,
+        batch_size: int = 1,
         constraints_dir: Optional[Path] = None,
         template_dir: Optional[Path] = None,
         extra_mols_dir: Optional[Path] = None,
@@ -344,6 +345,8 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
             The path to the moldir.
         num_workers : int
             The number of workers to use.
+        batch_size : int
+            The number of inputs to process in parallel per batch. Default is 1.
         constraints_dir : Optional[Path]
             The path to the constraints directory.
         template_dir : Optional[Path]
@@ -356,6 +359,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         """
         super().__init__()
         self.num_workers = num_workers
+        self.batch_size = batch_size
         self.manifest = manifest
         self.target_dir = target_dir
         self.msa_dir = msa_dir

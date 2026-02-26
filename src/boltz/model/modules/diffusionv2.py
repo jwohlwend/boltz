@@ -379,17 +379,36 @@ class AtomDiffusion(Module):
 
             with torch.no_grad():
                 atom_coords_denoised = torch.zeros_like(atom_coords_noisy)
-                sample_ids = torch.arange(multiplicity).to(atom_coords_noisy.device)
-                sample_ids_chunks = sample_ids.chunk(
-                    multiplicity % max_parallel_samples + 1
-                )
+                # atom_mask has shape [batch_size * multiplicity, L] after repeat_interleave.
+                # Build a [multiplicity, batch_size] index matrix so that each chunk of
+                # `max_parallel_samples` diffusion steps contains one sample from every
+                # batch item, matching the repeat_interleave ordering the network expects.
+                batch_size = atom_mask.shape[0] // multiplicity
+                sample_ids_2d = (
+                    torch.arange(
+                        batch_size * multiplicity, device=atom_coords_noisy.device
+                    )
+                    .view(batch_size, multiplicity)
+                    .t()
+                )  # [multiplicity, batch_size]
 
-                for sample_ids_chunk in sample_ids_chunks:
+                for chunk_start in range(0, multiplicity, max_parallel_samples):
+                    chunk_end = min(chunk_start + max_parallel_samples, multiplicity)
+                    chunk_m = chunk_end - chunk_start
+                    # Transpose [chunk_m, batch_size] -> [batch_size, chunk_m] then
+                    # flatten: gives [B0_sc..B0_{sc+k}, B1_sc..B1_{sc+k}, ...] which
+                    # aligns with the network's repeat_interleave(chunk_m) on feats.
+                    sample_ids_chunk = (
+                        sample_ids_2d[chunk_start:chunk_end]
+                        .t()
+                        .contiguous()
+                        .view(-1)
+                    )
                     atom_coords_denoised_chunk = self.preconditioned_network_forward(
                         atom_coords_noisy[sample_ids_chunk],
                         t_hat,
                         network_condition_kwargs=dict(
-                            multiplicity=sample_ids_chunk.numel(),
+                            multiplicity=chunk_m,
                             **network_condition_kwargs,
                         ),
                     )
