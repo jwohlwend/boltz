@@ -4,7 +4,7 @@
   <img src="https://model-gateway.boltz.bio/a.png?x-pxid=bce1627f-f326-4bff-8a97-45c6c3bc929d" />
 
 [Boltz-1](https://doi.org/10.1101/2024.11.19.624167) | [Boltz-2](https://doi.org/10.1101/2025.06.14.659707) |
-[Slack](https://boltz.bio/join-slack) <br> <br>
+[Slack](https://boltz.bio/join-slack) | [Documentation](https://deepwiki.com/jwohlwend/boltz/3.2-boltz-2-model) <br> <br>
 </div>
 
 
@@ -16,7 +16,7 @@
 
 Boltz is a family of models for biomolecular interaction prediction. Boltz-1 was the first fully open source model to approach AlphaFold3 accuracy. Our latest work Boltz-2 is a new biomolecular foundation model that goes beyond AlphaFold3 and Boltz-1 by jointly modeling complex structures and binding affinities, a critical component towards accurate molecular design. Boltz-2 is the first deep learning model to approach the accuracy of physics-based free-energy perturbation (FEP) methods, while running 1000x faster — making accurate in silico screening practical for early-stage drug discovery.
 
-All the code and weights are provided under MIT license, making them freely available for both academic and commercial uses. For more information about the model, see the [Boltz-1](https://doi.org/10.1101/2024.11.19.624167) and [Boltz-2](https://doi.org/10.1101/2025.06.14.659707) technical reports. To discuss updates, tools and applications join our [Slack channel](https://boltz.bio/join-slack).
+All the code and weights are provided under MIT license, making them freely available for both academic and commercial uses. For more information about the model, see the [Boltz-1](https://doi.org/10.1101/2024.11.19.624167) and [Boltz-2](https://doi.org/10.1101/2025.06.14.659707) technical reports. For detailed architecture documentation, see [DeepWiki: Boltz-2 Model](https://deepwiki.com/jwohlwend/boltz/3.2-boltz-2-model). To discuss updates, tools and applications join our [Slack channel](https://boltz.bio/join-slack).
 
 ## Installation
 
@@ -46,6 +46,34 @@ boltz predict input_path --use_msa_server
 ```
 
 `input_path` should point to a YAML file, or a directory of YAML files for batched processing, describing the biomolecules you want to model and the properties you want to predict (e.g. affinity). To see all available options: `boltz predict --help` and for more information on these input formats, see our [prediction instructions](docs/prediction.md). By default, the `boltz` command will run the latest version of the model.
+
+### Quick Start with Examples
+
+To quickly test inference on one of the bundled examples:
+
+```bash
+boltz predict examples/prot_custom_msa.yaml --out_dir ./output
+```
+
+This uses a pre-computed MSA, so no MSA server is required. Predictions are written to `./output/predictions/`.
+
+| Example | Description |
+|---------|-------------|
+| `examples/prot_custom_msa.yaml` | Protein with pre-computed MSA (no MSA server needed) |
+| `examples/prot_no_msa.yaml` | Protein with `msa: empty` (single-sequence mode) |
+| `examples/prot.yaml` | Protein; requires MSA path or `--use_msa_server` |
+| `examples/ligand.yaml` | Protein–ligand complex |
+| `examples/multimer.yaml` | Protein multimer |
+| `examples/affinity.yaml` | Affinity prediction |
+| `examples/pocket.yaml` | Pocket constraint |
+
+For examples without a pre-computed MSA (e.g. `examples/prot.yaml`), add `--use_msa_server` to auto-generate the MSA via the ColabFold server:
+
+```bash
+boltz predict examples/prot.yaml --use_msa_server --out_dir ./output
+```
+
+Outputs include predicted structures (`.cif`), confidence scores (`confidence_*.json`), and affinity scores (`affinity_*.json`, when applicable). Model weights are downloaded on first run and cached in `~/.boltz` (or `$BOLTZ_CACHE`).
 
 
 ### Binding Affinity Prediction
