@@ -22,20 +22,21 @@ All the code and weights are provided under MIT license, making them freely avai
 
 > Note: we recommend installing boltz in a fresh python environment
 
-Install boltz with PyPI (recommended):
+Install boltz with [uv](https://docs.astral.sh/uv/) from PyPI:
 
 ```
-pip install boltz[cuda] -U
+uv pip install boltz[cuda]
 ```
 
-or directly from GitHub for daily updates:
+Or install directly from GitHub for daily updates:
 
 ```
 git clone https://github.com/jwohlwend/boltz.git
-cd boltz; pip install -e .[cuda]
+cd boltz
+uv sync --extra cuda
 ```
 
-If you are installing on CPU-only or non-CUDA GPus hardware, remove `[cuda]` from the above commands. Note that the CPU version is significantly slower than the GPU version.
+If you are installing on CPU-only or non-CUDA GPUs hardware, remove `[cuda]` or `--extra cuda` from the above commands. Note that the CPU version is significantly slower than the GPU version.
 
 ## Inference
 
