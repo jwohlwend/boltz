@@ -2,8 +2,8 @@ import multiprocessing
 import os
 import pickle
 import platform
+import sys
 import tarfile
-import urllib.request
 import warnings
 from dataclasses import asdict, dataclass
 from functools import partial
@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Literal, Optional
 
 import click
+import httpx
+import questionary
 import torch
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.strategies import DDPStrategy
@@ -157,105 +159,135 @@ class BoltzSteeringParams:
     num_gd_steps: int = 20
 
 
+def _should_replace_existing(filepath: Path, force: bool) -> bool:
+    """Return True if we should download (overwrite); False to skip."""
+    if not filepath.exists():
+        return True
+    if force:
+        return True
+    if not sys.stdin.isatty():
+        return False
+    answer = questionary.confirm(
+        f"{filepath} already exists. Replace it?",
+        default=False,
+    ).ask()
+    return answer is True
+
+
+def _download_with_progress(
+    url: str,
+    filepath: Path,
+    desc: str = "Downloading",
+    force: bool = False,
+) -> bool:
+    """Download with progress. Returns True if downloaded, False if skipped."""
+    if not _should_replace_existing(filepath, force):
+        return False
+    click.echo(
+        f"Downloading to {filepath}. You may change the cache directory "
+        "with the --cache flag."
+    )
+    with httpx.stream("GET", url, follow_redirects=True) as response:
+        response.raise_for_status()
+        total = int(response.headers.get("content-length", 0))
+        with open(filepath, "wb") as f, tqdm(
+            total=total or None,
+            unit="B",
+            unit_scale=True,
+            unit_divisor=1024,
+            miniters=1,
+            desc=desc,
+        ) as pbar:
+            for chunk in response.iter_bytes(chunk_size=8192):
+                f.write(chunk)
+                pbar.update(len(chunk))
+    return True
+
+
 @rank_zero_only
-def download_boltz1(cache: Path) -> None:
+def download_boltz1(cache: Path, force: bool = False) -> None:
     """Download all the required data.
 
     Parameters
     ----------
     cache : Path
         The cache directory.
+    force : bool, optional
+        If True, overwrite existing files without prompting.
 
     """
     # Download CCD
     ccd = cache / "ccd.pkl"
-    if not ccd.exists():
-        click.echo(
-            f"Downloading the CCD dictionary to {ccd}. You may "
-            "change the cache directory with the --cache flag."
-        )
-        urllib.request.urlretrieve(CCD_URL, str(ccd))  # noqa: S310
+    _download_with_progress(CCD_URL, ccd, desc="CCD dictionary", force=force)
 
     # Download model
     model = cache / "boltz1_conf.ckpt"
-    if not model.exists():
-        click.echo(
-            f"Downloading the model weights to {model}. You may "
-            "change the cache directory with the --cache flag."
-        )
-        for i, url in enumerate(BOLTZ1_URL_WITH_FALLBACK):
-            try:
-                urllib.request.urlretrieve(url, str(model))  # noqa: S310
-                break
-            except Exception as e:  # noqa: BLE001
-                if i == len(BOLTZ1_URL_WITH_FALLBACK) - 1:
-                    msg = f"Failed to download model from all URLs. Last error: {e}"
-                    raise RuntimeError(msg) from e
-                continue
+    for i, url in enumerate(BOLTZ1_URL_WITH_FALLBACK):
+        try:
+            _download_with_progress(url, model, desc="Boltz-1 weights", force=force)
+            break
+        except Exception as e:  # noqa: BLE001
+            if i == len(BOLTZ1_URL_WITH_FALLBACK) - 1:
+                msg = f"Failed to download model from all URLs. Last error: {e}"
+                raise RuntimeError(msg) from e
+            continue
 
 
 @rank_zero_only
-def download_boltz2(cache: Path) -> None:
+def download_boltz2(cache: Path, force: bool = False) -> None:
     """Download all the required data.
 
     Parameters
     ----------
     cache : Path
         The cache directory.
+    force : bool, optional
+        If True, overwrite existing files without prompting.
 
     """
-    # Download CCD
     mols = cache / "mols"
     tar_mols = cache / "mols.tar"
-    if not tar_mols.exists():
+
+    # Download CCD (mols.tar)
+    if _download_with_progress(MOL_URL, tar_mols, desc="CCD data", force=force):
+        pass  # Downloaded; will extract below if needed
+
+    # Extract CCD if mols dir doesn't exist
+    if not mols.exists() and tar_mols.exists():
         click.echo(
-            f"Downloading the CCD data to {tar_mols}. "
-            "This may take a bit of time. You may change the cache directory "
-            "with the --cache flag."
-        )
-        urllib.request.urlretrieve(MOL_URL, str(tar_mols))  # noqa: S310
-    if not mols.exists():
-        click.echo(
-            f"Extracting the CCD data to {mols}. "
-            "This may take a bit of time. You may change the cache directory "
-            "with the --cache flag."
+            f"Extracting the CCD data to {mols}. You may change the cache "
+            "directory with the --cache flag."
         )
         with tarfile.open(str(tar_mols), "r") as tar:
-            tar.extractall(cache)  # noqa: S202
+            members = tar.getmembers()
+            for member in tqdm(members, desc="Extracting CCD data", unit="file"):
+                tar.extract(member, cache)
 
     # Download model
     model = cache / "boltz2_conf.ckpt"
-    if not model.exists():
-        click.echo(
-            f"Downloading the Boltz-2 weights to {model}. You may "
-            "change the cache directory with the --cache flag."
-        )
-        for i, url in enumerate(BOLTZ2_URL_WITH_FALLBACK):
-            try:
-                urllib.request.urlretrieve(url, str(model))  # noqa: S310
-                break
-            except Exception as e:  # noqa: BLE001
-                if i == len(BOLTZ2_URL_WITH_FALLBACK) - 1:
-                    msg = f"Failed to download model from all URLs. Last error: {e}"
-                    raise RuntimeError(msg) from e
-                continue
+    for i, url in enumerate(BOLTZ2_URL_WITH_FALLBACK):
+        try:
+            _download_with_progress(url, model, desc="Boltz-2 weights", force=force)
+            break
+        except Exception as e:  # noqa: BLE001
+            if i == len(BOLTZ2_URL_WITH_FALLBACK) - 1:
+                msg = f"Failed to download model from all URLs. Last error: {e}"
+                raise RuntimeError(msg) from e
+            continue
 
     # Download affinity model
     affinity_model = cache / "boltz2_aff.ckpt"
-    if not affinity_model.exists():
-        click.echo(
-            f"Downloading the Boltz-2 affinity weights to {affinity_model}. You may "
-            "change the cache directory with the --cache flag."
-        )
-        for i, url in enumerate(BOLTZ2_AFFINITY_URL_WITH_FALLBACK):
-            try:
-                urllib.request.urlretrieve(url, str(affinity_model))  # noqa: S310
-                break
-            except Exception as e:  # noqa: BLE001
-                if i == len(BOLTZ2_AFFINITY_URL_WITH_FALLBACK) - 1:
-                    msg = f"Failed to download model from all URLs. Last error: {e}"
-                    raise RuntimeError(msg) from e
-                continue
+    for i, url in enumerate(BOLTZ2_AFFINITY_URL_WITH_FALLBACK):
+        try:
+            _download_with_progress(
+                url, affinity_model, desc="Boltz-2 affinity weights", force=force
+            )
+            break
+        except Exception as e:  # noqa: BLE001
+            if i == len(BOLTZ2_AFFINITY_URL_WITH_FALLBACK) - 1:
+                msg = f"Failed to download model from all URLs. Last error: {e}"
+                raise RuntimeError(msg) from e
+            continue
 
 
 def get_cache_path() -> str:
@@ -916,6 +948,11 @@ def cli() -> None:
     help="Whether to override existing found predictions. Default is False.",
 )
 @click.option(
+    "--force",
+    is_flag=True,
+    help="Overwrite existing cached files (CCD, weights) without prompting.",
+)
+@click.option(
     "--seed",
     type=int,
     help="Seed to use for random number generator. Default is None (no seeding).",
@@ -1059,6 +1096,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     output_format: Literal["pdb", "mmcif"] = "mmcif",
     num_workers: int = 2,
     override: bool = False,
+    force: bool = False,
     seed: Optional[int] = None,
     use_msa_server: bool = False,
     msa_server_url: str = "https://api.colabfold.com",
@@ -1136,9 +1174,9 @@ def predict(  # noqa: C901, PLR0915, PLR0912
 
     # Download necessary data and model
     if model == "boltz1":
-        download_boltz1(cache)
+        download_boltz1(cache, force=force)
     elif model == "boltz2":
-        download_boltz2(cache)
+        download_boltz2(cache, force=force)
     else:
         msg = f"Model {model} not supported. Supported: boltz1, boltz2."
         raise ValueError(f"Model {model} not supported.")

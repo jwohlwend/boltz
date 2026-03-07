@@ -7,6 +7,7 @@ import tarfile
 import time
 from typing import Optional, Union, Dict
 
+import httpx
 import requests
 from requests.auth import HTTPBasicAuth
 from tqdm import tqdm
@@ -134,13 +135,33 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
 
     def download(ID, path):
         error_count = 0
+        httpx_auth = (
+            (auth.username, auth.password) if auth else None
+        )
         while True:
             try:
                 logger.debug(f"Downloading MSA results for ID: {ID}")
-                res = requests.get(
-                    f"{host_url}/result/download/{ID}", timeout=6.02, headers=headers, auth=auth
-                )
-                logger.debug(f"MSA download response status: {res.status_code}")
+                with httpx.stream(
+                    "GET",
+                    f"{host_url}/result/download/{ID}",
+                    headers=headers,
+                    auth=httpx_auth,
+                    timeout=6.02,
+                    follow_redirects=True,
+                ) as res:
+                    res.raise_for_status()
+                    logger.debug(f"MSA download response status: {res.status_code}")
+                    total = int(res.headers.get("content-length", 0))
+                    with open(path, "wb") as out, tqdm(
+                        total=total or None,
+                        unit="B",
+                        unit_scale=True,
+                        unit_divisor=1024,
+                        desc="Downloading MSA",
+                    ) as pbar:
+                        for chunk in res.iter_bytes(chunk_size=8192):
+                            out.write(chunk)
+                            pbar.update(len(chunk))
             except Exception as e:
                 error_count += 1
                 logger.warning(
@@ -154,8 +175,6 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
                 time.sleep(5)
             else:
                 break
-        with open(path, "wb") as out:
-            out.write(res.content)
 
     # process input x
     seqs = [x] if isinstance(x, str) else x
