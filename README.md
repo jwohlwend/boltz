@@ -43,7 +43,7 @@ If you are installing on CPU-only or non-CUDA GPUs hardware, remove `[cuda]` or 
 You can run inference using Boltz with:
 
 ```
-boltz predict input_path --use_msa_server
+uv run boltz predict input_path --use_msa_server
 ```
 
 `input_path` should point to a YAML file, or a directory of YAML files for batched processing, describing the biomolecules you want to model and the properties you want to predict (e.g. affinity). To see all available options: `boltz predict --help` and for more information on these input formats, see our [prediction instructions](docs/prediction.md). By default, the `boltz` command will run the latest version of the model.
@@ -53,7 +53,7 @@ boltz predict input_path --use_msa_server
 To quickly test inference on one of the bundled examples:
 
 ```bash
-boltz predict examples/prot_custom_msa.yaml --out_dir ./output
+uv run boltz predict examples/prot_custom_msa.yaml --out_dir ./output
 ```
 
 This uses a pre-computed MSA, so no MSA server is required. Predictions are written to `./output/predictions/`.
@@ -83,7 +83,7 @@ There are two main predictions in the affinity output: `affinity_pred_value` and
 ## Authentication to MSA Server
 
 When using the `--use_msa_server` option with a server that requires authentication, you can provide credentials in one of two ways. More information is available in our [prediction instructions](docs/prediction.md).
- 
+
 ## Evaluation
 
 ⚠️ **Coming soon: updated evaluation code for Boltz-2!**
