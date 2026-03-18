@@ -78,9 +78,8 @@ We welcome external contributions and are eager to engage with the community. Co
 
 On recent NVIDIA GPUs, Boltz leverages the acceleration provided by [NVIDIA  cuEquivariance](https://developer.nvidia.com/cuequivariance) kernels. Boltz also runs on Tenstorrent hardware thanks to a [fork](https://github.com/moritztng/tt-boltz) by Moritz Thüning.
 
-Community projects for scaling Boltz across multiple GPUs:
+Community project for scaling Boltz across multiple GPUs:
 
-- [Fold-CP (Context Parallelism)](https://github.com/jwohlwend/boltz/pull/658) — 2D CP mesh for distributed inference/training.
 - [Boltz-DAP (Distributed Axial Parallelism)](https://github.com/coqylight/boltz_dap) — shards the pair representation across GPUs to reduce per-GPU memory and avoid OOM on large complexes (inference wrapper; no Boltz source modifications).
 
 ## License
