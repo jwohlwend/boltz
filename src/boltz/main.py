@@ -1,8 +1,10 @@
+import json
 import multiprocessing
 import os
 import pickle
 import platform
 import tarfile
+import time
 import urllib.request
 import warnings
 from dataclasses import asdict, dataclass
@@ -410,6 +412,27 @@ def filter_inputs_affinity(
         click.echo(msg)
 
     return manifest
+
+
+def write_inference_timing_json(
+    out_dir: Path,
+    timing: dict[str, Optional[float]],
+    trainer: Trainer,
+) -> None:
+    """Write wall-clock inference timing next to predictions/ and processed/."""
+    if trainer.global_rank != 0:
+        return
+    structure_s = timing.get("structure_prediction_seconds")
+    affinity_s = timing.get("affinity_prediction_seconds")
+    measured = [t for t in (structure_s, affinity_s) if t is not None]
+    payload = {
+        "structure_prediction_seconds": structure_s,
+        "affinity_prediction_seconds": affinity_s,
+        "total_inference_seconds": sum(measured) if measured else None,
+    }
+    path = out_dir / "timing.json"
+    with path.open("w") as f:
+        json.dump(payload, f, indent=4)
 
 
 def compute_msa(
@@ -1262,6 +1285,11 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         precision=32 if model == "boltz1" else "bf16-mixed",
     )
 
+    inference_timing: dict[str, Optional[float]] = {
+        "structure_prediction_seconds": None,
+        "affinity_prediction_seconds": None,
+    }
+
     if filtered_manifest.records:
         msg = f"Running structure prediction for {len(filtered_manifest.records)} input"
         msg += "s." if len(filtered_manifest.records) > 1 else "."
@@ -1326,10 +1354,14 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         model_module.eval()
 
         # Compute structure predictions
+        t_structure = time.perf_counter()
         trainer.predict(
             model_module,
             datamodule=data_module,
             return_predictions=False,
+        )
+        inference_timing["structure_prediction_seconds"] = (
+            time.perf_counter() - t_structure
         )
 
     # Check if affinity predictions are needed
@@ -1345,6 +1377,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         )
         if not manifest_filtered.records:
             click.echo("Found existing affinity predictions for all inputs, skipping.")
+            write_inference_timing_json(out_dir, inference_timing, trainer)
             return
 
         msg = f"Running affinity prediction for {len(manifest_filtered.records)} input"
@@ -1403,11 +1436,17 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         model_module.eval()
 
         trainer.callbacks[0] = pred_writer
+        t_affinity = time.perf_counter()
         trainer.predict(
             model_module,
             datamodule=data_module,
             return_predictions=False,
         )
+        inference_timing["affinity_prediction_seconds"] = (
+            time.perf_counter() - t_affinity
+        )
+
+    write_inference_timing_json(out_dir, inference_timing, trainer)
 
 
 if __name__ == "__main__":
