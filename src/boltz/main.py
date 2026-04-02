@@ -51,6 +51,11 @@ BOLTZ2_AFFINITY_URL_WITH_FALLBACK = [
     "https://huggingface.co/boltz-community/boltz-2/resolve/main/boltz2_aff.ckpt",
 ]
 
+# Minimum expected checkpoint size in bytes (1 MB).
+# A legitimate Boltz checkpoint is hundreds of MB; anything smaller is almost
+# certainly the result of an interrupted or zero-byte download.
+_MIN_CHECKPOINT_SIZE_BYTES = 1 * 1024 * 1024  # 1 MB
+
 
 @dataclass
 class BoltzProcessedInput:
@@ -157,6 +162,49 @@ class BoltzSteeringParams:
     num_gd_steps: int = 20
 
 
+def validate_checkpoint(path: Path, label: str = "Checkpoint") -> None:
+    """Validate that a checkpoint file exists and appears intact.
+
+    This is a lightweight pre-flight check — it catches the common failure mode
+    where ``urllib.request.urlretrieve`` leaves a zero-byte or truncated file
+    after a network interruption, which would otherwise surface as a cryptic
+    ``Aborted!`` or unpickling error deep inside PyTorch Lightning.
+
+    Parameters
+    ----------
+    path : Path
+        Path to the checkpoint file.
+    label : str, optional
+        Human-readable label used in error messages (e.g. ``"Boltz-2 checkpoint"``).
+
+    Raises
+    ------
+    click.ClickException
+        If the file is missing, unreadable, empty, or below
+        ``_MIN_CHECKPOINT_SIZE_BYTES``.
+
+    """
+    if not path.exists():
+        msg = (
+            f"{label} not found: {path}. "
+            "Delete the file if it exists and rerun to trigger a fresh download."
+        )
+        raise click.ClickException(msg)
+    try:
+        size = path.stat().st_size
+    except OSError as e:
+        msg = f"{label} is not readable: {path}. Error: {e}"
+        raise click.ClickException(msg) from e
+    if size < _MIN_CHECKPOINT_SIZE_BYTES:
+        msg = (
+            f"{label} appears empty or corrupted: {path} "
+            f"({size:,} bytes, expected at least "
+            f"{_MIN_CHECKPOINT_SIZE_BYTES:,} bytes). "
+            "Delete the file and rerun to trigger a fresh download."
+        )
+        raise click.ClickException(msg)
+
+
 @rank_zero_only
 def download_boltz1(cache: Path) -> None:
     """Download all the required data.
@@ -192,6 +240,7 @@ def download_boltz1(cache: Path) -> None:
                     msg = f"Failed to download model from all URLs. Last error: {e}"
                     raise RuntimeError(msg) from e
                 continue
+    validate_checkpoint(model, label="Boltz-1 checkpoint")
 
 
 @rank_zero_only
@@ -239,6 +288,7 @@ def download_boltz2(cache: Path) -> None:
                     msg = f"Failed to download model from all URLs. Last error: {e}"
                     raise RuntimeError(msg) from e
                 continue
+    validate_checkpoint(model, label="Boltz-2 checkpoint")
 
     # Download affinity model
     affinity_model = cache / "boltz2_aff.ckpt"
@@ -256,6 +306,7 @@ def download_boltz2(cache: Path) -> None:
                     msg = f"Failed to download model from all URLs. Last error: {e}"
                     raise RuntimeError(msg) from e
                 continue
+    validate_checkpoint(affinity_model, label="Boltz-2 affinity checkpoint")
 
 
 def get_cache_path() -> str:
@@ -1296,6 +1347,14 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             else:
                 checkpoint = cache / "boltz1_conf.ckpt"
 
+        # Validate checkpoint before attempting to load it, so that a
+        # corrupted or empty file (e.g. from an interrupted download) surfaces
+        # as a clear, actionable error rather than a cryptic Aborted! message.
+        validate_checkpoint(
+            Path(checkpoint),
+            label=f"{'Boltz-2' if model == 'boltz2' else 'Boltz-1'} checkpoint",
+        )
+
         predict_args = {
             "recycling_steps": recycling_steps,
             "sampling_steps": sampling_steps,
@@ -1382,6 +1441,11 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         # Load affinity model
         if affinity_checkpoint is None:
             affinity_checkpoint = cache / "boltz2_aff.ckpt"
+
+        validate_checkpoint(
+            Path(affinity_checkpoint),
+            label="Boltz-2 affinity checkpoint",
+        )
 
         steering_args = BoltzSteeringParams()
         steering_args.fk_steering = False
