@@ -1,3 +1,5 @@
+import warnings
+
 import torch
 from torch import Tensor, nn
 
@@ -34,6 +36,9 @@ def kernel_triangular_mult(
         g_out_weight=g_out_weight,
         eps=eps,
     )
+
+
+_kernel_failed = False
 
 
 class TriangleMultiplicationOutgoing(nn.Module):
@@ -89,20 +94,30 @@ class TriangleMultiplicationOutgoing(nn.Module):
 
         """
         if use_kernels:
-            return kernel_triangular_mult(
-                x,
-                direction="outgoing",
-                mask=mask,
-                norm_in_weight=self.norm_in.weight,
-                norm_in_bias=self.norm_in.bias,
-                p_in_weight=self.p_in.weight,
-                g_in_weight=self.g_in.weight,
-                norm_out_weight=self.norm_out.weight,
-                norm_out_bias=self.norm_out.bias,
-                p_out_weight=self.p_out.weight,
-                g_out_weight=self.g_out.weight,
-                eps=1e-5,
-            )
+            global _kernel_failed
+            if not _kernel_failed:
+                try:
+                    return kernel_triangular_mult(
+                        x,
+                        direction="outgoing",
+                        mask=mask,
+                        norm_in_weight=self.norm_in.weight,
+                        norm_in_bias=self.norm_in.bias,
+                        p_in_weight=self.p_in.weight,
+                        g_in_weight=self.g_in.weight,
+                        norm_out_weight=self.norm_out.weight,
+                        norm_out_bias=self.norm_out.bias,
+                        p_out_weight=self.p_out.weight,
+                        g_out_weight=self.g_out.weight,
+                        eps=1e-5,
+                    )
+                except (ImportError, RuntimeError) as e:
+                    warnings.warn(
+                        f"Triangle multiplication kernel failed ({e}), "
+                        "falling back to PyTorch implementation.",
+                        stacklevel=2,
+                    )
+                    _kernel_failed = True
 
         # Input gating: D -> D
         x = self.norm_in(x)
@@ -177,20 +192,30 @@ class TriangleMultiplicationIncoming(nn.Module):
 
         """
         if use_kernels:
-            return kernel_triangular_mult(
-                x,
-                direction="incoming",
-                mask=mask,
-                norm_in_weight=self.norm_in.weight,
-                norm_in_bias=self.norm_in.bias,
-                p_in_weight=self.p_in.weight,
-                g_in_weight=self.g_in.weight,
-                norm_out_weight=self.norm_out.weight,
-                norm_out_bias=self.norm_out.bias,
-                p_out_weight=self.p_out.weight,
-                g_out_weight=self.g_out.weight,
-                eps=1e-5,
-            )
+            global _kernel_failed
+            if not _kernel_failed:
+                try:
+                    return kernel_triangular_mult(
+                        x,
+                        direction="incoming",
+                        mask=mask,
+                        norm_in_weight=self.norm_in.weight,
+                        norm_in_bias=self.norm_in.bias,
+                        p_in_weight=self.p_in.weight,
+                        g_in_weight=self.g_in.weight,
+                        norm_out_weight=self.norm_out.weight,
+                        norm_out_bias=self.norm_out.bias,
+                        p_out_weight=self.p_out.weight,
+                        g_out_weight=self.g_out.weight,
+                        eps=1e-5,
+                    )
+                except (ImportError, RuntimeError) as e:
+                    warnings.warn(
+                        f"Triangle multiplication kernel failed ({e}), "
+                        "falling back to PyTorch implementation.",
+                        stacklevel=2,
+                    )
+                    _kernel_failed = True
 
         # Input gating: D -> D
         x = self.norm_in(x)

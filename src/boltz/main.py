@@ -345,6 +345,17 @@ def filter_inputs_structure(
     else:
         existing = set()
 
+    # For records that need affinity prediction, also require pre_affinity_*.npz.
+    # If it's missing (e.g. a prior run without affinity), force re-prediction.
+    affinity_missing = {
+        r.id
+        for r in manifest.records
+        if r.id in existing
+        and r.affinity
+        and not (pred_dir / r.id / f"pre_affinity_{r.id}.npz").exists()
+    }
+    existing -= affinity_missing
+
     # Remove them from the input data
     if existing and not override:
         manifest = Manifest([r for r in manifest.records if r.id not in existing])
