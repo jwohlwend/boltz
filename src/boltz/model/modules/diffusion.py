@@ -1,3 +1,26 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+# fmt: off
+
 # started from code from https://github.com/lucidrains/alphafold3-pytorch, MIT License, Copyright (c) 2024 Phil Wang
 
 from __future__ import annotations
@@ -16,7 +39,6 @@ from boltz.model.loss.diffusion import (
     smooth_lddt_loss,
     weighted_rigid_align,
 )
-from boltz.model.modules.utils import center_random_augmentation
 from boltz.model.modules.encoders import (
     AtomAttentionDecoder,
     AtomAttentionEncoder,
@@ -30,8 +52,8 @@ from boltz.model.modules.transformers import (
 )
 from boltz.model.modules.utils import (
     LinearNoBias,
-    compute_random_augmentation,
     center_random_augmentation,
+    compute_random_augmentation,
     default,
     log,
 )
@@ -183,6 +205,11 @@ class DiffusionModule(Module):
             s_inputs=s_inputs.repeat_interleave(multiplicity, 0),
         )
 
+        # Promote to at least float32 for numerical stability, but preserve
+        # higher precision (e.g. float64) if available. Replaces hardcoded .float()
+        # to support float64 DTensor testing.
+        compute_dtype = torch.promote_types(r_noisy.dtype, torch.float32)
+
         if model_cache is None or len(model_cache) == 0:
             z = self.pairwise_conditioner(
                 z_trunk=z_trunk, token_rel_pos_feats=relative_position_encoding
@@ -206,7 +233,7 @@ class DiffusionModule(Module):
         mask = feats["token_pad_mask"].repeat_interleave(multiplicity, 0)
         a = self.token_transformer(
             a,
-            mask=mask.float(),
+            mask=mask.to(compute_dtype),
             s=s,
             z=z,  # note z is not expanded with multiplicity until after bias is computed
             multiplicity=multiplicity,
@@ -411,7 +438,10 @@ class AtomDiffusion(Module):
         batch, device = noised_atom_coords.shape[0], noised_atom_coords.device
 
         if isinstance(sigma, float):
-            sigma = torch.full((batch,), sigma, device=device)
+            # Preserve dtype of noised_atom_coords (e.g. float64 for testing).
+            # Without this, torch.full defaults to float32, causing dtype mismatch
+            # in downstream FourierEmbedding when the model is in float64.
+            sigma = torch.full((batch,), sigma, device=device, dtype=noised_atom_coords.dtype)
 
         padded_sigma = rearrange(sigma, "b -> b 1 1")
 
@@ -473,12 +503,19 @@ class AtomDiffusion(Module):
                 device=self.device,
             )
 
+        # Default to processing all multiplicity samples at once (no chunking).
+        # The original code did not handle max_parallel_samples=None, causing TypeError.
+        if max_parallel_samples is None:
+            max_parallel_samples = multiplicity
+
         num_sampling_steps = default(num_sampling_steps, self.num_sampling_steps)
         atom_mask = atom_mask.repeat_interleave(multiplicity, 0)
 
         shape = (*atom_mask.shape, 3)
+        # atom_mask is already (B*M, N_atoms) after repeat_interleave above,
+        # so atom_mask.shape[0] == B*M — use that for token_a's batch dimension.
         token_repr_shape = (
-            multiplicity,
+            atom_mask.shape[0],
             network_condition_kwargs["feats"]["token_index"].shape[1],
             2 * self.token_s,
         )
@@ -533,25 +570,43 @@ class AtomDiffusion(Module):
                 atom_coords_denoised = torch.zeros_like(atom_coords_noisy)
                 token_a = torch.zeros(token_repr_shape).to(atom_coords_noisy)
 
+                B_local = atom_coords_noisy.shape[0] // multiplicity
                 sample_ids = torch.arange(multiplicity).to(atom_coords_noisy.device)
+                # ceiling division: ceil(multiplicity / max_parallel_samples).
+                # The original formula (multiplicity % max_parallel_samples + 1) was incorrect
+                # when multiplicity is an exact non-trivial multiple of max_parallel_samples
+                # (e.g., multiplicity=4, max_parallel_samples=2 gave 1 chunk instead of 2).
                 sample_ids_chunks = sample_ids.chunk(
-                    multiplicity % max_parallel_samples + 1
+                    (multiplicity + max_parallel_samples - 1) // max_parallel_samples
                 )
                 for sample_ids_chunk in sample_ids_chunks:
+                    chunk_M = sample_ids_chunk.numel()
+                    # atom_coords_noisy is (B*M, N, 3). We must unflatten to (B, M, N, 3)
+                    # and index the M axis — not dim 0 directly — because
+                    # preconditioned_network_forward passes **network_condition_kwargs
+                    # (feats, s_inputs, s_trunk, z_trunk, etc.) which have the full B
+                    # batch dimension. A naïve dim-0 index would select B*chunk_M rows
+                    # that mix batch and multiplicity positions, causing a shape mismatch
+                    # with the un-indexed conditioning tensors inside the score model.
+                    noisy_chunk = atom_coords_noisy.unflatten(0, (B_local, multiplicity))[:, sample_ids_chunk].flatten(0, 1)
                     atom_coords_denoised_chunk, token_a_chunk = (
                         self.preconditioned_network_forward(
-                            atom_coords_noisy[sample_ids_chunk],
+                            noisy_chunk,
                             t_hat,
                             training=False,
                             network_condition_kwargs=dict(
-                                multiplicity=sample_ids_chunk.numel(),
+                                multiplicity=chunk_M,
                                 model_cache=model_cache,
                                 **network_condition_kwargs,
                             ),
                         )
                     )
-                    atom_coords_denoised[sample_ids_chunk] = atom_coords_denoised_chunk
-                    token_a[sample_ids_chunk] = token_a_chunk
+                    atom_coords_denoised.unflatten(0, (B_local, multiplicity))[:, sample_ids_chunk] = (
+                        atom_coords_denoised_chunk.unflatten(0, (B_local, chunk_M))
+                    )
+                    token_a.unflatten(0, (B_local, multiplicity))[:, sample_ids_chunk] = (
+                        token_a_chunk.unflatten(0, (B_local, chunk_M))
+                    )
 
                 if (
                     steering_args is not None
@@ -705,7 +760,7 @@ class AtomDiffusion(Module):
 
             atom_coords = atom_coords_next
 
-        return dict(sample_atom_coords=atom_coords, diff_token_repr=token_repr)
+        return dict(sample_atom_coords=atom_coords, diff_token_repr=token_repr) # noqa: C408
 
     def loss_weight(self, sigma):
         return (sigma**2 + self.sigma_data**2) / ((sigma * self.sigma_data) ** 2)
@@ -759,17 +814,17 @@ class AtomDiffusion(Module):
             noised_atom_coords,
             sigmas,
             training=True,
-            network_condition_kwargs=dict(
+            network_condition_kwargs=dict( # noqa: C408
                 s_inputs=s_inputs,
                 s_trunk=s_trunk,
                 z_trunk=z_trunk,
                 relative_position_encoding=relative_position_encoding,
                 feats=feats,
                 multiplicity=multiplicity,
-            ),
+            )
         )
 
-        return dict(
+        return dict( # noqa: C408
             noised_atom_coords=noised_atom_coords,
             denoised_atom_coords=denoised_atom_coords,
             sigmas=sigmas,
@@ -855,9 +910,9 @@ class AtomDiffusion(Module):
 
             total_loss = total_loss + lddt_loss
 
-        loss_breakdown = dict(
+        loss_breakdown = dict( # noqa: C408
             mse_loss=mse_loss,
             smooth_lddt_loss=lddt_loss,
         )
 
-        return dict(loss=total_loss, loss_breakdown=loss_breakdown)
+        return dict(loss=total_loss, loss_breakdown=loss_breakdown) # noqa: C408

@@ -1,3 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+
 from typing import Optional
 
 import torch
@@ -47,19 +69,13 @@ class PairformerLayer(nn.Module):
         self.tri_mul_out = TriangleMultiplicationOutgoing(token_z)
         self.tri_mul_in = TriangleMultiplicationIncoming(token_z)
 
-        self.tri_att_start = TriangleAttentionStartingNode(
-            token_z, pairwise_head_width, pairwise_num_heads, inf=1e9
-        )
-        self.tri_att_end = TriangleAttentionEndingNode(
-            token_z, pairwise_head_width, pairwise_num_heads, inf=1e9
-        )
+        self.tri_att_start = TriangleAttentionStartingNode(token_z, pairwise_head_width, pairwise_num_heads, inf=1e9)
+        self.tri_att_end = TriangleAttentionEndingNode(token_z, pairwise_head_width, pairwise_num_heads, inf=1e9)
 
         self.transition_s = Transition(token_s, token_s * 4)
         self.transition_z = Transition(token_z, token_z * 4)
 
-        self.s_post_norm = (
-            nn.LayerNorm(token_s) if self.post_layer_norm else nn.Identity()
-        )
+        self.s_post_norm = nn.LayerNorm(token_s) if self.post_layer_norm else nn.Identity()
 
     def forward(
         self,
@@ -74,14 +90,10 @@ class PairformerLayer(nn.Module):
     ) -> tuple[Tensor, Tensor]:
         # Compute pairwise stack
         dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_out(
-            z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
-        )
+        z = z + dropout * self.tri_mul_out(z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels)
 
         dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_in(
-            z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
-        )
+        z = z + dropout * self.tri_mul_in(z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels)
 
         dropout = get_dropout_mask(self.dropout, z, self.training)
         z = z + dropout * self.tri_att_start(
@@ -103,11 +115,12 @@ class PairformerLayer(nn.Module):
 
         # Compute sequence stack
         with torch.autocast("cuda", enabled=False):
-            s_normed = self.pre_norm_s(s.float())
-            s = s.float() + self.attention(
-                s=s_normed, z=z.float(), mask=mask.float(), k_in=s_normed
+            safe_dtype = torch.promote_types(s.dtype, torch.float32)
+            s_normed = self.pre_norm_s(s.to(dtype=safe_dtype))
+            s = s.to(dtype=safe_dtype) + self.attention(
+                s=s_normed, z=z.to(dtype=safe_dtype), mask=mask.to(dtype=safe_dtype), k_in=s_normed
             )
-            s = s + self.transition_s(s)
+            s = s + self.transition_s(s.to(dtype=safe_dtype))
             s = self.s_post_norm(s)
 
         return s, z
@@ -220,12 +233,8 @@ class PairformerNoSeqLayer(nn.Module):
         self.tri_mul_out = TriangleMultiplicationOutgoing(token_z)
         self.tri_mul_in = TriangleMultiplicationIncoming(token_z)
 
-        self.tri_att_start = TriangleAttentionStartingNode(
-            token_z, pairwise_head_width, pairwise_num_heads, inf=1e9
-        )
-        self.tri_att_end = TriangleAttentionEndingNode(
-            token_z, pairwise_head_width, pairwise_num_heads, inf=1e9
-        )
+        self.tri_att_start = TriangleAttentionStartingNode(token_z, pairwise_head_width, pairwise_num_heads, inf=1e9)
+        self.tri_att_end = TriangleAttentionEndingNode(token_z, pairwise_head_width, pairwise_num_heads, inf=1e9)
 
         self.transition_z = Transition(token_z, token_z * 4)
 
@@ -240,14 +249,10 @@ class PairformerNoSeqLayer(nn.Module):
     ) -> Tensor:
         # Compute pairwise stack
         dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_out(
-            z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
-        )
+        z = z + dropout * self.tri_mul_out(z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels)
 
         dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_in(
-            z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
-        )
+        z = z + dropout * self.tri_mul_in(z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels)
 
         dropout = get_dropout_mask(self.dropout, z, self.training)
         z = z + dropout * self.tri_att_start(

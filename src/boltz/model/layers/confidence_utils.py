@@ -1,3 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+# fmt: off
 import torch
 from torch import nn
 
@@ -30,12 +52,33 @@ def compute_frame_pred(
         ).squeeze(-1)
 
     B, N, _ = pred_atom_coords.shape
-    pred_atom_coords = pred_atom_coords.reshape(B // multiplicity, multiplicity, -1, 3)
+    if B % multiplicity != 0:
+        raise ValueError(
+            f"pred_atom_coords batch dim ({B}) not divisible by multiplicity ({multiplicity})"
+        )
+    if resolved_mask is not None and resolved_mask.shape != pred_atom_coords.shape[:2]:
+        raise ValueError(
+            f"resolved_mask shape {tuple(resolved_mask.shape)} must match "
+            f"pred_atom_coords[:2] {tuple(pred_atom_coords.shape[:2])}"
+        )
+    B_batch = B // multiplicity
+    if frames_idx_true.shape[0] != B_batch:
+        raise ValueError(
+            f"frames_idx_true batch dim ({frames_idx_true.shape[0]}) must equal "
+            f"B // multiplicity ({B_batch})"
+        )
+    pred_atom_coords = pred_atom_coords.reshape(B_batch, multiplicity, -1, 3)
     frames_idx_pred = (
         frames_idx_true.clone()
         .repeat_interleave(multiplicity, 0)
-        .reshape(B // multiplicity, multiplicity, -1, 3)
+        .reshape(B_batch, multiplicity, -1, 3)
     )
+
+    # resolved_mask arrives as (B*mult, N_atom).  Reshape to (B_batch, mult,
+    # N_atom) so that each diffusion sample's per-sample resolved mask is
+    # preserved (symmetry_correction can produce different masks per sample).
+    if resolved_mask is not None:
+        resolved_mask = resolved_mask.reshape(B_batch, multiplicity, -1)
 
     # Iterate through the batch and modify the frames for nonpolymers
     for i, pred_atom_coord in enumerate(pred_atom_coords):
@@ -69,10 +112,15 @@ def compute_frame_pred(
                 indices = torch.sort(dist_mat + resolved_pair, axis=2).indices
             else:
                 if resolved_mask is None:
-                    resolved_mask = feats["atom_resolved_mask"]
+                    # atom_resolved_mask is (B_batch, N_atom); expand to
+                    # (B_batch, mult, N_atom) so indexing is uniform.
+                    resolved_mask = feats["atom_resolved_mask"][:, None, :].expand(
+                        -1, multiplicity, -1
+                    )
+                # resolved_mask[i]: (mult, N_atom)
+                rm_chain = resolved_mask[i][:, mask_chain_atom.bool()]  # (mult, N_chain)
                 resolved_pair = 1 - (
-                    resolved_mask[i][mask_chain_atom.bool()][None, :]
-                    * resolved_mask[i][mask_chain_atom.bool()][:, None]
+                    rm_chain[:, None, :] * rm_chain[:, :, None]
                 ).to(torch.float32)
                 resolved_pair[resolved_pair == 1] = torch.inf
                 indices = torch.sort(dist_mat + resolved_pair, axis=2).indices

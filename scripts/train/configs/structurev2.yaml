@@ -1,0 +1,244 @@
+trainer:
+  accelerator: cuda
+  devices: 1
+  num_nodes: 1
+  precision: bf16-mixed
+  gradient_clip_val: 10.0
+  accumulate_grad_batches: 1
+  max_epochs: -1
+
+# Optional set wandb here
+# wandb:
+#   name: boltz
+#   project: boltz
+#   entity: boltz
+
+output: # PATH_HERE
+pretrained: null
+resume: null
+disable_checkpoint: false
+matmul_precision: null
+save_top_k: -1
+v2: true
+
+data:
+  datasets:
+    # RCSB Data
+    - _target_: boltz.data.module.trainingv2.DatasetConfig
+      target_dir: #PATH_HERE
+      msa_dir: #PATH_HERE
+      template_dir: #PATH_HERE
+      prob: 0.55
+      filters:
+        - _target_: boltz.data.filter.dynamic.size.SizeFilter
+          min_chains: 1
+          max_chains: 300
+        - _target_: boltz.data.filter.dynamic.date.DateFilter
+          date: "2023-06-01"
+          ref: released
+        - _target_: boltz.data.filter.dynamic.resolution.ResolutionFilter
+          resolution: 9.0
+      sampler:
+        _target_: boltz.data.sample.v2.cluster.ClusterSampler
+      cropper:
+        _target_: boltz.data.crop.boltz.BoltzCropper
+        min_neighborhood: 0
+        max_neighborhood: 40
+      split: ./scripts/train/assets/validation_ids_v2.txt
+      symmetry_correction: true
+      val_group: "RCSB"
+
+    # AFDB Distillation Data
+    - _target_: boltz.data.module.trainingv2.DatasetConfig
+      target_dir: #PATH_HERE
+      msa_dir: #PATH_HERE
+      template_dir: null
+      prob: 0.45
+      filters:
+        - _target_: boltz.data.filter.dynamic.size.SizeFilter
+          min_chains: 1
+          max_chains: 300
+      sampler:
+        _target_: boltz.data.sample.v2.cluster.ClusterSampler
+      cropper:
+        _target_: boltz.data.crop.boltz.BoltzCropper
+        min_neighborhood: 0
+        max_neighborhood: 40
+      symmetry_correction: true
+      override_method: "AFDB"
+      override_bfactor: true
+
+  checkpoint_monitor_val_group: "val/lddt"  # dataset __RCSB is turned to ""   # which validation dataset group to use for checkpoint monitoring
+  tokenizer:
+    _target_: boltz.data.tokenize.boltz2.Boltz2TrainingTokenizer
+  featurizer:
+    _target_: boltz.data.feature.featurizerv2_train.Boltz2Featurizer
+
+  moldir: #PATH_HERE
+  max_tokens: 384  # 640 # NOTE: cuEq TriAttn backend on sm100f GPUs requires multiples of 8 token counts per CP shard
+  max_atoms: 3456 # 5760
+  max_seqs: 8192
+  pad_to_max_tokens: true
+  pad_to_max_atoms: true
+  pad_to_max_seqs: true
+  samples_per_epoch: 36096
+  batch_size: 1
+  num_workers: 2
+  random_seed: 42
+  pin_memory: false
+  overfit: null
+  return_train_symmetries: false
+  return_val_symmetries: true
+  train_binder_pocket_conditioned_prop: 0.15
+  val_binder_pocket_conditioned_prop: 0.15
+  train_contact_conditioned_prop: 0.15
+  val_contact_conditioned_prop: 0.15
+  binder_pocket_cutoff_val: 6.0
+  binder_pocket_cutoff_min: 4.0
+  binder_pocket_cutoff_max: 20.0
+  binder_pocket_sampling_geometric_p: 0.3
+  atoms_per_window_queries: 32
+  min_dist: 2.0
+  max_dist: 22.0
+  num_bins: 64
+  num_ensembles_train: 1
+  num_ensembles_val: 1
+  fix_single_ensemble: false
+  disto_use_ensemble: true
+  single_sequence_prop_training: 0.05
+  max_templates_train: 4
+  max_templates_val: 4
+  no_template_prob_train: 0.6
+  no_template_prob_val: 1.0
+  use_templates: false
+  msa_sampling_training: true
+  bfactor_md_correction: true
+
+model:
+  _target_: boltz.model.models.boltz2.Boltz2
+  atom_s: 128
+  atom_z: 16
+  token_s: 384
+  token_z: 128
+  num_bins: 64
+  atom_feature_dim: 388
+  atoms_per_window_queries: 32
+  atoms_per_window_keys: 128
+  compile_pairformer: false
+  compile_templates: false
+  compile_msa: false
+  ema: true
+  ema_decay: 0.999
+  exclude_ions_from_lddt: true
+  fix_sym_check: true
+  cyclic_pos_enc: true
+  num_val_datasets: 1
+  bond_type_feature: true
+  conditioning_cutoff_min: ${data.binder_pocket_cutoff_min}
+  conditioning_cutoff_max: ${data.binder_pocket_cutoff_max}
+  use_templates: ${data.use_templates}
+  predict_bfactor: true
+  checkpoint_diffusion_conditioning: true
+
+  validators:
+    - _target_: boltz.model.validation.rcsb.RCSBValidator
+      val_names: ["RCSB"]
+      confidence_prediction: ${model.confidence_prediction}
+
+  embedder_args:
+    atom_encoder_depth: 3
+    atom_encoder_heads: 4
+    add_mol_type_feat: true
+    add_method_conditioning: true
+    add_modified_flag: true
+    add_cyclic_flag: true
+
+  msa_args:
+    msa_s: 64
+    msa_blocks: 4
+    msa_dropout: 0.15
+    z_dropout: 0.25
+    pairwise_head_width: 32
+    pairwise_num_heads: 4
+    use_paired_feature: true
+    activation_checkpointing: true
+
+  template_args:
+    template_dim: 64
+    template_blocks: 2
+    activation_checkpointing: true
+
+  pairformer_args:
+    num_blocks: 48
+    num_heads: 16
+    dropout: 0.25
+    post_layer_norm: false
+    activation_checkpointing: true
+    v2: true
+
+  score_model_args:
+    sigma_data: 16
+    dim_fourier: 256
+    atom_encoder_depth: 3
+    atom_encoder_heads: 4
+    token_transformer_depth: 24
+    token_transformer_heads: 16
+    atom_decoder_depth: 3
+    atom_decoder_heads: 4
+    conditioning_transition_layers: 2
+    transformer_post_ln: false
+    activation_checkpointing: true
+
+  confidence_prediction: false
+  affinity_prediction: false
+  structure_prediction_training: true
+
+  training_args:
+    recycling_steps: 3
+    sampling_steps: 20
+    diffusion_multiplicity: 32
+    diffusion_samples: 1
+    affinity_loss_weight: 3e-3
+    confidence_loss_weight: 1e-4
+    diffusion_loss_weight: 4.0
+    distogram_loss_weight: 3e-2
+    bfactor_loss_weight: 1e-3
+    adam_beta_1: 0.9
+    adam_beta_2: 0.95
+    adam_eps: 0.00000001
+    lr_scheduler: af3
+    base_lr: 0.0
+    max_lr: 0.0005
+    lr_warmup_no_steps: 1000
+    lr_start_decay_after_n_steps: 50000
+    lr_decay_every_n_steps: 50000
+    lr_decay_factor: 0.95
+    weight_decay: 0.003
+    weight_decay_exclude: true
+
+  validation_args:
+    recycling_steps: 3
+    sampling_steps: 200
+    diffusion_samples: 5
+    symmetry_correction: true
+
+  diffusion_process_args:
+    sigma_min: 0.0004
+    sigma_max: 160.0
+    sigma_data: 16.0
+    rho: 7
+    P_mean: -1.2
+    P_std: 1.5
+    gamma_0: 0.8
+    gamma_min: 1.0
+    noise_scale: 1.0
+    step_scale: 1.0
+    coordinate_augmentation: true
+    alignment_reverse_diff: true
+    synchronize_sigmas: false
+
+  diffusion_loss_args:
+    add_smooth_lddt_loss: true
+    nucleotide_loss_weight: 5.0
+    ligand_loss_weight: 10.0
+    filter_by_plddt: 0.0

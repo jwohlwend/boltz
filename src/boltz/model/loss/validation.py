@@ -1,8 +1,30 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+# fmt: off
 import torch
 
 from boltz.data import const
-from boltz.model.loss.confidence import (
-    compute_frame_pred,
+from boltz.model.layers.confidence_utils import compute_frame_pred
+from boltz.model.loss.confidencev2 import (
     express_coordinate_in_frame,
     lddt_dist,
 )
@@ -749,11 +771,22 @@ def compute_pae_mae(
         + 0.25
     )
 
-    # Compute mask for the pae loss
-    b_true_resolved_mask = true_coords_resolved_mask[
-        torch.arange(B // multiplicity)[:, None, None].to(
-            pred_coords_transformed.device
-        ),
+    # Reshape to (B_batch, mult, N_atom) so each diffusion sample uses
+    # its own resolved mask (symmetry_correction can differ per sample).
+    if true_coords_resolved_mask.shape[0] != B:
+        raise ValueError(
+            f"true_coords_resolved_mask batch dim ({true_coords_resolved_mask.shape[0]}) "
+            f"!= expected ({B})"
+        )
+    if true_coords_resolved_mask.ndim != 2:
+        raise ValueError(
+            f"true_coords_resolved_mask must be 2D, got ndim={true_coords_resolved_mask.ndim}"
+        )
+    B_batch = B // multiplicity
+    resolved_mask_3d = true_coords_resolved_mask.reshape(B_batch, multiplicity, -1)
+    b_true_resolved_mask = resolved_mask_3d[
+        torch.arange(B_batch)[:, None, None].to(pred_coords_transformed.device),
+        torch.arange(multiplicity)[None, :, None].to(pred_coords_transformed.device),
         frame_true_atom_b,
     ]
 

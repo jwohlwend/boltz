@@ -1,16 +1,16 @@
+from collections.abc import Iterator
 from dataclasses import replace
-from typing import Iterator, List
 
 from numpy.random import RandomState
 
-from boltz.data.types import Record
 from boltz.data.sample.sampler import Sample, Sampler
+from boltz.data.types import Record
 
 
 class RandomSampler(Sampler):
     """A simple random sampler with replacement."""
 
-    def sample(self, records: List[Record], random: RandomState) -> Iterator[Sample]:
+    def sample(self, records: list[Record], random: RandomState) -> Iterator[Sample]:
         """Sample a structure from the dataset infinitely.
 
         Parameters

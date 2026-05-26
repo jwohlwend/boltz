@@ -66,6 +66,7 @@ class DataConfig:
     binder_pocket_sampling_geometric_p: float = 0.0
     val_batch_size: int = 1
     compute_constraint_features: bool = False
+    max_data_retries: int = 5
 
 
 @dataclass
@@ -208,6 +209,7 @@ class TrainingDataset(torch.utils.data.Dataset):
         binder_pocket_sampling_geometric_p: Optional[float] = 0.0,
         return_symmetries: Optional[bool] = False,
         compute_constraint_features: bool = False,
+        max_data_retries: int = 5,
     ) -> None:
         """Initialize the training dataset."""
         super().__init__()
@@ -230,6 +232,8 @@ class TrainingDataset(torch.utils.data.Dataset):
         self.binder_pocket_sampling_geometric_p = binder_pocket_sampling_geometric_p
         self.return_symmetries = return_symmetries
         self.compute_constraint_features = compute_constraint_features
+        self.max_data_retries = max_data_retries
+        self._fallback_depth = 0
         self.samples = []
         for dataset in datasets:
             records = dataset.manifest.records
@@ -237,6 +241,20 @@ class TrainingDataset(torch.utils.data.Dataset):
                 records = records[:overfit]
             iterator = dataset.sampler.sample(records, np.random)
             self.samples.append(iterator)
+
+    def _raise_or_return_item_0(self, e: Exception) -> dict[str, Tensor]:
+        if self.max_data_retries <= 0:
+            raise e
+        if self._fallback_depth >= self.max_data_retries:
+            raise RuntimeError(
+                f"Data loading failed {self.max_data_retries} consecutive times. " f"Last error: {e}"
+            ) from e
+        self._fallback_depth += 1
+        try:
+            fallback_idx = np.random.randint(0, len(self))
+            return self.__getitem__(fallback_idx)
+        finally:
+            self._fallback_depth -= 1
 
     def __getitem__(self, idx: int) -> dict[str, Tensor]:
         """Get an item from the dataset.
@@ -265,18 +283,18 @@ class TrainingDataset(torch.utils.data.Dataset):
         # Get the structure
         try:
             input_data = load_input(sample.record, dataset.target_dir, dataset.msa_dir)
-        except Exception as e:
-            print(
+        except Exception as e:  # noqa: BLE001
+            print(  # noqa: T201
                 f"Failed to load input for {sample.record.id} with error {e}. Skipping."
             )
-            return self.__getitem__(idx)
+            return self._raise_or_return_item_0(e)
 
         # Tokenize structure
         try:
             tokenized = dataset.tokenizer.tokenize(input_data)
-        except Exception as e:
-            print(f"Tokenizer failed on {sample.record.id} with error {e}. Skipping.")
-            return self.__getitem__(idx)
+        except Exception as e:  # noqa: BLE001
+            print(f"Tokenizer failed on {sample.record.id} with error {e}. Skipping.")  # noqa: T201
+            return self._raise_or_return_item_0(e)
 
         # Compute crop
         try:
@@ -289,9 +307,9 @@ class TrainingDataset(torch.utils.data.Dataset):
                     chain_id=sample.chain_id,
                     interface_id=sample.interface_id,
                 )
-        except Exception as e:
-            print(f"Cropper failed on {sample.record.id} with error {e}. Skipping.")
-            return self.__getitem__(idx)
+        except Exception as e:  # noqa: BLE001
+            print(f"Cropper failed on {sample.record.id} with error {e}. Skipping.")  # noqa: T201
+            return self._raise_or_return_item_0(e)
 
         # Check if there are tokens
         if len(tokenized.tokens) == 0:
@@ -318,9 +336,9 @@ class TrainingDataset(torch.utils.data.Dataset):
                 binder_pocket_sampling_geometric_p=self.binder_pocket_sampling_geometric_p,
                 compute_constraint_features=self.compute_constraint_features,
             )
-        except Exception as e:
-            print(f"Featurizer failed on {sample.record.id} with error {e}. Skipping.")
-            return self.__getitem__(idx)
+        except Exception as e:  # noqa: BLE001
+            print(f"Featurizer failed on {sample.record.id} with error {e}. Skipping.")  # noqa: T201
+            return self._raise_or_return_item_0(e)
 
         return features
 
@@ -360,6 +378,7 @@ class ValidationDataset(torch.utils.data.Dataset):
         binder_pocket_conditioned_prop: Optional[float] = 0.0,
         binder_pocket_cutoff: Optional[float] = 6.0,
         compute_constraint_features: bool = False,
+        max_data_retries: int = 5,
     ) -> None:
         """Initialize the validation dataset."""
         super().__init__()
@@ -383,6 +402,22 @@ class ValidationDataset(torch.utils.data.Dataset):
         self.binder_pocket_conditioned_prop = binder_pocket_conditioned_prop
         self.binder_pocket_cutoff = binder_pocket_cutoff
         self.compute_constraint_features = compute_constraint_features
+        self.max_data_retries = max_data_retries
+        self._fallback_depth = 0
+
+    def _raise_or_return_item_0(self, e: Exception) -> dict[str, Tensor]:
+        if self.max_data_retries <= 0:
+            raise e
+        if self._fallback_depth >= self.max_data_retries:
+            raise RuntimeError(
+                f"Data loading failed {self.max_data_retries} consecutive times. " f"Last error: {e}"
+            ) from e
+        self._fallback_depth += 1
+        try:
+            fallback_idx = np.random.randint(0, len(self))
+            return self.__getitem__(fallback_idx)
+        finally:
+            self._fallback_depth -= 1
 
     def __getitem__(self, idx: int) -> dict[str, Tensor]:
         """Get an item from the dataset.
@@ -413,16 +448,16 @@ class ValidationDataset(torch.utils.data.Dataset):
         # Get the structure
         try:
             input_data = load_input(record, dataset.target_dir, dataset.msa_dir)
-        except Exception as e:
-            print(f"Failed to load input for {record.id} with error {e}. Skipping.")
-            return self.__getitem__(0)
+        except Exception as e:  # noqa: BLE001
+            print(f"Failed to load input for {record.id} with error {e}. Skipping.")  # noqa: T201
+            return self._raise_or_return_item_0(e)
 
         # Tokenize structure
         try:
             tokenized = dataset.tokenizer.tokenize(input_data)
-        except Exception as e:
-            print(f"Tokenizer failed on {record.id} with error {e}. Skipping.")
-            return self.__getitem__(0)
+        except Exception as e:  # noqa: BLE001
+            print(f"Tokenizer failed on {record.id} with error {e}. Skipping.")  # noqa: T201
+            return self._raise_or_return_item_0(e)
 
         # Compute crop
         try:
@@ -433,9 +468,9 @@ class ValidationDataset(torch.utils.data.Dataset):
                     random=self.random,
                     max_atoms=self.max_atoms,
                 )
-        except Exception as e:
-            print(f"Cropper failed on {record.id} with error {e}. Skipping.")
-            return self.__getitem__(0)
+        except Exception as e:  # noqa: BLE001
+            print(f"Cropper failed on {record.id} with error {e}. Skipping.")  # noqa: T201
+            return self._raise_or_return_item_0(e)
 
         # Check if there are tokens
         if len(tokenized.tokens) == 0:
@@ -466,9 +501,9 @@ class ValidationDataset(torch.utils.data.Dataset):
                 only_ligand_binder_pocket=True,
                 compute_constraint_features=self.compute_constraint_features,
             )
-        except Exception as e:
-            print(f"Featurizer failed on {record.id} with error {e}. Skipping.")
-            return self.__getitem__(0)
+        except Exception as e:  # noqa: BLE001
+            print(f"Featurizer failed on {record.id} with error {e}. Skipping.")  # noqa: T201
+            return self._raise_or_return_item_0(e)
 
         return features
 
@@ -542,17 +577,11 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
                 val_records = []
 
             # Filter training records
-            train_records = [
-                record
-                for record in train_records
-                if all(f.filter(record) for f in cfg.filters)
-            ]
+            train_records = [record for record in train_records if all(f.filter(record) for f in cfg.filters)]
             # Filter training records
             if data_config.filters is not None:
                 train_records = [
-                    record
-                    for record in train_records
-                    if all(f.filter(record) for f in data_config.filters)
+                    record for record in train_records if all(f.filter(record) for f in data_config.filters)
                 ]
 
             # Create train dataset
@@ -616,6 +645,7 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
             binder_pocket_sampling_geometric_p=cfg.binder_pocket_sampling_geometric_p,
             return_symmetries=cfg.return_train_symmetries,
             compute_constraint_features=cfg.compute_constraint_features,
+            max_data_retries=cfg.max_data_retries,
         )
         self._val_set = ValidationDataset(
             datasets=train if cfg.overfit is not None else val,
@@ -637,6 +667,7 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
             binder_pocket_conditioned_prop=cfg.val_binder_pocket_conditioned_prop,
             binder_pocket_cutoff=cfg.binder_pocket_cutoff,
             compute_constraint_features=cfg.compute_constraint_features,
+            max_data_retries=cfg.max_data_retries,
         )
 
     def setup(self, stage: Optional[str] = None) -> None:

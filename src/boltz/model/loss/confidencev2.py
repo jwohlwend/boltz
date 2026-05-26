@@ -1,8 +1,30 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+# fmt: off
 import torch
 from torch import nn
 
 from boltz.data import const
-from boltz.model.layers.confidence_utils import compute_frame_pred, tm_function
+from boltz.model.layers.confidence_utils import compute_frame_pred
 
 
 def confidence_loss(
@@ -96,24 +118,28 @@ def resolved_loss(
     mask_loss=None,
 ):
     with torch.autocast("cuda", enabled=False):
+        # Bugfix: use promote_types instead of hardcoded .float() so that
+        # float64 test inputs are not silently truncated to float32, which
+        # causes dtype mismatches between serial and distributed code paths.
+        compute_dtype = torch.promote_types(pred_resolved.dtype, torch.float32)
         if token_level_confidence:
             token_to_rep_atom = feats["token_to_rep_atom"]
             token_to_rep_atom = token_to_rep_atom.repeat_interleave(
                 multiplicity, 0
-            ).float()
+            ).to(dtype=compute_dtype)
             ref_mask = torch.bmm(
-                token_to_rep_atom, true_coords_resolved_mask.unsqueeze(-1).float()
+                token_to_rep_atom, true_coords_resolved_mask.unsqueeze(-1).to(dtype=compute_dtype)
             ).squeeze(-1)
 
             pad_mask = feats["token_pad_mask"]
-            pad_mask = pad_mask.repeat_interleave(multiplicity, 0).float()
+            pad_mask = pad_mask.repeat_interleave(multiplicity, 0).to(dtype=compute_dtype)
         else:
-            ref_mask = true_coords_resolved_mask.float()
+            ref_mask = true_coords_resolved_mask.to(dtype=compute_dtype)
             pad_mask = feats["atom_pad_mask"]
-            pad_mask = pad_mask.repeat_interleave(multiplicity, 0).float()
+            pad_mask = pad_mask.repeat_interleave(multiplicity, 0).to(dtype=compute_dtype)
         # compute loss
         log_softmax_resolved = torch.nn.functional.log_softmax(
-            pred_resolved.float(), dim=-1
+            pred_resolved.to(dtype=compute_dtype), dim=-1
         )
         errors = (
             -ref_mask * log_softmax_resolved[:, :, 0]
@@ -128,7 +154,7 @@ def resolved_loss(
             mask_loss = (
                 mask_loss.repeat_interleave(multiplicity, 0)
                 .reshape(-1, multiplicity)
-                .float()
+                .to(dtype=compute_dtype)
             )
             loss = torch.sum(loss.reshape(-1, multiplicity) * mask_loss) / (
                 torch.sum(mask_loss) + 1e-7
@@ -410,11 +436,22 @@ def get_target_pae(
             ((true_coords_transformed - pred_coords_transformed) ** 2).sum(-1) + 1e-8
         )
 
-        # Compute mask for the pae loss
-        b_true_resolved_mask = true_coords_resolved_mask[
-            torch.arange(B // multiplicity)[:, None, None].to(
-                pred_coords_transformed.device
-            ),
+        # Reshape to (B_batch, mult, N_atom) so each diffusion sample uses
+        # its own resolved mask (symmetry_correction can differ per sample).
+        B = true_coords_resolved_mask.shape[0]
+        if B % multiplicity != 0:
+            raise ValueError(
+                f"true_coords_resolved_mask batch dim ({B}) not divisible by multiplicity ({multiplicity})"
+            )
+        if true_coords_resolved_mask.ndim != 2:
+            raise ValueError(
+                f"true_coords_resolved_mask must be 2D, got ndim={true_coords_resolved_mask.ndim}"
+            )
+        B_batch = B // multiplicity
+        resolved_mask_3d = true_coords_resolved_mask.reshape(B_batch, multiplicity, -1)
+        b_true_resolved_mask = resolved_mask_3d[
+            torch.arange(B_batch)[:, None, None].to(pred_coords_transformed.device),
+            torch.arange(multiplicity)[None, :, None].to(pred_coords_transformed.device),
             frame_true_atom_b,
         ]
 

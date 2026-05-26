@@ -18,6 +18,18 @@ Boltz is a family of models for biomolecular interaction prediction. Boltz-1 was
 
 All the code and weights are provided under MIT license, making them freely available for both academic and commercial uses. For more information about the model, see the [Boltz-1](https://doi.org/10.1101/2024.11.19.624167) and [Boltz-2](https://doi.org/10.1101/2025.06.14.659707) technical reports. To discuss updates, tools and applications join our [Slack channel](https://boltz.bio/join-slack).
 
+## Fold-CP: A Context Parallelism Framework for Biomolecular Modeling
+
+This repo also contains context parallelism (CP) for distributed inference and training for biomolecular folding models across multiple GPUs using a 2D CP mesh combined with data parallelism, demonstrated with the Boltz model. See [this README](src/boltz/distributed/README.md) for detail.
+
+### Copyright and License Compliance
+
+- The context parallel code is licensed under the terms and conditions as written in [the license file](licenses/LICENSE)
+
+- The original Boltz code is licensed under their respective MIT license (See the [third-party-attr.txt](licenses/third-party-attr.txt))
+
+- This project will download and install additional third-party open source software projects. Review the license terms of these open source projects before use
+
 ## Installation
 
 > Note: we recommend installing boltz in a fresh python environment

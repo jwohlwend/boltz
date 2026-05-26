@@ -1,3 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+
 # Copyright 2021 AlQuraishi Laboratory
 # Copyright 2021 DeepMind Technologies Limited
 #
@@ -13,6 +35,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import importlib
 import math
 from typing import Callable, List, Optional, Tuple
 
@@ -25,6 +48,10 @@ from boltz.model.layers.triangular_attention.utils import (
     flatten_final_dims,
     permute_final_dims,
 )
+
+trifast_is_installed = importlib.util.find_spec("trifast") is not None
+
+cueq_is_installed = importlib.util.find_spec("cuequivariance_torch.primitives.triangle") is not None
 
 
 class Linear(nn.Linear):
@@ -104,11 +131,7 @@ class Linear(nn.Linear):
         d = input.dtype
         if self.precision is not None:
             with torch.autocast("cuda", enabled=False):
-                bias = (
-                    self.bias.to(dtype=self.precision)
-                    if self.bias is not None
-                    else None
-                )
+                bias = self.bias.to(dtype=self.precision) if self.bias is not None else None
                 return nn.functional.linear(
                     input.to(dtype=self.precision),
                     self.weight.to(dtype=self.precision),
@@ -178,6 +201,7 @@ def _attention(
     key: torch.Tensor,
     value: torch.Tensor,
     biases: List[torch.Tensor],
+    return_lse: bool = False,
 ) -> torch.Tensor:
     # [*, H, C_hidden, K]
     key = permute_final_dims(key, (1, 0))
@@ -188,10 +212,24 @@ def _attention(
     for b in biases:
         a += b
 
-    a = softmax_no_cast(a, -1)
+    if return_lse:
+        # [B, I, H, Q, 1]
+        amax = a.amax(dim=-1, keepdim=True)
+        # [B, I, H, Q, 1]
+        lse = torch.logsumexp(a - amax, dim=-1, keepdim=True)
+        # [B, I, H, Q, K]
+        a = torch.exp(a - amax - lse)
+    else:
+        amax = None
+        lse = None
+        # [B, I, H, Q, K]
+        a = softmax_no_cast(a, -1)
 
     # [*, H, Q, C_hidden]
     a = torch.matmul(a, value)
+
+    if return_lse:
+        return a, lse, amax
 
     return a
 
@@ -199,6 +237,7 @@ def _attention(
 @torch.compiler.disable
 def kernel_triangular_attn(q, k, v, tri_bias, mask, scale):
     from cuequivariance_torch.primitives.triangle import triangle_attention
+
     return triangle_attention(q, k, v, tri_bias, mask=mask, scale=scale)
 
 
@@ -247,24 +286,14 @@ class Attention(nn.Module):
         # DISCREPANCY: c_hidden is not the per-head channel dimension, as
         # stated in the supplement, but the overall channel dimension.
 
-        self.linear_q = Linear(
-            self.c_q, self.c_hidden * self.no_heads, bias=False, init="glorot"
-        )
-        self.linear_k = Linear(
-            self.c_k, self.c_hidden * self.no_heads, bias=False, init="glorot"
-        )
-        self.linear_v = Linear(
-            self.c_v, self.c_hidden * self.no_heads, bias=False, init="glorot"
-        )
-        self.linear_o = Linear(
-            self.c_hidden * self.no_heads, self.c_q, bias=False, init="final"
-        )
+        self.linear_q = Linear(self.c_q, self.c_hidden * self.no_heads, bias=False, init="glorot")
+        self.linear_k = Linear(self.c_k, self.c_hidden * self.no_heads, bias=False, init="glorot")
+        self.linear_v = Linear(self.c_v, self.c_hidden * self.no_heads, bias=False, init="glorot")
+        self.linear_o = Linear(self.c_hidden * self.no_heads, self.c_q, bias=False, init="final")
 
         self.linear_g = None
         if self.gating:
-            self.linear_g = Linear(
-                self.c_q, self.c_hidden * self.no_heads, bias=False, init="gating"
-            )
+            self.linear_g = Linear(self.c_q, self.c_hidden * self.no_heads, bias=False, init="gating")
 
         self.sigmoid = nn.Sigmoid()
 

@@ -1,9 +1,9 @@
-from typing import Iterator, List
+from collections.abc import Iterator
 
 from numpy.random import RandomState
 
-from boltz.data.types import Record
 from boltz.data.sample.sampler import Sample, Sampler
+from boltz.data.types import Record
 
 
 class DistillationSampler(Sampler):
@@ -23,7 +23,7 @@ class DistillationSampler(Sampler):
         self._size = small_size
         self._prob = small_prob
 
-    def sample(self, records: List[Record], random: RandomState) -> Iterator[Sample]:
+    def sample(self, records: list[Record], random: RandomState) -> Iterator[Sample]:
         """Sample a structure from the dataset infinitely.
 
         Parameters

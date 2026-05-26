@@ -1,5 +1,30 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+# fmt: off
+
 # started from code from https://github.com/lucidrains/alphafold3-pytorch, MIT License, Copyright (c) 2024 Phil Wang
 
+# Added for torch.promote_types used in AtomTransformer.forward() to support float64 testing.
+import torch
 from fairscale.nn.checkpoint.checkpoint_activations import checkpoint_wrapper
 from torch import nn, sigmoid
 from torch.nn import (
@@ -302,16 +327,20 @@ class AtomTransformer(Module):
             p = p.repeat_interleave(multiplicity, 0)
             p = p.view((p.shape[0] * NW, W, H, -1))
 
-            to_keys_new = lambda x: to_keys(x.view(B, NW * W, -1)).view(B * NW, H, -1)
+            to_keys_new = lambda x: to_keys(x.view(B, NW * W, -1)).view(B * NW, H, -1)  # noqa: E731
         else:
             to_keys_new = None
 
         # main transformer
+        # Promote to at least float32 for numerical stability, but preserve
+        # higher precision (e.g. float64) if available. Replaces hardcoded .float()
+        # to support float64 DTensor testing.
+        compute_dtype = torch.promote_types(q.dtype, torch.float32)
         q = self.diffusion_transformer(
             a=q,
             s=c,
             z=p,
-            mask=mask.float(),
+            mask=mask.to(compute_dtype),
             multiplicity=1, # bias term already expanded with multiplicity
             to_keys=to_keys_new,
             model_cache=model_cache,

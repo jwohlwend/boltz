@@ -1,9 +1,32 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+# fmt: off
+
 # started from code from https://github.com/lucidrains/alphafold3-pytorch, MIT License, Copyright (c) 2024 Phil Wang
 
-import einx
+import einx  # noqa: F401
 import torch
 import torch.nn.functional as F
-from einops import einsum, rearrange
+from einops import einsum, rearrange  # noqa: F401
 
 
 def weighted_rigid_align(
@@ -44,12 +67,13 @@ def weighted_rigid_align(
         "... n i, ... n j -> ... i j",
     )
 
-    # Compute the SVD of the covariance matrix, required float32 for svd and determinant
+    # SVD requires at least float32; preserve float64 when present.
     original_dtype = cov_matrix.dtype
-    cov_matrix_32 = cov_matrix.to(dtype=torch.float32)
+    svd_dtype = torch.promote_types(cov_matrix.dtype, torch.float32)
+    cov_matrix_svd = cov_matrix.to(dtype=svd_dtype)
 
     U, S, V = torch.linalg.svd(
-        cov_matrix_32, driver="gesvd" if cov_matrix_32.is_cuda else None
+        cov_matrix_svd, driver="gesvd" if cov_matrix_svd.is_cuda else None
     )
     V = V.mH
 
@@ -63,11 +87,11 @@ def weighted_rigid_align(
 
     # Compute the rotation matrix
     rot_matrix = torch.einsum("... i j, ... k j -> ... i k", U, V).to(
-        dtype=torch.float32
+        dtype=svd_dtype
     )
 
     # Ensure proper rotation matrix with determinant 1
-    F = torch.eye(dim, dtype=cov_matrix_32.dtype, device=cov_matrix.device)[
+    F = torch.eye(dim, dtype=svd_dtype, device=cov_matrix.device)[
         None
     ].repeat(*batch_size, 1, 1)
     F[..., -1, -1] = torch.det(rot_matrix)
@@ -110,8 +134,9 @@ def smooth_lddt_loss(
             -1, is_nucleotide_i.shape[-1]
         )
 
-        mask = is_nucleotide_pair * (true_dists < nucleic_acid_cutoff).float()
-        mask += (1 - is_nucleotide_pair) * (true_dists < other_cutoff).float()
+        compute_dtype = torch.promote_types(pred_coords.dtype, torch.float32)
+        mask = is_nucleotide_pair * (true_dists < nucleic_acid_cutoff).to(compute_dtype)
+        mask += (1 - is_nucleotide_pair) * (true_dists < other_cutoff).to(compute_dtype)
         mask *= 1 - torch.eye(pred_coords.shape[1], device=pred_coords.device)
         mask *= coords_mask_i.unsqueeze(-1)
         mask *= coords_mask_i.unsqueeze(-2)

@@ -1,11 +1,11 @@
-from typing import Dict, Iterator, List
+from collections.abc import Iterator
 
 import numpy as np
 from numpy.random import RandomState
 
 from boltz.data import const
-from boltz.data.types import ChainInfo, InterfaceInfo, Record
 from boltz.data.sample.sampler import Sample, Sampler
+from boltz.data.types import ChainInfo, InterfaceInfo, Record
 
 
 def get_chain_cluster(chain: ChainInfo, record: Record) -> str:  # noqa: ARG001
@@ -58,7 +58,7 @@ def get_interface_cluster(interface: InterfaceInfo, record: Record) -> str:
 def get_chain_weight(
     chain: ChainInfo,
     record: Record,  # noqa: ARG001
-    clusters: Dict[str, int],
+    clusters: dict[str, int],
     beta_chain: float,
     alpha_prot: float,
     alpha_nucl: float,
@@ -108,7 +108,7 @@ def get_chain_weight(
 def get_interface_weight(
     interface: InterfaceInfo,
     record: Record,
-    clusters: Dict[str, int],
+    clusters: dict[str, int],
     beta_interface: float,
     alpha_prot: float,
     alpha_nucl: float,
@@ -201,7 +201,11 @@ class ClusterSampler(Sampler):
         self.beta_chain = beta_chain
         self.beta_interface = beta_interface
 
-    def sample(self, records: List[Record], random: RandomState) -> Iterator[Sample]:  # noqa: C901, PLR0912
+    def sample(  # noqa: C901, PLR0912
+        self,
+        records: list[Record],
+        random: RandomState,
+    ) -> Iterator[Sample]:
         """Sample a structure from the dataset infinitely.
 
         Parameters
@@ -218,7 +222,7 @@ class ClusterSampler(Sampler):
 
         """
         # Compute chain cluster sizes
-        chain_clusters: Dict[str, int] = {}
+        chain_clusters: dict[str, int] = {}
         for record in records:
             for chain in record.chains:
                 if not chain.valid:
@@ -229,7 +233,7 @@ class ClusterSampler(Sampler):
                 chain_clusters[cluster_id] += 1
 
         # Compute interface clusters sizes
-        interface_clusters: Dict[str, int] = {}
+        interface_clusters: dict[str, int] = {}
         for record in records:
             for interface in record.interfaces:
                 if not interface.valid:

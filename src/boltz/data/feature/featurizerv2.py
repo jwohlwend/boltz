@@ -1,10 +1,33 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+
+# fmt: off
 import math
-from typing import Optional
 from collections import deque
+from typing import Optional
+
 import numba
 import numpy as np
 import numpy.typing as npt
-import rdkit.Chem.Descriptors
 import torch
 from numba import types
 from rdkit.Chem import Mol
@@ -276,9 +299,23 @@ def construct_paired_msa(  # noqa: C901, PLR0915, PLR0912
                         first_residues["res_type"][idx] == const.token_ids["UNK"]
                     )
                     if (np.all(is_met) and np.all(is_msa_unk)) or np.all(is_unk):
-                        msa_residues[first_start:first_end]["res_type"] = residues[
+                        # BUG FIX: The original code mutated data.msa[chain_id].residues
+                        # in-place via the msa_residues view. MSA is a frozen dataclass
+                        # but its numpy arrays are still mutable. If construct_paired_msa
+                        # is called twice on the same Tokenized (e.g. when retrying a
+                        # failed sample), the second call sees residues already patched by
+                        # the first — the MET/UNK mismatch check passes silently with
+                        # corrupted data. Copy-on-write: create a new MSA with copied
+                        # residues so the caller's data is never modified.
+                        patched_residues = msa_residues.copy()
+                        patched_residues[first_start:first_end][
                             "res_type"
-                        ]
+                        ] = residues["res_type"]
+                        msa[chain_id] = MSA(
+                            sequences=data.msa[chain_id].sequences,
+                            deletions=data.msa[chain_id].deletions,
+                            residues=patched_residues,
+                        )
                     else:
                         print(
                             warning,
@@ -320,8 +357,20 @@ def construct_paired_msa(  # noqa: C901, PLR0915, PLR0912
     )
 
     # Keep track of the sequences available per chain, keeping the original
-    # order of the sequences in the MSA to favor the best matching sequences
-    visited = {(c, s) for c, items in taxonomy_map for s in items}
+    # order of the sequences in the MSA to favor the best matching sequences.
+    #
+    # BUG FIX: The original comprehension was {(c, s) for c, items in taxonomy_map
+    # for s in items}. After sorted(), taxonomy_map is a list of (taxon, pairs)
+    # tuples, so `c` was the taxon key and `s` was a (chain_id, seq_idx) tuple,
+    # producing {(taxon, (chain_id, seq_idx)), ...}. The downstream check
+    # `(c, i) not in visited` uses (chain_id, seq_idx) — an (int, int) pair that
+    # never matched the (int, tuple) entries, so `visited` never filtered anything.
+    # Example: taxonomy_map = [(9606, [(0, 1), (1, 1)])] produced
+    # visited = {(9606, (0, 1)), (9606, (1, 1))} but the check looked for (0, 1)
+    # which was never found. All taxonomy-assigned sequences leaked into the
+    # `available` pool, causing duplicate MSA rows that waste capacity and dilute
+    # the paired co-evolutionary signal.
+    visited = {s for _, items in taxonomy_map for s in items}
     available = {}
     for c in chain_ids:
         available[c] = deque(
@@ -421,16 +470,28 @@ def construct_paired_msa(  # noqa: C901, PLR0915, PLR0912
     # Map (chain_id, seq_idx, res_idx) to deletion
     deletions = numba.typed.Dict.empty(
         key_type=numba.types.Tuple(
-            [numba.types.int64, numba.types.int64, numba.types.int64]),
-        value_type=numba.types.int64
+            [numba.types.int64, numba.types.int64, numba.types.int64]
+        ),
+        value_type=numba.types.int64,
     )
     for chain_id, chain_msa in msa.items():
-        chain_deletions = chain_msa.deletions
         for sequence in chain_msa.sequences:
             seq_idx = sequence["seq_idx"]
             del_start = sequence["del_start"]
             del_end = sequence["del_end"]
-            chain_deletions = chain_deletions[del_start:del_end]
+            # BUG FIX: The original code assigned
+            #   chain_deletions = chain_msa.deletions   (full array, outer loop)
+            #   chain_deletions = chain_deletions[del_start:del_end]  (inner loop)
+            # On each inner iteration, chain_deletions was re-sliced from the
+            # *previous* iteration's already-shrunken slice, not from the original
+            # full array. Example: if seq 0 (query) has del_start=0, del_end=0,
+            # then after seq 0 chain_deletions = full_array[0:0] = []. For seq 1,
+            # [][del_start_1:del_end_1] = [] regardless of del_start_1/del_end_1,
+            # silently dropping ALL deletion data for every subsequent sequence.
+            # This affects all inference predictions — has_deletion, deletion_value,
+            # and deletion_mean features are all zero, removing structural loop/
+            # insertion information from the MSA module's input.
+            chain_deletions = chain_msa.deletions[del_start:del_end]
             for deletion_data in chain_deletions:
                 res_idx = deletion_data["res_idx"]
                 deletion_values = deletion_data["deletion"]
@@ -1155,6 +1216,7 @@ def process_atom_features(
         frame_data = []
         resolved_frame_data = []
     atom_to_token = []
+    atom_counts_per_token = []  # consumed by distributed featurizer for sharding
     token_to_rep_atom = []  # index on cropped atom table
     r_set_to_rep_atom = []
     disto_coords_ensemble = []
@@ -1202,6 +1264,7 @@ def process_atom_features(
         # Map atoms to token indices
         ref_space_uid.extend([new_idx] * token["atom_num"])
         atom_to_token.extend([token_id] * token["atom_num"])
+        atom_counts_per_token.append(token["atom_num"])
 
         # Add atom data
         start = token["atom_idx"]
@@ -1388,6 +1451,12 @@ def process_atom_features(
         atom_idx += len(token_atoms)
 
     disto_coords_ensemble = np.array(disto_coords_ensemble)  # (N_TOK, N_ENS, 3)
+    if disto_coords_ensemble.ndim != 3:
+        msg = (
+            f"disto_coords_ensemble has shape {disto_coords_ensemble.shape} "
+            f"(expected 3D: N_TOK x N_ENS x 3) for record {data.record.id}"
+        )
+        raise ValueError(msg)
 
     # Compute ensemble distogram
     L = len(data.tokens)
@@ -1438,6 +1507,7 @@ def process_atom_features(
     resolved_mask = from_numpy(atom_data["is_present"])
     pad_mask = torch.ones(len(atom_data), dtype=torch.float)
     atom_to_token = torch.tensor(atom_to_token, dtype=torch.long)
+    atom_counts_per_token = torch.tensor(atom_counts_per_token, dtype=torch.long)
     token_to_rep_atom = torch.tensor(token_to_rep_atom, dtype=torch.long)
     r_set_to_rep_atom = torch.tensor(r_set_to_rep_atom, dtype=torch.long)
     token_to_center_atom = torch.tensor(token_to_center_atom, dtype=torch.long)
@@ -1530,6 +1600,7 @@ def process_atom_features(
         pad_len = max_tokens - token_to_rep_atom.shape[0]
         if pad_len > 0:
             atom_to_token = pad_dim(atom_to_token, 1, pad_len)
+            atom_counts_per_token = pad_dim(atom_counts_per_token, 0, pad_len)
             token_to_rep_atom = pad_dim(token_to_rep_atom, 0, pad_len)
             r_set_to_rep_atom = pad_dim(r_set_to_rep_atom, 0, pad_len)
             token_to_center_atom = pad_dim(token_to_center_atom, 0, pad_len)
@@ -1552,6 +1623,7 @@ def process_atom_features(
         "coords": coords,
         "atom_pad_mask": pad_mask,
         "atom_to_token": atom_to_token,
+        "atom_counts_per_token": atom_counts_per_token,
         "token_to_rep_atom": token_to_rep_atom,
         "r_set_to_rep_atom": r_set_to_rep_atom,
         "token_to_center_atom": token_to_center_atom,
@@ -2335,8 +2407,12 @@ class Boltz2Featurizer:
             chain_constraint_features = process_chain_feature_constraints(data)
             contact_constraint_features = process_contact_feature_constraints(
                 data=data,
-                inference_pocket_constraints=inference_pocket_constraints if inference_pocket_constraints else [],
-                inference_contact_constraints=inference_contact_constraints if inference_contact_constraints else [],
+                inference_pocket_constraints=inference_pocket_constraints
+                if inference_pocket_constraints
+                else [],
+                inference_contact_constraints=inference_contact_constraints
+                if inference_contact_constraints
+                else [],
             )
 
         return {

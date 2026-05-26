@@ -1,0 +1,30 @@
+defaults:
+  - structurev2_cp
+  - _self_
+
+trainer:
+  accumulate_grad_batches: 4
+
+wandb:
+  name: boltz2_small_bf16mixed_cp
+  project: boltz
+  id: boltz2_small_bf16mixed_cp
+
+data:
+  checkpoint_monitor_val_group: "val/disto_lddt_protein_protein"
+  max_tokens: 256
+  max_atoms: 2048
+  max_seqs: 1024
+
+model:
+  checkpoint_diffusion_conditioning: false
+  msa_args:
+    msa_blocks: 3
+    activation_checkpointing: false
+  template_args:
+    activation_checkpointing: false
+  pairformer_args:
+    num_blocks: 12
+    activation_checkpointing: false
+  score_model_args:
+    activation_checkpointing: false

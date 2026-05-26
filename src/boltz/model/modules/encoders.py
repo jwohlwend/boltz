@@ -1,3 +1,26 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+# fmt: off
+
 # started from code from https://github.com/lucidrains/alphafold3-pytorch, MIT License, Copyright (c) 2024 Phil Wang
 from functools import partial
 from math import pi
@@ -404,6 +427,11 @@ class AtomAttentionEncoder(Module):
         B, N, _ = feats["ref_pos"].shape
         atom_mask = feats["atom_pad_mask"].bool()
 
+        # Promote to at least float32 for numerical stability, but preserve
+        # higher precision (e.g. float64) if available. Replaces hardcoded .float()
+        # to support float64 DTensor testing.
+        compute_dtype = torch.promote_types(feats["ref_pos"].dtype, torch.float32)
+
         layer_cache = None
         if model_cache is not None:
             cache_prefix = "atomencoder"
@@ -433,7 +461,7 @@ class AtomAttentionEncoder(Module):
             W, H = self.atoms_per_window_queries, self.atoms_per_window_keys
             B, N = c.shape[:2]
             K = N // W
-            keys_indexing_matrix = get_indexing_matrix(K, W, H, c.device)
+            keys_indexing_matrix = get_indexing_matrix(K, W, H, c.device).to(dtype=compute_dtype)
             to_keys = partial(
                 single_to_keys, indexing_matrix=keys_indexing_matrix, W=W, H=H
             )
@@ -447,11 +475,11 @@ class AtomAttentionEncoder(Module):
 
             atom_mask_queries = atom_mask.view(B, K, W, 1)
             atom_mask_keys = (
-                to_keys(atom_mask.unsqueeze(-1).float()).view(B, K, 1, H).bool()
+                to_keys(atom_mask.unsqueeze(-1).to(compute_dtype)).view(B, K, 1, H).bool()
             )
             atom_uid_queries = atom_uid.view(B, K, W, 1)
             atom_uid_keys = (
-                to_keys(atom_uid.unsqueeze(-1).float()).view(B, K, 1, H).long()
+                to_keys(atom_uid.unsqueeze(-1).to(compute_dtype)).view(B, K, 1, H).long()
             )
             v = (
                 (
@@ -459,7 +487,7 @@ class AtomAttentionEncoder(Module):
                     & atom_mask_keys
                     & (atom_uid_queries == atom_uid_keys)
                 )
-                .float()
+                .to(compute_dtype)
                 .unsqueeze(-1)
             )
 
@@ -471,7 +499,7 @@ class AtomAttentionEncoder(Module):
 
             if self.structure_prediction:
                 # run only in structure model not in initial encoding
-                atom_to_token = feats["atom_to_token"].float()
+                atom_to_token = feats["atom_to_token"].to(compute_dtype)
 
                 s_to_c = self.s_to_c_trans(s_trunk)
                 s_to_c = torch.bmm(atom_to_token, s_to_c)
@@ -530,7 +558,7 @@ class AtomAttentionEncoder(Module):
         )
 
         q_to_a = self.atom_to_token_trans(q)
-        atom_to_token = feats["atom_to_token"].float()
+        atom_to_token = feats["atom_to_token"].to(compute_dtype)
         atom_to_token = atom_to_token.repeat_interleave(multiplicity, 0)
         atom_to_token_mean = atom_to_token / (
             atom_to_token.sum(dim=1, keepdim=True) + 1e-6
@@ -611,7 +639,11 @@ class AtomAttentionDecoder(Module):
         atom_mask = feats["atom_pad_mask"]
         atom_mask = atom_mask.repeat_interleave(multiplicity, 0)
 
-        atom_to_token = feats["atom_to_token"].float()
+        # Promote to at least float32 for numerical stability, but preserve
+        # higher precision (e.g. float64) if available. Replaces hardcoded .float()
+        # to support float64 DTensor testing.
+        compute_dtype = torch.promote_types(a.dtype, torch.float32)
+        atom_to_token = feats["atom_to_token"].to(compute_dtype)
         atom_to_token = atom_to_token.repeat_interleave(multiplicity, 0)
 
         a_to_q = self.a_to_q_trans(a)

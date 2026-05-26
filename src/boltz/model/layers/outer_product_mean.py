@@ -1,3 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+
 import torch
 from torch import Tensor, nn
 
@@ -58,21 +80,15 @@ class OuterProductMean(nn.Module):
             # Compute pairwise mask
             for i in range(0, mask.shape[1], 64):
                 if i == 0:
-                    num_mask = (
-                        mask[:, i : i + 64, None, :] * mask[:, i : i + 64, :, None]
-                    ).sum(1)
+                    num_mask = (mask[:, i : i + 64, None, :] * mask[:, i : i + 64, :, None]).sum(1)
                 else:
-                    num_mask += (
-                        mask[:, i : i + 64, None, :] * mask[:, i : i + 64, :, None]
-                    ).sum(1)
+                    num_mask += (mask[:, i : i + 64, None, :] * mask[:, i : i + 64, :, None]).sum(1)
             num_mask = num_mask.clamp(min=1)
 
             # Compute squentially in chunks
             for i in range(0, self.c_hidden, chunk_size):
                 a_chunk = a[:, :, :, i : i + chunk_size]
-                sliced_weight_proj_o = self.proj_o.weight[
-                    :, i * self.c_hidden : (i + chunk_size) * self.c_hidden
-                ]
+                sliced_weight_proj_o = self.proj_o.weight[:, i * self.c_hidden : (i + chunk_size) * self.c_hidden]
 
                 z = torch.einsum("bsic,bsjd->bijcd", a_chunk, b)
                 z = z.reshape(*z.shape[:3], -1)
@@ -89,7 +105,10 @@ class OuterProductMean(nn.Module):
         else:
             mask = mask[:, :, None, :] * mask[:, :, :, None]
             num_mask = mask.sum(1).clamp(min=1)
-            z = torch.einsum("bsic,bsjd->bijcd", a.float(), b.float())
+            # Cast to at least float32 for numerical stability, using
+            # promote_types to preserve higher-precision dtypes (e.g. float64).
+            compute_dtype = torch.promote_types(a.dtype, torch.float32)
+            z = torch.einsum("bsic,bsjd->bijcd", a.to(compute_dtype), b.to(compute_dtype))
             z = z.reshape(*z.shape[:3], -1)
             z = z / num_mask
 

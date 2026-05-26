@@ -113,18 +113,13 @@ def resolved_loss(
     # extract necessary features
     token_to_rep_atom = feats["token_to_rep_atom"]
     token_to_rep_atom = token_to_rep_atom.repeat_interleave(multiplicity, 0).float()
-    ref_mask = torch.bmm(
-        token_to_rep_atom, true_coords_resolved_mask.unsqueeze(-1).float()
-    ).squeeze(-1)
+    ref_mask = torch.bmm(token_to_rep_atom, true_coords_resolved_mask.unsqueeze(-1).float()).squeeze(-1)
     pad_mask = feats["token_pad_mask"]
     pad_mask = pad_mask.repeat_interleave(multiplicity, 0).float()
 
     # compute loss
     log_softmax_resolved = torch.nn.functional.log_softmax(pred_resolved, dim=-1)
-    errors = (
-        -ref_mask * log_softmax_resolved[:, :, 0]
-        - (1 - ref_mask) * log_softmax_resolved[:, :, 1]
-    )
+    errors = -ref_mask * log_softmax_resolved[:, :, 0] - (1 - ref_mask) * log_softmax_resolved[:, :, 1]
     loss = torch.sum(errors * pad_mask, dim=-1) / (1e-7 + torch.sum(pad_mask, dim=-1))
 
     # Average over the batch dimension
@@ -200,24 +195,17 @@ def plddt_loss(
 
     # compute mask
     pair_mask = atom_mask.unsqueeze(-1) * atom_mask.unsqueeze(-2)
-    pair_mask = (
-        pair_mask
-        * (1 - torch.eye(pair_mask.shape[1], device=pair_mask.device))[None, :, :]
-    )
+    pair_mask = pair_mask * (1 - torch.eye(pair_mask.shape[1], device=pair_mask.device))[None, :, :]
     pair_mask = torch.einsum("bnm,bkm->bnk", pair_mask, R_set_to_rep_atom)
     pair_mask = torch.bmm(token_to_rep_atom, pair_mask)
     atom_mask = torch.bmm(token_to_rep_atom, atom_mask.unsqueeze(-1).float())
     is_nucleotide_R_element = torch.bmm(
         R_set_to_rep_atom, torch.bmm(atom_to_token, is_nucleotide_token.unsqueeze(-1))
     ).squeeze(-1)
-    cutoff = 15 + 15 * is_nucleotide_R_element.reshape(B, 1, -1).repeat(
-        1, true_d.shape[1], 1
-    )
+    cutoff = 15 + 15 * is_nucleotide_R_element.reshape(B, 1, -1).repeat(1, true_d.shape[1], 1)
 
     # compute lddt
-    target_lddt, mask_no_match = lddt_dist(
-        pred_d, true_d, pair_mask, cutoff, per_atom=True
-    )
+    target_lddt, mask_no_match = lddt_dist(pred_d, true_d, pair_mask, cutoff, per_atom=True)
 
     # compute loss
     num_bins = pred_lddt.shape[-1]
@@ -229,9 +217,7 @@ def plddt_loss(
         dim=-1,
     )
     atom_mask = atom_mask.squeeze(-1)
-    loss = torch.sum(errors * atom_mask * mask_no_match, dim=-1) / (
-        1e-7 + torch.sum(atom_mask * mask_no_match, dim=-1)
-    )
+    loss = torch.sum(errors * atom_mask * mask_no_match, dim=-1) / (1e-7 + torch.sum(atom_mask * mask_no_match, dim=-1))
 
     # Average over the batch dimension
     loss = torch.mean(loss)
@@ -275,9 +261,7 @@ def pde_loss(
     # extract necessary features
     token_to_rep_atom = feats["token_to_rep_atom"]
     token_to_rep_atom = token_to_rep_atom.repeat_interleave(multiplicity, 0).float()
-    token_mask = torch.bmm(
-        token_to_rep_atom, true_coords_resolved_mask.unsqueeze(-1).float()
-    ).squeeze(-1)
+    token_mask = torch.bmm(token_to_rep_atom, true_coords_resolved_mask.unsqueeze(-1).float()).squeeze(-1)
     mask = token_mask.unsqueeze(-1) * token_mask.unsqueeze(-2)
 
     # compute true pde
@@ -297,9 +281,7 @@ def pde_loss(
         pde_one_hot * torch.nn.functional.log_softmax(pred_pde, dim=-1),
         dim=-1,
     )
-    loss = torch.sum(errors * mask, dim=(-2, -1)) / (
-        1e-7 + torch.sum(mask, dim=(-2, -1))
-    )
+    loss = torch.sum(errors * mask, dim=(-2, -1)) / (1e-7 + torch.sum(mask, dim=(-2, -1)))
 
     # Average over the batch dimension
     loss = torch.mean(loss)
@@ -381,15 +363,11 @@ def pae_loss(
         pred_atom_coords, frame_pred_atom_a, frame_pred_atom_b, frame_pred_atom_c
     )
 
-    target_pae = torch.sqrt(
-        ((true_coords_transformed - pred_coords_transformed) ** 2).sum(-1) + 1e-8
-    )
+    target_pae = torch.sqrt(((true_coords_transformed - pred_coords_transformed) ** 2).sum(-1) + 1e-8)
 
     # Compute mask for the pae loss
     b_true_resolved_mask = true_coords_resolved_mask[
-        torch.arange(B // multiplicity)[:, None, None].to(
-            pred_coords_transformed.device
-        ),
+        torch.arange(0, B, multiplicity)[:, None, None].to(pred_coords_transformed.device),
         frame_true_atom_b,
     ]
 
@@ -408,13 +386,10 @@ def pae_loss(
     bin_index = torch.clamp(bin_index, max=(num_bins - 1))
     pae_one_hot = nn.functional.one_hot(bin_index, num_classes=num_bins)
     errors = -1 * torch.sum(
-        pae_one_hot
-        * torch.nn.functional.log_softmax(pred_pae.reshape(pae_one_hot.shape), dim=-1),
+        pae_one_hot * torch.nn.functional.log_softmax(pred_pae.reshape(pae_one_hot.shape), dim=-1),
         dim=-1,
     )
-    loss = torch.sum(errors * pair_mask, dim=(-2, -1)) / (
-        1e-7 + torch.sum(pair_mask, dim=(-2, -1))
-    )
+    loss = torch.sum(errors * pair_mask, dim=(-2, -1)) / (1e-7 + torch.sum(pair_mask, dim=(-2, -1)))
     # Average over the batch dimension
     loss = torch.mean(loss)
 
@@ -428,10 +403,7 @@ def lddt_dist(dmat_predicted, dmat_true, mask, cutoff=15.0, per_atom=False):
     dist_l1 = torch.abs(dmat_true - dmat_predicted)
 
     score = 0.25 * (
-        (dist_l1 < 0.5).float()
-        + (dist_l1 < 1.0).float()
-        + (dist_l1 < 2.0).float()
-        + (dist_l1 < 4.0).float()
+        (dist_l1 < 0.5).float() + (dist_l1 < 1.0).float() + (dist_l1 < 2.0).float() + (dist_l1 < 4.0).float()
     )
 
     # Normalize over the appropriate axes.
@@ -501,16 +473,17 @@ def compute_frame_pred(
 ):
     # extract necessary features
     asym_id_token = feats["asym_id"]
-    asym_id_atom = torch.bmm(
-        feats["atom_to_token"].float(), asym_id_token.unsqueeze(-1).float()
-    ).squeeze(-1)
+    asym_id_atom = torch.bmm(feats["atom_to_token"].float(), asym_id_token.unsqueeze(-1).float()).squeeze(-1)
     B, N, _ = pred_atom_coords.shape
     pred_atom_coords = pred_atom_coords.reshape(B // multiplicity, multiplicity, -1, 3)
     frames_idx_pred = (
-        frames_idx_true.clone()
-        .repeat_interleave(multiplicity, 0)
-        .reshape(B // multiplicity, multiplicity, -1, 3)
+        frames_idx_true.clone().repeat_interleave(multiplicity, 0).reshape(B // multiplicity, multiplicity, -1, 3)
     )
+
+    # resolved_mask is (B*mult, N_atom); reduce to (B_batch, N_atom) so indexing
+    # by batch element i is correct (frames are shared across multiplicity copies).
+    if resolved_mask is not None:
+        resolved_mask = resolved_mask[::multiplicity]
 
     # Iterate through the batch and update the frames for nonpolymers
     for i, pred_atom_coord in enumerate(pred_atom_coords):
@@ -521,10 +494,7 @@ def compute_frame_pred(
             mask_chain_atom = (asym_id_atom[i] == id) * feats["atom_pad_mask"][i]
             num_tokens = int(mask_chain_token.sum().item())
             num_atoms = int(mask_chain_atom.sum().item())
-            if (
-                feats["mol_type"][i, token_idx] != const.chain_type_ids["NONPOLYMER"]
-                or num_atoms < 3
-            ):
+            if feats["mol_type"][i, token_idx] != const.chain_type_ids["NONPOLYMER"] or num_atoms < 3:
                 token_idx += num_tokens
                 atom_idx += num_atoms
                 continue
@@ -543,7 +513,7 @@ def compute_frame_pred(
                     * feats["atom_pad_mask"][i][mask_chain_atom.bool()][:, None]
                 ).to(torch.float32)
                 resolved_pair[resolved_pair == 1] = torch.inf
-                indices = torch.sort(dist_mat + resolved_pair, axis=2).indices
+                indices = torch.sort(dist_mat + resolved_pair, axis=2, stable=True).indices
             else:
                 if resolved_mask is None:
                     resolved_mask = feats["atom_resolved_mask"]
@@ -552,7 +522,7 @@ def compute_frame_pred(
                     * resolved_mask[i][mask_chain_atom.bool()][:, None]
                 ).to(torch.float32)
                 resolved_pair[resolved_pair == 1] = torch.inf
-                indices = torch.sort(dist_mat + resolved_pair, axis=2).indices
+                indices = torch.sort(dist_mat + resolved_pair, axis=2, stable=True).indices
 
             # Compute the frames
             frames = (
@@ -572,12 +542,8 @@ def compute_frame_pred(
 
     # Expand the frames with the multiplicity
     frames_expanded = pred_atom_coords[
-        torch.arange(0, B // multiplicity, 1)[:, None, None, None].to(
-            frames_idx_pred.device
-        ),
-        torch.arange(0, multiplicity, 1)[None, :, None, None].to(
-            frames_idx_pred.device
-        ),
+        torch.arange(0, B // multiplicity, 1)[:, None, None, None].to(frames_idx_pred.device),
+        torch.arange(0, multiplicity, 1)[None, :, None, None].to(frames_idx_pred.device),
         frames_idx_pred,
     ].reshape(-1, 3, 3)
 

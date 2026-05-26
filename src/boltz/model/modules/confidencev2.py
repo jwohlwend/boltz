@@ -1,3 +1,26 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+# fmt: off
+# ruff: noqa
 import torch
 from torch import nn
 from torch.nn.functional import pad
@@ -14,6 +37,10 @@ from boltz.model.modules.trunkv2 import (
     ContactConditioning,
 )
 from boltz.model.modules.utils import LinearNoBias
+
+IPLDDT_LIGAND_WEIGHT = 20
+IPLDDT_INTERFACE_WEIGHT = 10
+IPLDDT_NON_INTERFACE_WEIGHT = 1
 
 
 class ConfidenceModule(nn.Module):
@@ -165,7 +192,9 @@ class ConfidenceModule(nn.Module):
         if self.add_z_input_to_z:
             relative_position_encoding = self.rel_pos(feats)
             z = z + relative_position_encoding
-            z = z + self.token_bonds(feats["token_bonds"].float())
+            z = z + self.token_bonds(
+                feats["token_bonds"].to(dtype=torch.promote_types(feats["token_bonds"].dtype, torch.float32))
+            )
             if self.bond_type_feature:
                 z = z + self.token_bonds_type(feats["type_bonds"].long())
             z = z + self.contact_conditioning(feats)
@@ -193,7 +222,11 @@ class ConfidenceModule(nn.Module):
             x_pred = x_pred.reshape(B * mult, N, -1)
         else:
             BM, N, _ = x_pred.shape
-        x_pred_repr = torch.bmm(token_to_rep_atom.float(), x_pred)
+        compute_dtype = torch.promote_types(token_to_rep_atom.dtype, torch.float32)
+        x_pred_repr = torch.bmm(
+            token_to_rep_atom.to(dtype=compute_dtype),
+            x_pred.to(dtype=compute_dtype),
+        )
         d = torch.cdist(x_pred_repr, x_pred_repr)
         distogram = (d.unsqueeze(-1) > self.boundaries).sum(dim=-1).long()
         distogram = self.dist_bin_pairwise_embed(distogram)
@@ -283,7 +316,9 @@ class ConfidenceHeads(nn.Module):
     ):
         if self.use_separate_heads:
             asym_id_token = feats["asym_id"]
-            is_same_chain = asym_id_token.unsqueeze(-1) == asym_id_token.unsqueeze(-2)
+            is_same_chain = asym_id_token.unsqueeze(-1) == asym_id_token.unsqueeze(-2)  # (B, N, N)
+            if multiplicity > 1:
+                is_same_chain = is_same_chain.repeat_interleave(multiplicity, dim=0)
             is_different_chain = ~is_same_chain
 
         if self.use_separate_heads:
@@ -314,9 +349,9 @@ class ConfidenceHeads(nn.Module):
         resolved_logits = self.to_resolved_logits(s)
         plddt_logits = self.to_plddt_logits(s)
 
-        ligand_weight = 20
-        non_interface_weight = 1
-        interface_weight = 10
+        ligand_weight = IPLDDT_LIGAND_WEIGHT
+        non_interface_weight = IPLDDT_NON_INTERFACE_WEIGHT
+        interface_weight = IPLDDT_INTERFACE_WEIGHT
 
         token_type = feats["mol_type"]
         token_type = token_type.repeat_interleave(multiplicity, 0)
@@ -400,9 +435,10 @@ class ConfidenceHeads(nn.Module):
             complex_plddt = (plddt * atom_pad_mask).sum(dim=-1) / atom_pad_mask.sum(
                 dim=-1
             )
-            token_type = feats["mol_type"].float()
-            atom_to_token = feats["atom_to_token"].float()
-            chain_id_token = feats["asym_id"].float()
+            _promote = lambda t: t.to(dtype=torch.promote_types(t.dtype, torch.float32))  # noqa: E731
+            token_type = _promote(feats["mol_type"])
+            atom_to_token = _promote(feats["atom_to_token"])
+            chain_id_token = _promote(feats["asym_id"])
             atom_type = torch.bmm(atom_to_token, token_type.unsqueeze(-1)).squeeze(-1)
             is_ligand_atom = (atom_type == const.chain_type_ids["NONPOLYMER"]).float()
             d_atom = torch.cdist(x_pred, x_pred)

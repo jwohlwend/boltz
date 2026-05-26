@@ -1,3 +1,26 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+# fmt: off
+
 from dataclasses import replace
 from typing import Optional
 
@@ -6,12 +29,12 @@ from scipy.spatial.distance import cdist
 
 from boltz.data import const
 from boltz.data.crop.cropper import Cropper
-from boltz.data.types import Tokenized
+from boltz.data.types import TokenizedTraining
 
 
 def pick_random_token(
     tokens: np.ndarray,
-    random: np.random.RandomState,
+    random: np.random.Generator,
 ) -> np.ndarray:
     """Pick a random token from the data.
 
@@ -19,7 +42,7 @@ def pick_random_token(
     ----------
     tokens : np.ndarray
         The token data.
-    random : np.ndarray
+    random : np.random.Generator
         The random state for reproducibility.
 
     Returns
@@ -34,7 +57,7 @@ def pick_random_token(
 def pick_chain_token(
     tokens: np.ndarray,
     chain_id: int,
-    random: np.random.RandomState,
+    random: np.random.Generator,
 ) -> np.ndarray:
     """Pick a random token from a chain.
 
@@ -68,7 +91,7 @@ def pick_chain_token(
 def pick_interface_token(
     tokens: np.ndarray,
     interface: np.ndarray,
-    random: np.random.RandomState,
+    random: np.random.Generator,
 ) -> np.ndarray:
     """Pick a random token from an interface.
 
@@ -78,7 +101,7 @@ def pick_interface_token(
         The token data.
     interface : int
         The interface ID.
-    random : np.ndarray
+    random : np.random.Generator
         The random state for reproducibility.
 
     Returns
@@ -124,17 +147,53 @@ def pick_interface_token(
     return query
 
 
+def pick_initial_crop_token(
+    tokens: np.ndarray,
+    initial_crop: list[int],
+    random: np.random.Generator,
+) -> np.ndarray:
+    """Pick a random token from the initial crop.
+
+    Parameters
+    ----------
+    tokens : np.ndarray
+        The token data.
+    initial_crop : list[int]
+        The initial crop.
+    random : np.random.Generator
+        The random state for reproducibility.
+
+    Returns
+    -------
+    np.ndarray
+
+    """
+    # Compute crop centroid
+    crop_centroid = np.mean(tokens[initial_crop]["center_coords"], axis=0)
+
+    # Compute distances to all tokens
+    dists = cdist(tokens["center_coords"], crop_centroid[None])
+
+    # Pick the closest token
+    return tokens[np.argmin(dists[:, 0])]
+
+
 class BoltzCropper(Cropper):
     """Interpolate between contiguous and spatial crops."""
 
-    def __init__(self, min_neighborhood: int = 0, max_neighborhood: int = 40) -> None:
+    def __init__(
+        self,
+        min_neighborhood: int = 0,
+        max_neighborhood: int = 40,
+        dna_double_helix: bool = False,
+    ) -> None:
         """Initialize the cropper.
 
         Modulates the type of cropping to be performed.
         Smaller neighborhoods result in more spatial
         cropping. Larger neighborhoods result in more
         continuous cropping. A mix can be achieved by
-        providing a range over which to sample.
+        providing a list of sizes from which to sample.
 
         Parameters
         ----------
@@ -142,20 +201,24 @@ class BoltzCropper(Cropper):
             The minimum neighborhood size, by default 0.
         max_neighborhood : int
             The maximum neighborhood size, by default 40.
+        dna_double_helix : bool
+            Whether to use DNA double helix cropping, by default False.
 
         """
-        sizes = list(range(min_neighborhood, max_neighborhood + 1, 2))
-        self.neighborhood_sizes = sizes
+        self.neighborhood_sizes = list(range(min_neighborhood, max_neighborhood + 1, 2))
+        self.dna_double_helix = dna_double_helix
 
     def crop(  # noqa: PLR0915
         self,
-        data: Tokenized,
+        data: TokenizedTraining,
         max_tokens: int,
-        random: np.random.RandomState,
-        max_atoms: Optional[int] = None,
+        random: np.random.Generator,
         chain_id: Optional[int] = None,
         interface_id: Optional[int] = None,
-    ) -> Tokenized:
+        max_atoms: Optional[int] = None,
+        return_indices: bool = False,
+        initial_crop: Optional[list[int]] = None,
+    ) -> TokenizedTraining:
         """Crop the data to a maximum number of tokens.
 
         Parameters
@@ -164,18 +227,14 @@ class BoltzCropper(Cropper):
             The tokenized data.
         max_tokens : int
             The maximum number of tokens to crop.
-        random : np.random.RandomState
+        random : np.random.Generator
             The random state for reproducibility.
-        max_atoms : int, optional
+        max_atoms : Optional[int]
             The maximum number of atoms to consider.
-        chain_id : int, optional
-            The chain ID to crop.
-        interface_id : int, optional
-            The interface ID to crop.
 
         Returns
         -------
-        Tokenized
+        TokenizedTraining
             The cropped data.
 
         """
@@ -211,7 +270,9 @@ class BoltzCropper(Cropper):
             raise ValueError(msg)
 
         # Pick a random token, chain, or interface
-        if chain_id is not None:
+        if initial_crop is not None:
+            query = pick_initial_crop_token(token_data, initial_crop, random)
+        elif chain_id is not None:
             query = pick_chain_token(valid_tokens, chain_id, random)
         elif interface_id is not None:
             interface = interfaces[interface_id]
@@ -232,44 +293,102 @@ class BoltzCropper(Cropper):
         # Select cropped indices
         cropped: set[int] = set()
         total_atoms = 0
+
+        if initial_crop is not None:
+            cropped.update(initial_crop)
+            total_atoms = sum(token_data[idx]["atom_num"] for idx in initial_crop)
+
         for idx in indices:
             # Get the token
             token = valid_tokens[idx]
 
-            # Get all tokens from this chain
-            chain_tokens = token_data[token_data["asym_id"] == token["asym_id"]]
+            neighborhood_size_to_use = neighborhood_size
+            center_tokens_to_use = [token]
+            new_tokens_acc = []
 
-            # Pick the whole chain if possible, otherwise select
-            # a contiguous subset centered at the query token
-            if len(chain_tokens) <= neighborhood_size:
-                new_tokens = chain_tokens
-            else:
-                # First limit to the maximum set of tokens, with the
-                # neighborhood on both sides to handle edges. This
-                # is mostly for efficiency with the while loop below.
-                min_idx = token["res_idx"] - neighborhood_size
-                max_idx = token["res_idx"] + neighborhood_size
+            # If it is a DNA double helix we may change this
+            if (
+                self.dna_double_helix
+                and token["mol_type"] == const.chain_type_ids["DNA"]
+            ):
+                base_coords = data.structure.atoms["coords"][
+                    token["atom_idx"] : token["atom_idx"] + token["atom_num"]
+                ]
+                base_is_present = data.structure.atoms["is_present"][
+                    token["atom_idx"] : token["atom_idx"] + token["atom_num"]
+                ]
+                base_coords = base_coords[base_is_present]
 
-                max_token_set = chain_tokens
-                max_token_set = max_token_set[max_token_set["res_idx"] >= min_idx]
-                max_token_set = max_token_set[max_token_set["res_idx"] <= max_idx]
+                best_dist = 1e9
+                best_other_token = None
 
-                # Start by adding just the query token
-                new_tokens = max_token_set[max_token_set["res_idx"] == token["res_idx"]]
+                for other_token in valid_tokens:
+                    if (
+                        other_token["mol_type"] == const.chain_type_ids["DNA"]
+                        and other_token["asym_id"] != token["asym_id"]
+                    ):
+                        other_base_coords = data.structure.atoms["coords"][
+                            other_token["atom_idx"] : other_token["atom_idx"]
+                            + other_token["atom_num"]
+                        ]
+                        other_base_is_present = data.structure.atoms["is_present"][
+                            other_token["atom_idx"] : other_token["atom_idx"]
+                            + other_token["atom_num"]
+                        ]
+                        other_base_coords = other_base_coords[other_base_is_present]
 
-                # Expand the neighborhood until we have enough tokens, one
-                # by one to handle some edge cases with non-standard chains.
-                # We switch to the res_idx instead of the token_idx to always
-                # include all tokens from modified residues or from ligands.
-                min_idx = max_idx = token["res_idx"]
-                while new_tokens.size < neighborhood_size:
-                    min_idx = min_idx - 1
-                    max_idx = max_idx + 1
-                    new_tokens = max_token_set
-                    new_tokens = new_tokens[new_tokens["res_idx"] >= min_idx]
-                    new_tokens = new_tokens[new_tokens["res_idx"] <= max_idx]
+                        dist = np.min(cdist(base_coords, other_base_coords))
+                        if dist < best_dist:
+                            best_dist = dist
+                            best_other_token = other_token
+
+                if best_dist < 3.0:
+                    center_tokens_to_use.append(best_other_token)
+                    neighborhood_size_to_use = neighborhood_size_to_use // 2
+
+            for center_token in center_tokens_to_use:
+                # Get all tokens from this chain
+                chain_tokens = token_data[
+                    token_data["asym_id"] == center_token["asym_id"]
+                ]
+
+                # Pick the whole chain if possible, otherwise select
+                # a contiguous subset centered at the query token
+                if len(chain_tokens) <= neighborhood_size_to_use:
+                    new_tokens = chain_tokens
+                else:
+                    # First limit to the maximum set of tokens, with the
+                    # neighboorhood on both sides to handle edges. This
+                    # is mostly for efficiency with the while loop below.
+                    min_idx = center_token["res_idx"] - neighborhood_size_to_use
+                    max_idx = center_token["res_idx"] + neighborhood_size_to_use
+
+                    max_token_set = chain_tokens
+                    max_token_set = max_token_set[max_token_set["res_idx"] >= min_idx]
+                    max_token_set = max_token_set[max_token_set["res_idx"] <= max_idx]
+
+                    # Start by adding just the query token
+                    new_tokens = max_token_set[
+                        max_token_set["res_idx"] == center_token["res_idx"]
+                    ]
+
+                    # Expand the neighborhood until we have enough tokens, one
+                    # by one to handle some edge cases with non-standard chains.
+                    # We switch to the res_idx instead of the token_idx to always
+                    # include all tokens from modified residues or from ligands.
+                    min_idx = max_idx = center_token["res_idx"]
+                    target_size = min(neighborhood_size_to_use, max_token_set.size)
+                    while new_tokens.size < target_size:
+                        min_idx = min_idx - 1
+                        max_idx = max_idx + 1
+                        new_tokens = max_token_set
+                        new_tokens = new_tokens[new_tokens["res_idx"] >= min_idx]
+                        new_tokens = new_tokens[new_tokens["res_idx"] <= max_idx]
+
+                new_tokens_acc.append(new_tokens)
 
             # Compute new tokens and new atoms
+            new_tokens = np.concatenate(new_tokens_acc)
             new_indices = set(new_tokens["token_idx"]) - cropped
             new_tokens = token_data[list(new_indices)]
             new_atoms = np.sum(new_tokens["atom_num"])
@@ -293,4 +412,28 @@ class BoltzCropper(Cropper):
         token_bonds = token_bonds[np.isin(token_bonds["token_2"], indices)]
 
         # Return the cropped tokens
+        if return_indices:
+            token_ids_mol = set(
+                token_data[token_data["mol_type"] == 3]["token_idx"].tolist()
+            )
+            return replace(data, tokens=token_data, bonds=token_bonds), sorted(
+                cropped - token_ids_mol
+            )
+        else:
+            return replace(data, tokens=token_data, bonds=token_bonds)
+
+    def crop_indices(  # noqa: PLR0915
+        self,
+        data: TokenizedTraining,
+        cropped_indices: list[int],
+    ) -> TokenizedTraining:
+        token_data = data.tokens
+        token_ids_mol = token_data[token_data["mol_type"] == 3]["token_idx"].tolist()  # noqa: PLR2004
+        cropped_indices = sorted({*token_ids_mol, *cropped_indices})
+        token_data = token_data[cropped_indices]
+        indices = token_data["token_idx"]
+        token_bonds = data.bonds
+        token_bonds = token_bonds[np.isin(token_bonds["token_1"], indices)]
+        token_bonds = token_bonds[np.isin(token_bonds["token_2"], indices)]
+
         return replace(data, tokens=token_data, bonds=token_bonds)

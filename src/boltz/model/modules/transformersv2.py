@@ -1,3 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+
 # started from code from https://github.com/lucidrains/alphafold3-pytorch, MIT License, Copyright (c) 2024 Phil Wang
 
 import torch
@@ -152,20 +174,14 @@ class DiffusionTransformerLayer(Module):
         dim_single_cond = default(dim_single_cond, dim)
 
         self.adaln = AdaLN(dim, dim_single_cond)
-        self.pair_bias_attn = AttentionPairBias(
-            c_s=dim, num_heads=heads, compute_pair_bias=False
-        )
+        self.pair_bias_attn = AttentionPairBias(c_s=dim, num_heads=heads, compute_pair_bias=False)
 
         self.output_projection_linear = Linear(dim_single_cond, dim)
         nn.init.zeros_(self.output_projection_linear.weight)
         nn.init.constant_(self.output_projection_linear.bias, -2.0)
 
-        self.output_projection = nn.Sequential(
-            self.output_projection_linear, nn.Sigmoid()
-        )
-        self.transition = ConditionedTransitionBlock(
-            dim_single=dim, dim_single_cond=dim_single_cond
-        )
+        self.output_projection = nn.Sequential(self.output_projection_linear, nn.Sigmoid())
+        self.transition = ConditionedTransitionBlock(dim_single=dim, dim_single_cond=dim_single_cond)
 
         if post_layer_norm:
             self.post_lnorm = nn.LayerNorm(dim)
@@ -220,9 +236,7 @@ class AtomTransformer(Module):
         super().__init__()
         self.attn_window_queries = attn_window_queries
         self.attn_window_keys = attn_window_keys
-        self.diffusion_transformer = DiffusionTransformer(
-            **diffusion_transformer_kwargs
-        )
+        self.diffusion_transformer = DiffusionTransformer(**diffusion_transformer_kwargs)
 
     def forward(
         self,
@@ -246,15 +260,16 @@ class AtomTransformer(Module):
         bias = bias.repeat_interleave(multiplicity, 0)
         bias = bias.view((bias.shape[0] * NW, W, H, -1))
 
-        to_keys_new = lambda x: to_keys(x.view(B, NW * W, -1)).view(B * NW, H, -1)
+        to_keys_new = lambda x: to_keys(x.view(B, NW * W, -1)).view(B * NW, H, -1)  # noqa: E731
 
         # main transformer
+        compute_dtype = torch.promote_types(q.dtype, torch.float32)
         q = self.diffusion_transformer(
             a=q,
             s=c,
             bias=bias,
-            mask=mask.float(),
-            multiplicity=1, # bias term already expanded with multiplicity
+            mask=mask.to(compute_dtype),
+            multiplicity=1,  # bias term already expanded with multiplicity
             to_keys=to_keys_new,
         )
 

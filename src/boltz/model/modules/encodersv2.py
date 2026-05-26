@@ -1,3 +1,26 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+# fmt: off
+
 # started from code from https://github.com/lucidrains/alphafold3-pytorch, MIT License, Copyright (c) 2024 Phil Wang
 from functools import partial
 from math import pi
@@ -36,9 +59,7 @@ class FourierEmbedding(Module):
 class RelativePositionEncoder(Module):
     """Algorithm 3."""
 
-    def __init__(
-        self, token_z, r_max=32, s_max=2, fix_sym_check=False, cyclic_pos_enc=False
-    ):
+    def __init__(self, token_z, r_max=32, s_max=2, fix_sym_check=False, cyclic_pos_enc=False):
         super().__init__()
         self.r_max = r_max
         self.s_max = s_max
@@ -47,26 +68,22 @@ class RelativePositionEncoder(Module):
         self.cyclic_pos_enc = cyclic_pos_enc
 
     def forward(self, feats):
-        b_same_chain = torch.eq(
-            feats["asym_id"][:, :, None], feats["asym_id"][:, None, :]
-        )
-        b_same_residue = torch.eq(
-            feats["residue_index"][:, :, None], feats["residue_index"][:, None, :]
-        )
-        b_same_entity = torch.eq(
-            feats["entity_id"][:, :, None], feats["entity_id"][:, None, :]
-        )
+        b_same_chain = torch.eq(feats["asym_id"][:, :, None], feats["asym_id"][:, None, :])
+        b_same_residue = torch.eq(feats["residue_index"][:, :, None], feats["residue_index"][:, None, :])
+        b_same_entity = torch.eq(feats["entity_id"][:, :, None], feats["entity_id"][:, None, :])
 
-        d_residue = (
-            feats["residue_index"][:, :, None] - feats["residue_index"][:, None, :]
-        )
+        d_residue = feats["residue_index"][:, :, None] - feats["residue_index"][:, None, :]
 
         if self.cyclic_pos_enc and torch.any(feats["cyclic_period"] > 0):
+            # BugFix: unsqueeze(1) reshapes period from (B, N) to (B, 1, N) so it
+            # broadcasts correctly against d_residue (B, N, N). Without it,
+            # (B, N, N) / (B, N) aligns from the right and fails when B != N.
+            # The V1 encoder already had this unsqueeze at the same position.
             period = torch.where(
                 feats["cyclic_period"] > 0,
                 feats["cyclic_period"],
                 torch.zeros_like(feats["cyclic_period"]) + 10000,
-            )
+            ).unsqueeze(1)
             d_residue = (d_residue - period * torch.round(d_residue / period)).long()
 
         d_residue = torch.clip(
@@ -74,15 +91,11 @@ class RelativePositionEncoder(Module):
             0,
             2 * self.r_max,
         )
-        d_residue = torch.where(
-            b_same_chain, d_residue, torch.zeros_like(d_residue) + 2 * self.r_max + 1
-        )
+        d_residue = torch.where(b_same_chain, d_residue, torch.zeros_like(d_residue) + 2 * self.r_max + 1)
         a_rel_pos = one_hot(d_residue, 2 * self.r_max + 2)
 
         d_token = torch.clip(
-            feats["token_index"][:, :, None]
-            - feats["token_index"][:, None, :]
-            + self.r_max,
+            feats["token_index"][:, :, None] - feats["token_index"][:, None, :] + self.r_max,
             0,
             2 * self.r_max,
         )
@@ -106,13 +119,14 @@ class RelativePositionEncoder(Module):
         # Note: added  | (~b_same_entity) based on observation of ProteinX manuscript
         a_rel_chain = one_hot(d_chain, 2 * self.s_max + 2)
 
+        cast_dtype = torch.promote_types(self.linear_layer.weight.dtype, torch.float32)
         p = self.linear_layer(
             torch.cat(
                 [
-                    a_rel_pos.float(),
-                    a_rel_token.float(),
-                    b_same_entity.unsqueeze(-1).float(),
-                    a_rel_chain.float(),
+                    a_rel_pos.to(cast_dtype),
+                    a_rel_token.to(cast_dtype),
+                    b_same_entity.unsqueeze(-1).to(cast_dtype),
+                    a_rel_chain.to(cast_dtype),
                 ],
                 dim=-1,
             )
@@ -147,9 +161,7 @@ class SingleConditioning(Module):
 
         transitions = ModuleList([])
         for _ in range(num_transitions):
-            transition = Transition(
-                dim=2 * token_s, hidden=transition_expansion_factor * 2 * token_s
-            )
+            transition = Transition(dim=2 * token_s, hidden=transition_expansion_factor * 2 * token_s)
             transitions.append(transition)
 
         self.transitions = transitions
@@ -163,9 +175,7 @@ class SingleConditioning(Module):
         s = torch.cat((s_trunk, s_inputs), dim=-1)
         s = self.single_embed(self.norm_single(s))
         if not self.disable_times:
-            fourier_embed = self.fourier_embed(
-                times
-            )  # note: sigma rescaling done in diffusion module
+            fourier_embed = self.fourier_embed(times)  # note: sigma rescaling done in diffusion module
             normed_fourier = self.norm_fourier(fourier_embed)
             fourier_to_single = self.fourier_to_single(normed_fourier)
 
@@ -196,9 +206,7 @@ class PairwiseConditioning(Module):
 
         transitions = ModuleList([])
         for _ in range(num_transitions):
-            transition = Transition(
-                dim=token_z, hidden=transition_expansion_factor * token_z
-            )
+            transition = Transition(dim=token_z, hidden=transition_expansion_factor * token_z)
             transitions.append(transition)
 
         self.transitions = transitions
@@ -217,7 +225,7 @@ class PairwiseConditioning(Module):
         return z
 
 
-def get_indexing_matrix(K, W, H, device):
+def get_indexing_matrix(K, W, H, device, dtype=torch.float32):
     assert W % 2 == 0
     assert H % (W // 2) == 0
 
@@ -225,12 +233,10 @@ def get_indexing_matrix(K, W, H, device):
     assert h % 2 == 0
 
     arange = torch.arange(2 * K, device=device)
-    index = ((arange.unsqueeze(0) - arange.unsqueeze(1)) + h // 2).clamp(
-        min=0, max=h + 1
-    )
+    index = ((arange.unsqueeze(0) - arange.unsqueeze(1)) + h // 2).clamp(min=0, max=h + 1)
     index = index.view(K, 2, 2 * K)[:, 0, :]
     onehot = one_hot(index, num_classes=h + 2)[..., 1:-1].transpose(1, 0)
-    return onehot.reshape(2 * K, h * K).float()
+    return onehot.reshape(2 * K, h * K).to(dtype)
 
 
 def single_to_keys(single, indexing_matrix, W, H):
@@ -271,14 +277,10 @@ class AtomEncoder(Module):
 
         self.structure_prediction = structure_prediction
         if structure_prediction:
-            self.s_to_c_trans = nn.Sequential(
-                nn.LayerNorm(token_s), LinearNoBias(token_s, atom_s)
-            )
+            self.s_to_c_trans = nn.Sequential(nn.LayerNorm(token_s), LinearNoBias(token_s, atom_s))
             init.final_init_(self.s_to_c_trans[1].weight)
 
-            self.z_to_p_trans = nn.Sequential(
-                nn.LayerNorm(token_z), LinearNoBias(token_z, atom_z)
-            )
+            self.z_to_p_trans = nn.Sequential(nn.LayerNorm(token_z), LinearNoBias(token_z, atom_z))
             init.final_init_(self.z_to_p_trans[1].weight)
 
         self.c_to_p_trans_k = nn.Sequential(
@@ -316,6 +318,10 @@ class AtomEncoder(Module):
             atom_ref_pos = feats["ref_pos"]  # Float['b m 3'],
             atom_uid = feats["ref_space_uid"]  # Long['b m'],
 
+            # Promote to at least float32 for numerical stability, but preserve
+            # higher precision (e.g. float64) if available.
+            compute_dtype = torch.promote_types(atom_ref_pos.dtype, torch.float32)
+
             atom_feats = [
                 atom_ref_pos,
                 feats["ref_charge"].unsqueeze(-1),
@@ -330,11 +336,11 @@ class AtomEncoder(Module):
                     [
                         feats["res_type"],
                         feats["modified"].unsqueeze(-1),
-                        one_hot(feats["mol_type"], num_classes=4).float(),
+                        one_hot(feats["mol_type"], num_classes=4).to(compute_dtype),
                     ],
                     dim=-1,
                 )
-                atom_to_token = feats["atom_to_token"].float()
+                atom_to_token = feats["atom_to_token"].to(compute_dtype)
                 atom_res_feats = torch.bmm(atom_to_token, res_feats)
                 atom_feats.append(atom_res_feats)
 
@@ -346,35 +352,23 @@ class AtomEncoder(Module):
             W, H = self.atoms_per_window_queries, self.atoms_per_window_keys
             B, N = c.shape[:2]
             K = N // W
-            keys_indexing_matrix = get_indexing_matrix(K, W, H, c.device)
-            to_keys = partial(
-                single_to_keys, indexing_matrix=keys_indexing_matrix, W=W, H=H
-            )
+            keys_indexing_matrix = get_indexing_matrix(K, W, H, c.device, dtype=compute_dtype)
+            to_keys = partial(single_to_keys, indexing_matrix=keys_indexing_matrix, W=W, H=H)
 
             atom_ref_pos_queries = atom_ref_pos.view(B, K, W, 1, 3)
             atom_ref_pos_keys = to_keys(atom_ref_pos).view(B, K, 1, H, 3)
 
             d = atom_ref_pos_keys - atom_ref_pos_queries  # Float['b k w h 3']
             d_norm = torch.sum(d * d, dim=-1, keepdim=True)  # Float['b k w h 1']
-            d_norm = 1 / (
-                1 + d_norm
-            )  # AF3 feeds in the reciprocal of the distance norm
+            d_norm = 1 / (1 + d_norm)  # AF3 feeds in the reciprocal of the distance norm
 
             atom_mask_queries = atom_mask.view(B, K, W, 1)
-            atom_mask_keys = (
-                to_keys(atom_mask.unsqueeze(-1).float()).view(B, K, 1, H).bool()
-            )
+            atom_mask_keys = to_keys(atom_mask.unsqueeze(-1).to(compute_dtype)).view(B, K, 1, H).bool()
             atom_uid_queries = atom_uid.view(B, K, W, 1)
-            atom_uid_keys = (
-                to_keys(atom_uid.unsqueeze(-1).float()).view(B, K, 1, H).long()
-            )
+            atom_uid_keys = to_keys(atom_uid.unsqueeze(-1).to(compute_dtype)).view(B, K, 1, H).long()
             v = (
-                (
-                    atom_mask_queries
-                    & atom_mask_keys
-                    & (atom_uid_queries == atom_uid_keys)
-                )
-                .float()
+                (atom_mask_queries & atom_mask_keys & (atom_uid_queries == atom_uid_keys))
+                .to(compute_dtype)
                 .unsqueeze(-1)
             )  # Bool['b k w h 1']
 
@@ -386,24 +380,22 @@ class AtomEncoder(Module):
 
             if self.structure_prediction:
                 # run only in structure model not in initial encoding
-                atom_to_token = feats["atom_to_token"].float()  # Long['b m n'],
+                atom_to_token = feats["atom_to_token"].to(compute_dtype)  # Long['b m n'],
 
-                s_to_c = self.s_to_c_trans(s_trunk.float())
+                s_to_c = self.s_to_c_trans(s_trunk.to(compute_dtype))
                 s_to_c = torch.bmm(atom_to_token, s_to_c)
-                c = c + s_to_c.to(c)
+                c = c + s_to_c.to(c.dtype)
 
-                atom_to_token_queries = atom_to_token.view(
-                    B, K, W, atom_to_token.shape[-1]
-                )
+                atom_to_token_queries = atom_to_token.view(B, K, W, atom_to_token.shape[-1])
                 atom_to_token_keys = to_keys(atom_to_token)
-                z_to_p = self.z_to_p_trans(z.float())
+                z_to_p = self.z_to_p_trans(z.to(compute_dtype))
                 z_to_p = torch.einsum(
                     "bijd,bwki,bwlj->bwkld",
                     z_to_p,
                     atom_to_token_queries,
                     atom_to_token_keys,
                 )
-                p = p + z_to_p.to(p)
+                p = p + z_to_p.to(p.dtype)
 
             p = p + self.c_to_p_trans_q(c.view(B, K, W, 1, c.shape[-1]))
             p = p + self.c_to_p_trans_k(to_keys(c).view(B, K, 1, H, c.shape[-1]))
@@ -479,15 +471,14 @@ class AtomAttentionEncoder(Module):
         )
 
         with torch.autocast("cuda", enabled=False):
-            q_to_a = self.atom_to_token_trans(q).float()
-            atom_to_token = feats["atom_to_token"].float()
+            compute_dtype = torch.promote_types(feats["ref_pos"].dtype, torch.float32)
+            q_to_a = self.atom_to_token_trans(q).to(compute_dtype)
+            atom_to_token = feats["atom_to_token"].to(compute_dtype)
             atom_to_token = atom_to_token.repeat_interleave(multiplicity, 0)
-            atom_to_token_mean = atom_to_token / (
-                atom_to_token.sum(dim=1, keepdim=True) + 1e-6
-            )
+            atom_to_token_mean = atom_to_token / atom_to_token.sum(dim=1, keepdim=True).clamp(min=1)
             a = torch.bmm(atom_to_token_mean.transpose(1, 2), q_to_a)
 
-        a = a.to(q)
+        a = a.to(q.dtype)
 
         return a, q, c, to_keys
 
@@ -526,9 +517,7 @@ class AtomAttentionDecoder(Module):
             self.atom_feat_to_atom_pos_update = LinearNoBias(atom_s, 3)
             init.final_init_(self.atom_feat_to_atom_pos_update.weight)
         else:
-            self.atom_feat_to_atom_pos_update = nn.Sequential(
-                nn.LayerNorm(atom_s), LinearNoBias(atom_s, 3)
-            )
+            self.atom_feat_to_atom_pos_update = nn.Sequential(nn.LayerNorm(atom_s), LinearNoBias(atom_s, 3))
             init.final_init_(self.atom_feat_to_atom_pos_update[1].weight)
 
     def forward(
@@ -542,10 +531,13 @@ class AtomAttentionDecoder(Module):
         multiplicity=1,
     ):
         with torch.autocast("cuda", enabled=False):
-            atom_to_token = feats["atom_to_token"].float()
+            # Promote to at least float32 for numerical stability, but preserve
+            # higher precision (e.g. float64) if available.
+            compute_dtype = torch.promote_types(a.dtype, torch.float32)
+            atom_to_token = feats["atom_to_token"].to(compute_dtype)
             atom_to_token = atom_to_token.repeat_interleave(multiplicity, 0)
 
-            a_to_q = self.a_to_q_trans(a.float())
+            a_to_q = self.a_to_q_trans(a.to(compute_dtype))
             a_to_q = torch.bmm(atom_to_token, a_to_q)
 
         q = q + a_to_q.to(q)

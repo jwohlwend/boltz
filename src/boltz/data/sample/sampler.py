@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Iterator, List, Optional
+from typing import Optional
 
 from numpy.random import RandomState
 
@@ -30,7 +31,7 @@ class Sampler(ABC):
     """Abstract base class for samplers."""
 
     @abstractmethod
-    def sample(self, records: List[Record], random: RandomState) -> Iterator[Sample]:
+    def sample(self, records: list[Record], random: RandomState) -> Iterator[Sample]:
         """Sample a structure from the dataset infinitely.
 
         Parameters

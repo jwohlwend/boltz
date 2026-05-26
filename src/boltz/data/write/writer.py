@@ -1,3 +1,26 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+# fmt: off
+
 import json
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -66,20 +89,24 @@ class BoltzWriter(BasePredictionWriter):
 
         # Get the predictions
         coords = prediction["coords"]
-        coords = coords.unsqueeze(0)
-
         pad_masks = prediction["masks"]
 
-        # Get ranking
-        if "confidence_score" in prediction:
-            argsort = torch.argsort(prediction["confidence_score"], descending=True)
-            idx_to_rank = {idx.item(): rank for rank, idx in enumerate(argsort)}
-        # Handles cases where confidence summary is False
-        else:
-            idx_to_rank = {i: i for i in range(len(records))}
+        # Get ranking (will be calculated per record)
+        confidence_scores = prediction.get("confidence_score", None)
+
+        # Calculate diffusion samples per record
+        n_records = len(records)
+        n_diffusion_samples = coords.shape[0] // n_records
 
         # Iterate over the records
-        for record, coord, pad_mask in zip(records, coords, pad_masks):
+        for record_idx, record in enumerate(records):
+            pad_mask = pad_masks[record_idx]
+
+            # Get the diffusion samples for this record
+            start_idx = record_idx * n_diffusion_samples
+            end_idx = start_idx + n_diffusion_samples
+            record_coords = coords[start_idx:end_idx]
+
             # Load the structure
             path = self.data_dir / f"{record.id}.npz"
             if self.boltz2:
@@ -96,9 +123,17 @@ class BoltzWriter(BasePredictionWriter):
             # Remove masked chains completely
             structure = structure.remove_invalid_chains()
 
-            for model_idx in range(coord.shape[0]):
+            # Calculate ranking for this record's diffusion samples
+            if confidence_scores is not None:
+                record_confidence_scores = confidence_scores[start_idx:end_idx]
+                argsort = torch.argsort(record_confidence_scores, descending=True)
+                idx_to_rank = {idx.item(): rank for rank, idx in enumerate(argsort)}
+            else:
+                idx_to_rank = {i: i for i in range(record_coords.shape[0])}
+
+            for model_idx in range(record_coords.shape[0]):
                 # Get model coord
-                model_coord = coord[model_idx]
+                model_coord = record_coords[model_idx]
                 # Unpad
                 coord_unpad = model_coord[pad_mask.bool()]
                 coord_unpad = coord_unpad.cpu().numpy()
@@ -245,7 +280,7 @@ class BoltzWriter(BasePredictionWriter):
                         / f"pde_{record.id}_model_{idx_to_rank[model_idx]}.npz"
                     )
                     np.savez_compressed(path, pde=pde.cpu().numpy())
-                
+
             # Save embeddings
             if self.write_embeddings and "s" in prediction and "z" in prediction:
                 s = prediction["s"].cpu().numpy()

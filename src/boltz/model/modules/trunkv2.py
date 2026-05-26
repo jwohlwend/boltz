@@ -1,3 +1,26 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+# fmt: off
+
 import torch
 from torch import Tensor, nn
 from torch.nn.functional import one_hot
@@ -170,7 +193,9 @@ class InputEmbedder(nn.Module):
 
         """
         # Load relevant features
-        res_type = feats["res_type"].float()
+        # res_type is integer one-hot; cast to the layer's weight dtype so it
+        # works with any precision (float32, float64, bfloat16, etc.).
+        res_type = feats["res_type"].to(self.res_type_encoding.weight.dtype)
         if affinity:
             profile = feats["profile_affinity"]
             deletion_mean = feats["deletion_mean_affinity"].unsqueeze(-1)
@@ -200,7 +225,10 @@ class InputEmbedder(nn.Module):
         if self.add_modified_flag:
             s = s + self.modified_conditioning_init(feats["modified"])
         if self.add_cyclic_flag:
-            cyclic = feats["cyclic_period"].clamp(max=1.0).unsqueeze(-1)
+            # cyclic_period is integer; cast to the layer's weight dtype so it
+            # works with any precision (float32, float64, bfloat16, etc.).
+            cyclic = feats["cyclic_period"].to(self.cyclic_conditioning_init.weight.dtype)
+            cyclic = cyclic.clamp(max=1.0).unsqueeze(-1)
             s = s + self.cyclic_conditioning_init(cyclic)
         if self.add_mol_type_feat:
             s = s + self.mol_type_conditioning_init(feats["mol_type"])
@@ -291,7 +319,8 @@ class TemplateModule(nn.Module):
         cb_coords = feats["template_cb"]
         ca_coords = feats["template_ca"]
         cb_mask = feats["template_mask_cb"]
-        template_mask = feats["template_mask"].any(dim=2).float()
+        compute_dtype = torch.promote_types(z.dtype, torch.float32)
+        template_mask = feats["template_mask"].any(dim=2).to(compute_dtype)
         num_templates = template_mask.sum(dim=1)
         num_templates = num_templates.clamp(min=1)
 
@@ -304,7 +333,7 @@ class TemplateModule(nn.Module):
 
         # Compute asym mask, template features only attend within the same chain
         B, T = res_type.shape[:2]  # noqa: N806
-        asym_mask = (asym_id[:, :, None] == asym_id[:, None, :]).float()
+        asym_mask = (asym_id[:, :, None] == asym_id[:, None, :]).to(compute_dtype)
         asym_mask = asym_mask[:, None].expand(-1, T, -1, -1)
 
         # Compute template features
@@ -441,7 +470,8 @@ class TemplateV2Module(nn.Module):
         ca_coords = feats["template_ca"]
         cb_mask = feats["template_mask_cb"]
         visibility_ids = feats["visibility_ids"]
-        template_mask = feats["template_mask"].any(dim=2).float()
+        compute_dtype = torch.promote_types(z.dtype, torch.float32)
+        template_mask = feats["template_mask"].any(dim=2).to(compute_dtype)
         num_templates = template_mask.sum(dim=1)
         num_templates = num_templates.clamp(min=1)
 
@@ -456,7 +486,7 @@ class TemplateV2Module(nn.Module):
         B, T = res_type.shape[:2]  # noqa: N806
         tmlp_pair_mask = (
             visibility_ids[:, :, :, None] == visibility_ids[:, :, None, :]
-        ).float()
+        ).to(compute_dtype)
 
         # Compute template features
         with torch.autocast(device_type="cuda", enabled=False):
@@ -618,7 +648,8 @@ class MSAModule(nn.Module):
         deletion_value = feats["deletion_value"].unsqueeze(-1)
         is_paired = feats["msa_paired"].unsqueeze(-1)
         msa_mask = feats["msa_mask"]
-        token_mask = feats["token_pad_mask"].float()
+        mask_dtype = torch.promote_types(self.msa_proj.weight.dtype, torch.float32)
+        token_mask = feats["token_pad_mask"].to(mask_dtype)
         token_mask = token_mask[:, :, None] * token_mask[:, None, :]
 
         # Compute MSA embeddings

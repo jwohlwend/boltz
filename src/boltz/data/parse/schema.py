@@ -1,3 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,7 +31,7 @@ from Bio import Align
 from chembl_structure_pipeline.exclude_flag import exclude_flag
 from chembl_structure_pipeline.standardizer import standardize_mol
 from rdkit import Chem, rdBase
-from rdkit.Chem import AllChem, HybridizationType
+from rdkit.Chem import AllChem, Descriptors, HybridizationType
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.rdchem import BondStereo, Conformer, Mol
 from rdkit.Chem.rdDistGeom import GetMoleculeBoundsMatrix
@@ -20,7 +42,6 @@ from boltz.data import const
 from boltz.data.mol import load_molecules
 from boltz.data.parse.mmcif import parse_mmcif
 from boltz.data.parse.pdb import parse_pdb
-
 from boltz.data.types import (
     AffinityInfo,
     Atom,
@@ -317,13 +338,8 @@ def compute_geometry_constraints(mol: Mol, idx_map):
         doTriangleSmoothing=True,
         useMacrocycle14config=False,
     )
-    bonds = set(
-        tuple(sorted(b)) for b in mol.GetSubstructMatches(Chem.MolFromSmarts("*~*"))
-    )
-    angles = set(
-        tuple(sorted([a[0], a[2]]))
-        for a in mol.GetSubstructMatches(Chem.MolFromSmarts("*~*~*"))
-    )
+    bonds = {tuple(sorted(b)) for b in mol.GetSubstructMatches(Chem.MolFromSmarts("*~*"))}
+    angles = {tuple(sorted([a[0], a[2]])) for a in mol.GetSubstructMatches(Chem.MolFromSmarts("*~*~*"))}
 
     constraints = []
     for i, j in zip(*np.triu_indices(mol.GetNumAtoms(), k=1)):
@@ -341,18 +357,11 @@ def compute_geometry_constraints(mol: Mol, idx_map):
 
 def compute_chiral_atom_constraints(mol, idx_map):
     constraints = []
-    if all([atom.HasProp("_CIPRank") for atom in mol.GetAtoms()]):
-        for center_idx, orientation in Chem.FindMolChiralCenters(
-            mol, includeUnassigned=False
-        ):
+    if all(atom.HasProp("_CIPRank") for atom in mol.GetAtoms()):
+        for center_idx, orientation in Chem.FindMolChiralCenters(mol, includeUnassigned=False):
             center = mol.GetAtomWithIdx(center_idx)
-            neighbors = [
-                (neighbor.GetIdx(), int(neighbor.GetProp("_CIPRank")))
-                for neighbor in center.GetNeighbors()
-            ]
-            neighbors = sorted(
-                neighbors, key=lambda neighbor: neighbor[1], reverse=True
-            )
+            neighbors = [(neighbor.GetIdx(), int(neighbor.GetProp("_CIPRank"))) for neighbor in center.GetNeighbors()]
+            neighbors = sorted(neighbors, key=lambda neighbor: neighbor[1], reverse=True)
             neighbors = tuple(neighbor[0] for neighbor in neighbors)
             is_r = orientation == "R"
 
@@ -389,7 +398,7 @@ def compute_chiral_atom_constraints(mol, idx_map):
 
 def compute_stereo_bond_constraints(mol, idx_map):
     constraints = []
-    if all([atom.HasProp("_CIPRank") for atom in mol.GetAtoms()]):
+    if all(atom.HasProp("_CIPRank") for atom in mol.GetAtoms()):
         for bond in mol.GetBonds():
             stereo = bond.GetStereo()
             if stereo in {BondStereo.STEREOE, BondStereo.STEREOZ}:
@@ -402,18 +411,14 @@ def compute_stereo_bond_constraints(mol, idx_map):
                     for neighbor in mol.GetAtomWithIdx(start_atom_idx).GetNeighbors()
                     if neighbor.GetIdx() != end_atom_idx
                 ]
-                start_neighbors = sorted(
-                    start_neighbors, key=lambda neighbor: neighbor[1], reverse=True
-                )
+                start_neighbors = sorted(start_neighbors, key=lambda neighbor: neighbor[1], reverse=True)
                 start_neighbors = [neighbor[0] for neighbor in start_neighbors]
                 end_neighbors = [
                     (neighbor.GetIdx(), int(neighbor.GetProp("_CIPRank")))
                     for neighbor in mol.GetAtomWithIdx(end_atom_idx).GetNeighbors()
                     if neighbor.GetIdx() != start_atom_idx
                 ]
-                end_neighbors = sorted(
-                    end_neighbors, key=lambda neighbor: neighbor[1], reverse=True
-                )
+                end_neighbors = sorted(end_neighbors, key=lambda neighbor: neighbor[1], reverse=True)
                 end_neighbors = [neighbor[0] for neighbor in end_neighbors]
                 is_e = stereo == BondStereo.STEREOE
 
@@ -453,9 +458,7 @@ def compute_stereo_bond_constraints(mol, idx_map):
 def compute_flatness_constraints(mol, idx_map):
     planar_double_bond_smarts = Chem.MolFromSmarts("[C;X3;^2](*)(*)=[C;X3;^2](*)(*)")
     aromatic_ring_5_smarts = Chem.MolFromSmarts("[ar5^2]1[ar5^2][ar5^2][ar5^2][ar5^2]1")
-    aromatic_ring_6_smarts = Chem.MolFromSmarts(
-        "[ar6^2]1[ar6^2][ar6^2][ar6^2][ar6^2][ar6^2]1"
-    )
+    aromatic_ring_6_smarts = Chem.MolFromSmarts("[ar6^2]1[ar6^2][ar6^2][ar6^2][ar6^2][ar6^2]1")
 
     planar_double_bond_constraints = []
     aromatic_ring_5_constraints = []
@@ -467,14 +470,10 @@ def compute_flatness_constraints(mol, idx_map):
             )
     for match in mol.GetSubstructMatches(aromatic_ring_5_smarts):
         if all(i in idx_map for i in match):
-            aromatic_ring_5_constraints.append(
-                ParsedPlanarRing5Constraint(atom_idxs=tuple(idx_map[i] for i in match))
-            )
+            aromatic_ring_5_constraints.append(ParsedPlanarRing5Constraint(atom_idxs=tuple(idx_map[i] for i in match)))
     for match in mol.GetSubstructMatches(aromatic_ring_6_smarts):
         if all(i in idx_map for i in match):
-            aromatic_ring_6_constraints.append(
-                ParsedPlanarRing6Constraint(atom_idxs=tuple(idx_map[i] for i in match))
-            )
+            aromatic_ring_6_constraints.append(ParsedPlanarRing6Constraint(atom_idxs=tuple(idx_map[i] for i in match)))
 
     return (
         planar_double_bond_constraints,
@@ -674,9 +673,7 @@ def parse_ccd_residue(
 
         pos = (0, 0, 0)
         ref_atom = ref_mol.GetAtoms()[0]
-        chirality_type = const.chirality_type_ids.get(
-            str(ref_atom.GetChiralTag()), unk_chirality
-        )
+        chirality_type = const.chirality_type_ids.get(str(ref_atom.GetChiralTag()), unk_chirality)
         atom = ParsedAtom(
             name=ref_atom.GetProp("name"),
             element=ref_atom.GetAtomicNum(),
@@ -725,9 +722,7 @@ def parse_ccd_residue(
         element = atom.GetAtomicNum()
         ref_coords = conformer.GetAtomPosition(atom.GetIdx())
         ref_coords = (ref_coords.x, ref_coords.y, ref_coords.z)
-        chirality_type = const.chirality_type_ids.get(
-            str(atom.GetChiralTag()), unk_chirality
-        )
+        chirality_type = const.chirality_type_ids.get(str(atom.GetChiralTag()), unk_chirality)
 
         # Get PDB coordinates, if any
         coords = (0, 0, 0)
@@ -770,8 +765,8 @@ def parse_ccd_residue(
     rdkit_bounds_constraints = compute_geometry_constraints(ref_mol, idx_map)
     chiral_atom_constraints = compute_chiral_atom_constraints(ref_mol, idx_map)
     stereo_bond_constraints = compute_stereo_bond_constraints(ref_mol, idx_map)
-    planar_bond_constraints, planar_ring_5_constraints, planar_ring_6_constraints = (
-        compute_flatness_constraints(ref_mol, idx_map)
+    planar_bond_constraints, planar_ring_5_constraints, planar_ring_6_constraints = compute_flatness_constraints(
+        ref_mol, idx_map
     )
 
     unk_prot_id = const.unk_token_ids["PROTEIN"]
@@ -888,9 +883,7 @@ def parse_polymer(
                     coords=coords,
                     conformer=ref_coords,
                     is_present=atom_is_present,
-                    chirality=const.chirality_type_ids.get(
-                        str(ref_atom.GetChiralTag()), unk_chirality
-                    ),
+                    chirality=const.chirality_type_ids.get(str(ref_atom.GetChiralTag()), unk_chirality),
                 )
             )
 
@@ -926,9 +919,7 @@ def parse_polymer(
     )
 
 
-def token_spec_to_ids(
-    chain_name, residue_index_or_atom_name, chain_to_idx, atom_idx_map, chains
-):
+def token_spec_to_ids(chain_name, residue_index_or_atom_name, chain_to_idx, atom_idx_map, chains):
     if chains[chain_name].type == const.chain_type_ids["NONPOLYMER"]:
         # Non-polymer chains are indexed by atom name
         _, _, atom_idx = atom_idx_map[(chain_name, 0, residue_index_or_atom_name)]
@@ -1063,10 +1054,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 raise ValueError(msg)
 
             if chain_name_to_entity_type[binder] != "ligand":
-                msg = (
-                    f"Chain {binder} is not a ligand! "
-                    "Affinity is currently only supported for ligands."
-                )
+                msg = f"Chain {binder} is not a ligand! " "Affinity is currently only supported for ligands."
                 raise ValueError(msg)
 
             affinity_ligands.add(binder)
@@ -1199,16 +1187,21 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 ref_mol = get_mol(code, ccd, mol_dir)
 
                 if affinity:
-                    affinity_mw = AllChem.Descriptors.MolWt(ref_mol)
+                    # Fixed to used 'rdkit.Chem.Descriptors.MolWt' as module 'rdkit.Chem.AllChem' has no attribute 'Descriptors'
+                    affinity_mw = Descriptors.MolWt(ref_mol)
 
                     # Add error and warning messaging when computing affinity with ligands too large
                     if ref_mol.GetNumAtoms() > 128:
-                        msg = f"The ligand for affinity is too large, ligands with more than 128 atoms are not " \
-                              f"supported in the affinity prediction module"
+                        msg = (
+                            "The ligand for affinity is too large, ligands with more than 128 atoms are not "
+                            "supported in the affinity prediction module"
+                        )
                         raise ValueError(msg)
                     elif ref_mol.GetNumAtoms() > 56:
-                        print("WARNING: the ligand used for affinity calculation is larger than 56 heavy-atoms, which "
-                              "was the maximum during training, therefore the affinity output might be inaccurate.")
+                        print(
+                            "WARNING: the ligand used for affinity calculation is larger than 56 heavy-atoms, which "
+                            "was the maximum during training, therefore the affinity output might be inaccurate."
+                        )
 
                 # Parse residue
                 residue = parse_ccd_residue(
@@ -1229,9 +1222,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 affinity_mw=affinity_mw,
             )
 
-            assert not items[0][entity_type].get("cyclic", False), (
-                "Cyclic flag is not supported for ligands"
-            )
+            assert not items[0][entity_type].get("cyclic", False), "Cyclic flag is not supported for ligands"
 
         elif (entity_type == "ligand") and ("smiles" in items[0][entity_type]):
             seq = items[0][entity_type]["smiles"]
@@ -1248,10 +1239,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             for atom, can_idx in zip(mol.GetAtoms(), canonical_order):
                 atom_name = atom.GetSymbol().upper() + str(can_idx + 1)
                 if len(atom_name) > 4:
-                    msg = (
-                        f"{seq} has an atom with a name longer than "
-                        f"4 characters: {atom_name}."
-                    )
+                    msg = f"{seq} has an atom with a name longer than " f"4 characters: {atom_name}."
                     raise ValueError(msg)
                 atom.SetProp("name", atom_name)
 
@@ -1265,13 +1253,16 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             if affinity:
                 # Add error and warning messaging when computing affinity with ligands too large
                 if mol_no_h.GetNumAtoms() > 128:
-                    msg = f"The ligand for affinity is too large, ligands with more than 128 atoms are not supported in the affinity prediction module"
+                    msg = "The ligand for affinity is too large, ligands with more than 128 atoms are not supported in the affinity prediction module"
                     raise ValueError(msg)
                 elif mol_no_h.GetNumAtoms() > 56:
-                    print("WARNING: the ligand used for affinity calculation is larger than 56 heavy-atoms, "
-                          "which was the maximum during training, therefore the affinity output might be inaccurate.")
+                    print(
+                        "WARNING: the ligand used for affinity calculation is larger than 56 heavy-atoms, "
+                        "which was the maximum during training, therefore the affinity output might be inaccurate."
+                    )
 
-            affinity_mw = AllChem.Descriptors.MolWt(mol_no_h) if affinity else None
+            # Fixed to used rdkit.Chem.Descriptors.MolWt as module 'rdkit.Chem.AllChem' has no attribute 'Descriptors'
+            affinity_mw = Descriptors.MolWt(mol_no_h) if affinity else None
             extra_mols[f"LIG{ligand_id}"] = mol_no_h
             residue = parse_ccd_residue(
                 name=f"LIG{ligand_id}",
@@ -1290,9 +1281,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 affinity_mw=affinity_mw,
             )
 
-            assert not items[0][entity_type].get("cyclic", False), (
-                "Cyclic flag is not supported for ligands"
-            )
+            assert not items[0][entity_type].get("cyclic", False), "Cyclic flag is not supported for ligands"
 
         else:
             msg = f"Invalid entity type: {entity_type}"
@@ -1404,10 +1393,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 for constraint in res.rdkit_bounds_constraints:
                     rdkit_bounds_constraint_data.append(  # noqa: PERF401
                         (
-                            tuple(
-                                c_atom_idx + atom_idx
-                                for c_atom_idx in constraint.atom_idxs
-                            ),
+                            tuple(c_atom_idx + atom_idx for c_atom_idx in constraint.atom_idxs),
                             constraint.is_bond,
                             constraint.is_angle,
                             constraint.upper_bound,
@@ -1418,10 +1404,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 for constraint in res.chiral_atom_constraints:
                     chiral_atom_constraint_data.append(  # noqa: PERF401
                         (
-                            tuple(
-                                c_atom_idx + atom_idx
-                                for c_atom_idx in constraint.atom_idxs
-                            ),
+                            tuple(c_atom_idx + atom_idx for c_atom_idx in constraint.atom_idxs),
                             constraint.is_reference,
                             constraint.is_r,
                         )
@@ -1430,10 +1413,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 for constraint in res.stereo_bond_constraints:
                     stereo_bond_constraint_data.append(  # noqa: PERF401
                         (
-                            tuple(
-                                c_atom_idx + atom_idx
-                                for c_atom_idx in constraint.atom_idxs
-                            ),
+                            tuple(c_atom_idx + atom_idx for c_atom_idx in constraint.atom_idxs),
                             constraint.is_check,
                             constraint.is_e,
                         )
@@ -1441,32 +1421,17 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             if res.planar_bond_constraints is not None:
                 for constraint in res.planar_bond_constraints:
                     planar_bond_constraint_data.append(  # noqa: PERF401
-                        (
-                            tuple(
-                                c_atom_idx + atom_idx
-                                for c_atom_idx in constraint.atom_idxs
-                            ),
-                        )
+                        (tuple(c_atom_idx + atom_idx for c_atom_idx in constraint.atom_idxs),)
                     )
             if res.planar_ring_5_constraints is not None:
                 for constraint in res.planar_ring_5_constraints:
                     planar_ring_5_constraint_data.append(  # noqa: PERF401
-                        (
-                            tuple(
-                                c_atom_idx + atom_idx
-                                for c_atom_idx in constraint.atom_idxs
-                            ),
-                        )
+                        (tuple(c_atom_idx + atom_idx for c_atom_idx in constraint.atom_idxs),)
                     )
             if res.planar_ring_6_constraints is not None:
                 for constraint in res.planar_ring_6_constraints:
                     planar_ring_6_constraint_data.append(  # noqa: PERF401
-                        (
-                            tuple(
-                                c_atom_idx + atom_idx
-                                for c_atom_idx in constraint.atom_idxs
-                            ),
-                        )
+                        (tuple(c_atom_idx + atom_idx for c_atom_idx in constraint.atom_idxs),)
                     )
 
             for bond in res.bonds:
@@ -1516,7 +1481,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     for constraint in constraints:
         if "bond" in constraint:
             if "atom1" not in constraint["bond"] or "atom2" not in constraint["bond"]:
-                msg = f"Bond constraint was not properly specified"
+                msg = "Bond constraint was not properly specified"
                 raise ValueError(msg)
 
             c1, r1, a1 = tuple(constraint["bond"]["atom1"])
@@ -1525,29 +1490,24 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             c2, r2, a2 = atom_idx_map[(c2, r2 - 1, a2)]  # 1-indexed
             connections.append((c1, c2, r1, r2, a1, a2))
         elif "pocket" in constraint:
-            if (
-                "binder" not in constraint["pocket"]
-                or "contacts" not in constraint["pocket"]
-            ):
-                msg = f"Pocket constraint was not properly specified"
+            if "binder" not in constraint["pocket"] or "contacts" not in constraint["pocket"]:
+                msg = "Pocket constraint was not properly specified"
                 raise ValueError(msg)
 
             if len(pocket_constraints) > 0 and not boltz_2:
-                msg = f"Only one pocket binders is supported in Boltz-1!"
+                msg = "Only one pocket binders is supported in Boltz-1!"
                 raise ValueError(msg)
 
             max_distance = constraint["pocket"].get("max_distance", 6.0)
             if max_distance != 6.0 and not boltz_2:
-                msg = f"Max distance != 6.0 is not supported in Boltz-1!"
+                msg = "Max distance != 6.0 is not supported in Boltz-1!"
                 raise ValueError(msg)
 
             binder = constraint["pocket"]["binder"]
             binder = chain_to_idx[binder]
 
             contacts = []
-            for chain_name, residue_index_or_atom_name in constraint["pocket"][
-                "contacts"
-            ]:
+            for chain_name, residue_index_or_atom_name in constraint["pocket"]["contacts"]:
                 contact = token_spec_to_ids(
                     chain_name,
                     residue_index_or_atom_name,
@@ -1560,15 +1520,12 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             force = constraint["pocket"].get("force", False)
             pocket_constraints.append((binder, contacts, max_distance, force))
         elif "contact" in constraint:
-            if (
-                "token1" not in constraint["contact"]
-                or "token2" not in constraint["contact"]
-            ):
-                msg = f"Contact constraint was not properly specified"
+            if "token1" not in constraint["contact"] or "token2" not in constraint["contact"]:
+                msg = "Contact constraint was not properly specified"
                 raise ValueError(msg)
 
             if not boltz_2:
-                msg = f"Contact constraint is not supported in Boltz-1!"
+                msg = "Contact constraint is not supported in Boltz-1!"
                 raise ValueError(msg)
 
             max_distance = constraint["contact"].get("max_distance", 6.0)
@@ -1630,20 +1587,16 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         if template_chain_ids is not None and not isinstance(template_chain_ids, list):
             template_chain_ids = [template_chain_ids]
 
-        if (
-            template_chain_ids is not None
-            and chain_ids is not None
-        ):
-           
-                if len(template_chain_ids) == len(chain_ids):
-                     if len(template_chain_ids) > 0 and len(chain_ids) > 0:
-                        matched = True
-                else:
-                    msg = (
-                        "When providing both the chain_id and template_id, the number of"
-                        "template_ids provided must match the number of chain_ids!"
-                    )
-                    raise ValueError(msg)
+        if template_chain_ids is not None and chain_ids is not None:
+            if len(template_chain_ids) == len(chain_ids):
+                if len(template_chain_ids) > 0 and len(chain_ids) > 0:
+                    matched = True
+            else:
+                msg = (
+                    "When providing both the chain_id and template_id, the number of"
+                    "template_ids provided must match the number of chain_ids!"
+                )
+                raise ValueError(msg)
 
         # Get relevant chains ids
         if chain_ids is None:
@@ -1651,10 +1604,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
 
         for chain_id in chain_ids:
             if chain_id not in protein_chains:
-                msg = (
-                    f"Chain {chain_id} assigned for template"
-                    f"{template_id} is not one of the protein chains!"
-                )
+                msg = f"Chain {chain_id} assigned for template" f"{template_id} is not one of the protein chains!"
                 raise ValueError(msg)
 
         # Get relevant template chain ids
@@ -1675,9 +1625,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 compute_interfaces=False,
             )
         template_proteins = {
-            str(c["name"])
-            for c in parsed_template.data.chains
-            if c["mol_type"] == const.chain_type_ids["PROTEIN"]
+            str(c["name"]) for c in parsed_template.data.chains if c["mol_type"] == const.chain_type_ids["PROTEIN"]
         }
         if template_chain_ids is None:
             template_chain_ids = list(template_proteins)
@@ -1733,24 +1681,12 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     chains = np.array(chain_data, dtype=Chain)
     interfaces = np.array([], dtype=Interface)
     mask = np.ones(len(chain_data), dtype=bool)
-    rdkit_bounds_constraints = np.array(
-        rdkit_bounds_constraint_data, dtype=RDKitBoundsConstraint
-    )
-    chiral_atom_constraints = np.array(
-        chiral_atom_constraint_data, dtype=ChiralAtomConstraint
-    )
-    stereo_bond_constraints = np.array(
-        stereo_bond_constraint_data, dtype=StereoBondConstraint
-    )
-    planar_bond_constraints = np.array(
-        planar_bond_constraint_data, dtype=PlanarBondConstraint
-    )
-    planar_ring_5_constraints = np.array(
-        planar_ring_5_constraint_data, dtype=PlanarRing5Constraint
-    )
-    planar_ring_6_constraints = np.array(
-        planar_ring_6_constraint_data, dtype=PlanarRing6Constraint
-    )
+    rdkit_bounds_constraints = np.array(rdkit_bounds_constraint_data, dtype=RDKitBoundsConstraint)
+    chiral_atom_constraints = np.array(chiral_atom_constraint_data, dtype=ChiralAtomConstraint)
+    stereo_bond_constraints = np.array(stereo_bond_constraint_data, dtype=StereoBondConstraint)
+    planar_bond_constraints = np.array(planar_bond_constraint_data, dtype=PlanarBondConstraint)
+    planar_ring_5_constraints = np.array(planar_ring_5_constraint_data, dtype=PlanarRing5Constraint)
+    planar_ring_6_constraints = np.array(planar_ring_6_constraint_data, dtype=PlanarRing6Constraint)
 
     if boltz_2:
         atom_data = [(a[0], a[3], a[5], 0.0, 1.0) for a in atom_data]
@@ -1803,9 +1739,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         )
         chain_infos.append(chain_info)
 
-    options = InferenceOptions(
-        pocket_constraints=pocket_constraints, contact_constraints=contact_constraints
-    )
+    options = InferenceOptions(pocket_constraints=pocket_constraints, contact_constraints=contact_constraints)
     record = Record(
         id=name,
         structure=struct_info,

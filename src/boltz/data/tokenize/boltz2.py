@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import astuple, dataclass
 from typing import Optional
 
 import numpy as np
@@ -11,6 +11,7 @@ from boltz.data.types import (
     StructureV2,
     TokenBondV2,
     Tokenized,
+    TokenizedTraining,
     TokenV2,
 )
 
@@ -129,7 +130,7 @@ def get_unk_token(chain: np.ndarray) -> int:
     return res_id
 
 
-def tokenize_structure(  # noqa: C901, PLR0915
+def tokenize_structure(  # noqa: PLR0915
     struct: StructureV2,
     affinity: Optional[AffinityInfo] = None,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -423,4 +424,228 @@ class Boltz2Tokenizer(Tokenizer):
             template_bonds=template_bonds,
             extra_mols=data.extra_mols,
         )
+        return tokenized
+
+
+class Boltz2TrainingTokenizer(Tokenizer):
+    """Tokenize an input structure for training."""
+
+    def __init__(self, atomize_modified_residues: bool = False) -> None:
+        """Initialize the AF3Tokenizer.
+
+        Parameters
+        ----------
+        atomize_modified_residues : bool
+            Whether to atomize modified residues.
+        map_to_closest_residue : bool
+            Whether to map modified residues to the closest residue.
+
+        """
+        self.atomize_modified_residues = atomize_modified_residues
+
+    def tokenize(
+        self,
+        struct: StructureV2,
+        training: bool = False,
+        res_name_to_overwrite: Optional[dict] = None,
+    ) -> Tokenized:  # noqa: C901, PLR0915
+        """Tokenize the input data.
+
+        Parameters
+        ----------
+        struct : Structure
+            The input structure.
+        training: bool
+            Whether we are at training or inference time
+
+
+        Returns
+        -------
+        Tokenized
+            The tokenized data.
+
+        """
+        # Create token data
+        token_data = []
+
+        # Keep track of atom_idx to token_idx
+        token_idx = 0
+        atom_to_token = {}
+
+        # Filter to valid chains only
+        chains = struct.chains[struct.mask]
+
+        # Ensemble atom id start in coords table.
+        # For cropper and other operations, harcoded to 0th conformer.
+        offset = struct.ensemble[0]["atom_coord_idx"]
+
+        for chain in chains:
+            # Get residue indices
+            res_start = chain["res_idx"]
+            res_end = chain["res_idx"] + chain["res_num"]
+            is_protein = chain["mol_type"] == const.chain_type_ids["PROTEIN"]
+
+            for res in struct.residues[res_start:res_end]:
+                # Get atom indices
+                atom_start = res["atom_idx"]
+                atom_end = res["atom_idx"] + res["atom_num"]
+
+                # Standard residues are tokens
+                if res["is_standard"]:
+                    # Get center and disto atoms
+                    center = struct.atoms[res["atom_center"]]
+                    disto = struct.atoms[res["atom_disto"]]
+
+                    # Token is present if centers are
+                    is_present = res["is_present"] & center["is_present"]
+                    is_disto_present = res["is_present"] & disto["is_present"]
+
+                    # Apply chain transformation
+                    c_coords = struct.coords[offset + res["atom_center"]]["coords"]
+                    d_coords = struct.coords[offset + res["atom_disto"]]["coords"]
+
+                    # If protein, compute frame, only used for templates
+                    frame_rot = np.eye(3).flatten()
+                    frame_t = np.zeros(3)
+                    frame_mask = False
+
+                    if is_protein:
+                        # Get frame atoms
+                        atom_st = res["atom_idx"]
+                        atom_en = res["atom_idx"] + res["atom_num"]
+                        atoms = struct.atoms[atom_st:atom_en]
+
+                        # Atoms are always in the order N, CA, C
+                        atom_n = atoms[0]
+                        atom_ca = atoms[1]
+                        atom_c = atoms[2]
+
+                        # Compute frame and mask
+                        frame_mask = atom_ca["is_present"]
+                        frame_mask &= atom_c["is_present"]
+                        frame_mask &= atom_n["is_present"]
+                        frame_mask = bool(frame_mask)
+                        if frame_mask:
+                            frame_rot, frame_t = compute_frame(
+                                atom_n["coords"],
+                                atom_ca["coords"],
+                                atom_c["coords"],
+                            )
+                            frame_rot = frame_rot.flatten()
+
+                    # Create token
+                    token = TokenData(
+                        token_idx=token_idx,
+                        atom_idx=res["atom_idx"],
+                        atom_num=res["atom_num"],
+                        res_idx=res["res_idx"],
+                        res_type=res["res_type"],
+                        res_name=(
+                            res_name_to_overwrite.get(res["name"], res["name"])
+                            if res_name_to_overwrite
+                            else res["name"]
+                        ),
+                        sym_id=chain["sym_id"],
+                        asym_id=chain["asym_id"],
+                        entity_id=chain["entity_id"],
+                        mol_type=chain["mol_type"],
+                        center_idx=res["atom_center"],
+                        disto_idx=res["atom_disto"],
+                        center_coords=c_coords,
+                        disto_coords=d_coords,
+                        resolved_mask=is_present,
+                        disto_mask=is_disto_present,
+                        modified=False,
+                        frame_rot=frame_rot,
+                        frame_t=frame_t,
+                        frame_mask=frame_mask,
+                        cyclic_period=0,
+                    )
+                    token_data.append(astuple(token))
+
+                    # Update atom_idx to token_idx
+                    for atom_idx in range(atom_start, atom_end):
+                        atom_to_token[atom_idx] = token_idx
+
+                    token_idx += 1
+
+                # Non-standard are tokenized per atom
+                elif (
+                    chain["mol_type"] == const.chain_type_ids["NONPOLYMER"]
+                    or self.atomize_modified_residues
+                ):
+                    # We use the unk protein token as res_type
+                    unk_token = const.unk_token["PROTEIN"]
+                    unk_id = const.token_ids[unk_token]
+
+                    # Get atom coordinates
+                    atom_data = struct.atoms[atom_start:atom_end]
+                    atom_coords = struct.coords[
+                        offset + atom_start : offset + atom_end
+                    ]["coords"]
+
+                    # Tokenize each atom
+                    for i, atom in enumerate(atom_data):
+                        # Token is present if atom is
+                        is_present = res["is_present"] & atom["is_present"]
+                        index = atom_start + i
+
+                        # Create token
+                        token = TokenData(
+                            token_idx=token_idx,
+                            atom_idx=index,
+                            atom_num=1,
+                            res_idx=res["res_idx"],
+                            res_type=unk_id,
+                            res_name=(
+                                res_name_to_overwrite.get(res["name"], res["name"])
+                                if res_name_to_overwrite
+                                else res["name"]
+                            ),
+                            sym_id=chain["sym_id"],
+                            asym_id=chain["asym_id"],
+                            entity_id=chain["entity_id"],
+                            mol_type=chain["mol_type"],
+                            center_idx=index,
+                            disto_idx=index,
+                            center_coords=atom_coords[i],
+                            disto_coords=atom_coords[i],
+                            resolved_mask=is_present,
+                            disto_mask=is_present,
+                            modified=chain["mol_type"]
+                            != const.chain_type_ids["NONPOLYMER"],
+                            frame_rot=np.eye(3).flatten(),
+                            frame_t=np.zeros(3),
+                            frame_mask=False,
+                            cyclic_period=0,
+                        )
+                        token_data.append(astuple(token))
+
+                        # Update atom_idx to token_idx
+                        atom_to_token[index] = token_idx
+                        token_idx += 1
+
+        # Create token bonds
+        token_bonds = []
+
+        # Add bonds for ligands
+        for bond in struct.bonds:
+            if (
+                bond["atom_1"] not in atom_to_token
+                or bond["atom_2"] not in atom_to_token
+            ):
+                continue
+            token_bond = (
+                atom_to_token[bond["atom_1"]],
+                atom_to_token[bond["atom_2"]],
+                bond["type"] + 1,
+            )
+            token_bonds.append(token_bond)
+
+        # Consider adding missing bond for modified residues to standard?
+        # I'm not sure it's necessary because the bond is probably always
+        # the same and the model can use the residue indices to infer it
+        token_data = np.array(token_data, dtype=TokenV2)
+        token_bonds = np.array(token_bonds, dtype=TokenBondV2)
+        tokenized = TokenizedTraining(token_data, token_bonds, struct)
         return tokenized

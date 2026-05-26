@@ -316,7 +316,7 @@ def compute_covalent_ligands(
     return covalent_chain_ids
 
 
-def compute_interfaces(atom_data: np.ndarray, chain_data: np.ndarray) -> np.ndarray:
+def find_interfaces(atom_data: np.ndarray, chain_data: np.ndarray) -> np.ndarray:
     """Compute the chain-chain interfaces from a gemmi structure.
 
     Parameters
@@ -1204,7 +1204,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
 
     # Compute interface chains (find chains with a heavy atom within 5A)
     if compute_interfaces:
-        interfaces = compute_interfaces(atoms, chains)
+        interfaces = find_interfaces(atoms, chains)
     else:
         interfaces = np.array([], dtype=Interface)
 

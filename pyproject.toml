@@ -36,37 +36,36 @@ dependencies = [
 
 [project.scripts]
 boltz = "boltz.main:cli"
+download_data = "boltz.data.load.load:entrypoint"
 
 [project.optional-dependencies]
 lint = ["ruff"]
-test = ["pytest", "requests"]
-cuda = [
-    "cuequivariance_ops_cu12>=0.5.0",
-    "cuequivariance_ops_torch_cu12>=0.5.0",
-    "cuequivariance_torch>=0.5.0",
+test = [
+    "pytest",
+    "biotite",
+    "gdown==5.2.0",
+    "nest_asyncio",
+    "ngcsdk",
+    "pooch",
+    "pydantic[email]>=2.7.0",
+    "tqdm",
 ]
+cuda = [
+    "trifast>=0.1.13",
+    "cuequivariance_ops_cu13==0.8.0",
+    "cuequivariance_ops_torch_cu13==0.8.0",
+    "cuequivariance_torch==0.8.0",
+]
+dev = ["pre-commit==4.1.0"]
 
 [tool.ruff]
 src = ["src"]
 extend-exclude = ["conf.py"]
-target-version = "py39"
-lint.select = ["ALL"]
-lint.ignore = [
-    "COM812",  # Conflicts with the formatter
-    "ISC001",  # Conflicts with the formatter
-    "ANN101",  # "missing-type-self"
-    "RET504",  # Unnecessary assignment to `x` before `return` statementRuff
-    "S101",    # Use of `assert` detected
-    "D100",    # Missing docstring in public module
-    "D104",    # Missing docstring in public package
-    "PT001",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
-    "PT004",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
-    "PT005",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
-    "PT023",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
-    "FBT001",
-    "FBT002",
-    "PLR0913", # Too many arguments to init (> 5)
-]
+target-version = "py310"
+line-length = 120
+# Match boltz-1x-cp: only check basic categories (complexity, errors, pyflakes, isort, warnings)
+lint.select = ["C", "E", "F", "I", "W"]
+lint.ignore = ["C901", "E741", "E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = [

@@ -1,3 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -250,12 +272,8 @@ class Structure(NumpySerializable):
                 # Update the residue
                 new_res = res.copy()
                 new_res["atom_idx"] = atom_idx
-                new_res["atom_center"] = (
-                    atom_idx + new_res["atom_center"] - res["atom_idx"]
-                )
-                new_res["atom_disto"] = (
-                    atom_idx + new_res["atom_disto"] - res["atom_idx"]
-                )
+                new_res["atom_center"] = atom_idx + new_res["atom_center"] - res["atom_idx"]
+                new_res["atom_disto"] = atom_idx + new_res["atom_disto"] - res["atom_idx"]
                 residues.append(new_res)
                 res_map[res_start + j] = res_idx
                 res_idx += 1
@@ -333,6 +351,34 @@ class StructureV2(NumpySerializable):
     ensemble: np.ndarray
     pocket: Optional[np.ndarray] = None
 
+    @classmethod
+    def load(cls: "StructureV2", path: Path) -> "StructureV2":
+        """Load a StructureV2 from an NPZ file, patching legacy data.
+
+        Parameters
+        ----------
+        path : Path
+            The path to the file.
+
+        Returns
+        -------
+        StructureV2
+            The loaded structure.
+
+        """
+        data = dict(np.load(path, allow_pickle=True))
+        # Legacy structures may lack cyclic_period; the tokenizer and
+        # distributed featurizer both rely on this field existing on chains.
+        chains = data["chains"]
+        if "cyclic_period" not in chains.dtype.names:
+            new_dtype = chains.dtype.descr + [("cyclic_period", "i4")]
+            new_chains = np.empty(chains.shape, dtype=new_dtype)
+            for name in chains.dtype.names:
+                new_chains[name] = chains[name]
+            new_chains["cyclic_period"] = 0
+            data["chains"] = new_chains
+        return cls(**data)
+
     def remove_invalid_chains(self) -> "StructureV2":  # noqa: PLR0915
         """Remove invalid chains.
 
@@ -380,12 +426,8 @@ class StructureV2(NumpySerializable):
                 # Update the residue
                 new_res = res.copy()
                 new_res["atom_idx"] = atom_idx
-                new_res["atom_center"] = (
-                    atom_idx + new_res["atom_center"] - res["atom_idx"]
-                )
-                new_res["atom_disto"] = (
-                    atom_idx + new_res["atom_disto"] - res["atom_idx"]
-                )
+                new_res["atom_center"] = atom_idx + new_res["atom_center"] - res["atom_idx"]
+                new_res["atom_disto"] = atom_idx + new_res["atom_disto"] - res["atom_idx"]
                 residues.append(new_res)
                 res_map[res_start + j] = res_idx
                 res_idx += 1
@@ -506,6 +548,7 @@ class ChainInfo:
     num_residues: int
     valid: bool = True
     entity_id: Optional[Union[str, int]] = None
+    template_ids: Optional[list[Union[str, int]]] = None
 
 
 @dataclass(frozen=True)
@@ -521,12 +564,8 @@ class InterfaceInfo:
 class InferenceOptions:
     """InferenceOptions datatype."""
 
-    pocket_constraints: Optional[
-        list[tuple[int, list[tuple[int, int]], float, bool]]
-    ] = None
-    contact_constraints: Optional[
-        list[tuple[tuple[int, int], tuple[int, int], float, bool]]
-    ] = None
+    pocket_constraints: Optional[list[tuple[int, list[tuple[int, int]], float, bool]]] = None
+    contact_constraints: Optional[list[tuple[tuple[int, int], tuple[int, int], float, bool]]] = None
 
 
 @dataclass(frozen=True)
@@ -691,6 +730,30 @@ class Manifest(JSONSerializable):
 
 
 ####################################################################################################
+# TEMPLATE
+####################################################################################################
+
+TemplateCoordinates = [
+    ("res_idx", np.dtype("i4")),
+    ("res_type", np.dtype("i1")),
+    ("frame_rot", np.dtype("9f4")),
+    ("frame_t", np.dtype("3f4")),
+    ("coords_cb", np.dtype("3f4")),
+    ("coords_ca", np.dtype("3f4")),
+    ("mask_frame", np.dtype("?")),
+    ("mask_cb", np.dtype("?")),
+    ("mask_ca", np.dtype("?")),
+]
+
+
+@dataclass(frozen=True, slots=True)
+class Template(NumpySerializable):
+    """Template datatype."""
+
+    coordinates: np.ndarray
+
+
+####################################################################################################
 # INPUT
 ####################################################################################################
 
@@ -782,3 +845,24 @@ class Tokenized:
     template_tokens: Optional[dict[str, np.ndarray]] = None
     template_bonds: Optional[dict[str, np.ndarray]] = None
     extra_mols: Optional[dict[str, Mol]] = None
+
+
+@dataclass(frozen=True)
+class TokenizedTraining:
+    """Tokenized datatype."""
+
+    tokens: np.ndarray
+    bonds: np.ndarray
+    structure: Structure
+
+
+@dataclass(frozen=True, slots=True)
+class InputTraining:
+    """Input datatype."""
+
+    tokens: np.ndarray
+    bonds: np.ndarray
+    structure: Structure
+    msa: dict[str, MSA]
+    templates: dict[str, list[Template]]
+    record: Optional[Record] = None

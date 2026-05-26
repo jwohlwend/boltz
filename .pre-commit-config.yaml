@@ -1,0 +1,31 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v2.3.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+        exclude: "mkdocs.yml"
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.1
+    hooks:
+      - id: ruff
+        # Don't fail on docstring checks in pre-commit, and don't remove these unused noqa flags.
+        args: ["--fix", "--ignore", "D", "--ignore", "RUF100"]
+      - id: ruff-format
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        name: detect-secrets (everything but notebooks)
+        args: ['--baseline', './pre-commit/.secrets.baseline', '--exclude-files', '(.*\.ipynb|.*\.baseline|.*\.a3m)$', ]
+        exclude: package.lock.json
+  - repo: local
+    hooks:
+      - id: license-header-check
+        name: Run license-check script
+        entry: python pre-commit/license_check.py --license-header ./pre-commit/license_header --modify
+        language: python
+        additional_dependencies: ["click==8.1.7"]
+        pass_filenames: false
+        always_run: true

@@ -1,0 +1,69 @@
+defaults:
+  - structurev2
+  - _self_
+
+# General DTensor context-parallel settings for normal-size model.
+# For small-model CP training, use structurev2_small_cp.yaml instead.
+
+# DTensor CP uses SingleDeviceStrategy; multi-device/node is managed by
+# DistributedManager via parallel_size, not by Lightning.
+trainer:
+  accelerator: gpu    # must be gpu instead of cuda because CP code manages devices
+  devices: 1          # must be 1 for DTensor CP (one device per Lightning Trainer)
+  num_nodes: 1        # must be 1; multi-node is handled by torchrun/SLURM
+  precision: null     # superseded by top-level precision below
+
+# Context-parallelism and data-parallelism topology.
+# Override via CLI: parallel_size.size_cp=4 parallel_size.size_dp=2
+# Constraint: size_cp must be a perfect square (2D CP mesh); size_dp * size_cp == world_size.
+parallel_size:
+  size_cp: 1          # context-parallel group size (must be a perfect square, e.g. 1, 4, 9, 16)
+  size_dp: 1          # data-parallel group size
+  timeout_nccl: 30    # NCCL timeout in minutes (for CUDA)
+  timeout_gloo: 30    # Gloo timeout in minutes (for CPU)
+
+# Training precision. Values: FP32, TF32, BF16, BF16_MIXED, FP16, FP64
+precision: BF16_MIXED
+
+# Triangular attention kernel backend.
+# Values: reference, cueq, trifast, cueq_fwd_trifast_bwd
+# Note: cueq does not support FP32 precision.
+triattn_backend: cueq
+
+# Scaled dot-product attention with bias backend (ring-attention layers).
+# Values: reference, torch_sdpa_efficient_attention, torch_flex_attn
+sdpa_with_bias_backend: torch_flex_attn
+
+# SDPA with bias backend for shardwise (window-batched) attention layers.
+# Values: reference, torch_sdpa_efficient_attention, torch_flex_attn
+sdpa_with_bias_shardwise_backend: torch_flex_attn
+
+# CUDA memory profiling. Activated only when output_path_prefix is set.
+# Each rank writes to: {output_path_prefix}_rank{global_rank}.pickle
+# Additional kwargs are forwarded to torch.cuda.memory._record_memory_history().
+CUDAMemoryProfile:
+  output_path_prefix: null   # set a path prefix to enable, e.g. "profiling/mem"
+  max_entries: 300000         # max allocation/deallocation events to record
+
+# CPU offloading of activation-checkpoint boundary tensors.
+# Lists the distributed module types whose checkpoint-boundary activations
+# should be offloaded to CPU during forward and restored on backward.
+# Requires the corresponding activation_checkpointing to be enabled.
+# Valid types: DiffusionTransformer, MSAModule, PairformerModule
+# Set to null or omit to disable.
+OffloadActvCkptToCPU: null
+
+# DTensor CP requires num_workers=0 (main-process collation for distributed
+# tensor construction) and pin_memory=false.
+data:
+  num_workers: 0
+  pin_memory: false
+
+model:
+  validators:
+    - _target_: boltz.distributed.model.validation.rcsb.DistributedRCSBValidator
+      val_names: ["RCSB"]
+      confidence_prediction: ${model.confidence_prediction}
+      physicalism_metrics: False
+      rmsd_metrics: True
+      clash_score_metrics: True

@@ -80,6 +80,7 @@ class BoltzTokenizer(Tokenizer):
 
         # Filter to valid chains only
         chains = struct.chains[struct.mask]
+        has_cyclic_period = "cyclic_period" in chains.dtype.names
 
         for chain in chains:
             # Get residue indices
@@ -122,13 +123,12 @@ class BoltzTokenizer(Tokenizer):
                         disto_coords=d_coords,
                         resolved_mask=is_present,
                         disto_mask=is_disto_present,
-                        cyclic_period=chain["cyclic_period"],
+                        cyclic_period=chain["cyclic_period"] if has_cyclic_period else 0,
                     )
                     token_data.append(token_astuple(token))
 
                     # Update atom_idx to token_idx
-                    atom_to_token.update(
-                        dict.fromkeys(range(atom_start, atom_end), token_idx))
+                    atom_to_token.update(dict.fromkeys(range(atom_start, atom_end), token_idx))
 
                     token_idx += 1
 
@@ -165,9 +165,7 @@ class BoltzTokenizer(Tokenizer):
                             disto_coords=atom_coords[i],
                             resolved_mask=is_present,
                             disto_mask=is_present,
-                            cyclic_period=chain[
-                                "cyclic_period"
-                            ],  # Enforced to be False in chain parser
+                            cyclic_period=(chain["cyclic_period"] if has_cyclic_period else 0),
                         )
                         token_data.append(token_astuple(token))
 
@@ -180,10 +178,7 @@ class BoltzTokenizer(Tokenizer):
 
         # Add atom-atom bonds from ligands
         for bond in struct.bonds:
-            if (
-                bond["atom_1"] not in atom_to_token
-                or bond["atom_2"] not in atom_to_token
-            ):
+            if bond["atom_1"] not in atom_to_token or bond["atom_2"] not in atom_to_token:
                 continue
             token_bond = (
                 atom_to_token[bond["atom_1"]],
@@ -193,10 +188,7 @@ class BoltzTokenizer(Tokenizer):
 
         # Add connection bonds (covalent)
         for conn in struct.connections:
-            if (
-                conn["atom_1"] not in atom_to_token
-                or conn["atom_2"] not in atom_to_token
-            ):
+            if conn["atom_1"] not in atom_to_token or conn["atom_2"] not in atom_to_token:
                 continue
             token_bond = (
                 atom_to_token[conn["atom_1"]],

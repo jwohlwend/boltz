@@ -1,46 +1,87 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+# fmt: off
+
 import argparse
 import concurrent.futures
+import os
 import subprocess
 from pathlib import Path
 
 from tqdm import tqdm
 
-OST_COMPARE_STRUCTURE = r"""
-#!/bin/bash
-# https://openstructure.org/docs/2.7/actions/#ost-compare-structures
-
-IMAGE_NAME=openstructure-0.2.8
-
-command="compare-structures \
--m {model_file} \
--r {reference_file} \
---fault-tolerant \
---min-pep-length 4 \
---min-nuc-length 4 \
--o {output_path} \
---lddt --bb-lddt --qs-score --dockq \
---ics --ips --rigid-scores --patch-scores --tm-score"
-
-sudo docker run -u $(id -u):$(id -g) --rm --volume {mount}:{mount} $IMAGE_NAME $command
-"""
+IMAGE_NAME = "openstructure-0.2.8"
 
 
-OST_COMPARE_LIGAND = r"""
-#!/bin/bash
-# https://openstructure.org/docs/2.7/actions/#ost-compare-structures
+def _docker_compare_structures_cmd(
+    model_file: str,
+    reference_file: str,
+    output_path: str,
+    mount: str,
+) -> list[str]:
+    """Build the ``docker run … compare-structures`` command as an arg list."""
+    uid = os.getuid()
+    gid = os.getgid()
+    return [
+        "sudo", "docker", "run",
+        "-u", f"{uid}:{gid}",
+        "--rm",
+        "--volume", f"{mount}:{mount}",
+        IMAGE_NAME,
+        "compare-structures",
+        "-m", model_file,
+        "-r", reference_file,
+        "--fault-tolerant",
+        "--min-pep-length", "4",
+        "--min-nuc-length", "4",
+        "-o", output_path,
+        "--lddt", "--bb-lddt", "--qs-score", "--dockq",
+        "--ics", "--ips", "--rigid-scores", "--patch-scores", "--tm-score",
+    ]  # fmt: skip
 
-IMAGE_NAME=openstructure-0.2.8
 
-command="compare-ligand-structures \
--m {model_file} \
--r {reference_file} \
---fault-tolerant \
---lddt-pli --rmsd \
---substructure-match \
--o {output_path}"
-
-sudo docker run -u $(id -u):$(id -g) --rm --volume {mount}:{mount} $IMAGE_NAME $command
-"""
+def _docker_compare_ligands_cmd(
+    model_file: str,
+    reference_file: str,
+    output_path: str,
+    mount: str,
+) -> list[str]:
+    """Build the ``docker run … compare-ligand-structures`` command as an arg list."""
+    uid = os.getuid()
+    gid = os.getgid()
+    return [
+        "sudo", "docker", "run",
+        "-u", f"{uid}:{gid}",
+        "--rm",
+        "--volume", f"{mount}:{mount}",
+        IMAGE_NAME,
+        "compare-ligand-structures",
+        "-m", model_file,
+        "-r", reference_file,
+        "--fault-tolerant",
+        "--lddt-pli", "--rmsd",
+        "--substructure-match",
+        "-o", output_path,
+    ]  # fmt: skip
 
 
 def evaluate_structure(
@@ -49,7 +90,6 @@ def evaluate_structure(
     reference: Path,
     outdir: str,
     mount: str,
-    executable: str = "/bin/bash",
 ) -> None:
     """Evaluate the structure."""
     # Evaluate polymer metrics
@@ -61,15 +101,13 @@ def evaluate_structure(
         )
     else:
         subprocess.run(
-            OST_COMPARE_STRUCTURE.format(
+            _docker_compare_structures_cmd(
                 model_file=str(pred),
                 reference_file=str(reference),
                 output_path=str(out_path),
                 mount=mount,
             ),
-            shell=True,  # noqa: S602
             check=False,
-            executable=executable,
             capture_output=True,
         )
 
@@ -79,15 +117,13 @@ def evaluate_structure(
         print(f"Skipping recomputation of {name} as ligand json file already exists")  # noqa: T201
     else:
         subprocess.run(
-            OST_COMPARE_LIGAND.format(
+            _docker_compare_ligands_cmd(
                 model_file=str(pred),
                 reference_file=str(reference),
                 output_path=str(out_path),
                 mount=mount,
             ),
-            shell=True,  # noqa: S602
             check=False,
-            executable=executable,
             capture_output=True,
         )
 
@@ -132,7 +168,6 @@ def main(args):
                         reference=str(ref_path),
                         outdir=str(args.outdir),
                         mount=args.mount,
-                        executable=args.executable,
                     )
                     first_item = False
                 else:
@@ -143,7 +178,6 @@ def main(args):
                         reference=str(ref_path),
                         outdir=str(args.outdir),
                         mount=args.mount,
-                        executable=args.executable,
                     )
                     futures.append(future)
 
@@ -161,7 +195,6 @@ if __name__ == "__main__":
     parser.add_argument("--format", type=str, default="af3")
     parser.add_argument("--testset", type=str, default="casp")
     parser.add_argument("--mount", type=str)
-    parser.add_argument("--executable", type=str, default="/bin/bash")
     parser.add_argument("--max-workers", type=int, default=32)
     args = parser.parse_args()
     main(args)

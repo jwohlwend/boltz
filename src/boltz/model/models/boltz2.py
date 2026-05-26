@@ -1,3 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+# fmt: off
 import gc
 from typing import Any, Optional
 
@@ -31,7 +53,6 @@ from boltz.model.modules.trunkv2 import (
     InputEmbedder,
     MSAModule,
     TemplateModule,
-    TemplateV2Module,
 )
 from boltz.model.optim.ema import EMA
 from boltz.model.optim.scheduler import AlphaFoldLRScheduler
@@ -102,7 +123,6 @@ class Boltz2(LightningModule):
         predict_bfactor: bool = False,
         log_loss_every_steps: int = 50,
         checkpoint_diffusion_conditioning: bool = False,
-        use_templates_v2: bool = False,
         use_kernels: bool = False,
     ) -> None:
         super().__init__()
@@ -133,6 +153,7 @@ class Boltz2(LightningModule):
         self.diffusion_loss_args = diffusion_loss_args
         self.predict_args = predict_args
         self.steering_args = steering_args
+        self.validate_structure = validate_structure
 
         # Training metrics
         if validate_structure:
@@ -152,6 +173,7 @@ class Boltz2(LightningModule):
         self.num_bins = num_bins
         self.min_dist = min_dist
         self.max_dist = max_dist
+        self.num_distograms = 1
         self.aggregate_distogram = aggregate_distogram
 
         # Trunk
@@ -215,10 +237,7 @@ class Boltz2(LightningModule):
         # Pairwise stack
         self.use_templates = use_templates
         if use_templates:
-            if use_templates_v2:
-                self.template_module = TemplateV2Module(token_z, **template_args)
-            else:
-                self.template_module = TemplateModule(token_z, **template_args)
+            self.template_module = TemplateModule(token_z, **template_args)
             if compile_templates:
                 self.is_template_compiled = True
                 self.template_module = torch.compile(
@@ -311,7 +330,7 @@ class Boltz2(LightningModule):
                 cyclic_pos_enc=cyclic_pos_enc,
                 conditioning_cutoff_min=conditioning_cutoff_min,
                 conditioning_cutoff_max=conditioning_cutoff_max,
-                **confidence_model_args,
+                **(confidence_model_args or {}),
             )
             if compile_confidence:
                 self.confidence_module = torch.compile(
@@ -423,7 +442,7 @@ class Boltz2(LightningModule):
             )
             relative_position_encoding = self.rel_pos(feats)
             z_init = z_init + relative_position_encoding
-            z_init = z_init + self.token_bonds(feats["token_bonds"].float())
+            z_init = z_init + self.token_bonds(feats["token_bonds"].to(dtype=z_init.dtype))
             if self.bond_type_feature:
                 z_init = z_init + self.token_bonds_type(feats["type_bonds"].long())
             z_init = z_init + self.contact_conditioning(feats)
@@ -433,7 +452,10 @@ class Boltz2(LightningModule):
             z = torch.zeros_like(z_init)
 
             # Compute pairwise mask
-            mask = feats["token_pad_mask"].float()
+            # promote_types preserves float64 for testing while promoting lower
+            # dtypes to at least float32 (no-op at production float32).
+            compute_dtype = torch.promote_types(s_init.dtype, torch.float32)
+            mask = feats["token_pad_mask"].to(dtype=compute_dtype)
             pair_mask = mask[:, :, None] * mask[:, None, :]
             if self.run_trunk_and_structure:
                 for i in range(recycling_steps + 1):
@@ -495,11 +517,7 @@ class Boltz2(LightningModule):
                 "z": z,
             }
 
-            if (
-                self.run_trunk_and_structure
-                and ((not self.training) or self.confidence_prediction)
-                and (not self.skip_run_structure)
-            ):
+            if self.run_trunk_and_structure and (not self.skip_run_structure):
                 if self.checkpoint_diffusion_conditioning and self.training:
                     # TODO decide whether this should be with bf16 or not
                     q, c, to_keys, atom_enc_bias, atom_dec_bias, token_trans_bias = (
@@ -529,19 +547,20 @@ class Boltz2(LightningModule):
                     "token_trans_bias": token_trans_bias,
                 }
 
-                with torch.autocast("cuda", enabled=False):
-                    struct_out = self.structure_module.sample(
-                        s_trunk=s.float(),
-                        s_inputs=s_inputs.float(),
-                        feats=feats,
-                        num_sampling_steps=num_sampling_steps,
-                        atom_mask=feats["atom_pad_mask"].float(),
-                        multiplicity=diffusion_samples,
-                        max_parallel_samples=max_parallel_samples,
-                        steering_args=self.steering_args,
-                        diffusion_conditioning=diffusion_conditioning,
-                    )
-                    dict_out.update(struct_out)
+                if (not self.training) or self.confidence_prediction:
+                    with torch.autocast("cuda", enabled=False):
+                        struct_out = self.structure_module.sample(
+                            s_trunk=s.to(compute_dtype),
+                            s_inputs=s_inputs.to(compute_dtype),
+                            feats=feats,
+                            num_sampling_steps=num_sampling_steps,
+                            atom_mask=feats["atom_pad_mask"].to(compute_dtype),
+                            multiplicity=diffusion_samples,
+                            max_parallel_samples=max_parallel_samples,
+                            steering_args=self.steering_args,
+                            diffusion_conditioning=diffusion_conditioning,
+                        )
+                        dict_out.update(struct_out)
 
                 if self.predict_bfactor:
                     pbfactor = self.bfactor_module(s)
@@ -570,8 +589,8 @@ class Boltz2(LightningModule):
 
                 with torch.autocast("cuda", enabled=False):
                     struct_out = self.structure_module(
-                        s_trunk=s.float(),
-                        s_inputs=s_inputs.float(),
+                        s_trunk=s.to(compute_dtype),
+                        s_inputs=s_inputs.to(compute_dtype),
                         feats=feats,
                         multiplicity=multiplicity_diffusion_train,
                         diffusion_conditioning=diffusion_conditioning,
@@ -929,7 +948,6 @@ class Boltz2(LightningModule):
         return loss
 
     def training_log(self):
-        self.log("train/grad_norm", self.gradient_norm(self), prog_bar=False)
         self.log("train/param_norm", self.parameter_norm(self), prog_bar=False)
 
         lr = self.trainer.optimizers[0].param_groups[0]["lr"]
@@ -955,15 +973,35 @@ class Boltz2(LightningModule):
 
         if self.confidence_prediction:
             self.log(
-                "train/grad_norm_confidence_module",
-                self.gradient_norm(self.confidence_module),
-                prog_bar=False,
-            )
-            self.log(
                 "train/param_norm_confidence_module",
                 self.parameter_norm(self.confidence_module),
                 prog_bar=False,
             )
+
+    def on_after_backward(self):
+        if not (self.global_step % self.log_loss_every_steps):
+            self.log("train/grad_norm", self.gradient_norm(self), prog_bar=False)
+            self.log(
+                "train/grad_norm_msa_module",
+                self.gradient_norm(self.msa_module),
+                prog_bar=False,
+            )
+            self.log(
+                "train/grad_norm_pairformer_module",
+                self.gradient_norm(self.pairformer_module),
+                prog_bar=False,
+            )
+            self.log(
+                "train/grad_norm_structure_module",
+                self.gradient_norm(self.structure_module),
+                prog_bar=False,
+            )
+            if self.confidence_prediction:
+                self.log(
+                    "train/grad_norm_confidence_module",
+                    self.gradient_norm(self.confidence_module),
+                    prog_bar=False,
+                )
 
     def on_train_epoch_end(self):
         if self.confidence_prediction:
