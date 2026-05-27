@@ -306,7 +306,7 @@ def check_inputs(data: Path) -> list[Path]:
             if d.is_dir():
                 msg = f"Found directory {d} instead of .fasta or .yaml."
                 raise RuntimeError(msg)
-            if d.suffix not in (".fa", ".fas", ".fasta", ".yml", ".yaml"):
+            if d.suffix.lower() not in (".fa", ".fas", ".fasta", ".yml", ".yaml"):
                 msg = (
                     f"Unable to parse filetype {d.suffix}, "
                     "please provide a .fasta or .yaml file."
@@ -398,6 +398,7 @@ def filter_inputs_affinity(
 
     # Remove them from the input data
     if existing and not override:
+        manifest = Manifest([r for r in manifest.records if r.id not in existing])
         num_skipped = len(existing)
         msg = (
             f"Found some existing affinity predictions ({num_skipped}), "
@@ -410,7 +411,7 @@ def filter_inputs_affinity(
         msg = "Found existing affinity predictions, will override."
         click.echo(msg)
 
-    return Manifest([r for r in manifest.records if r.id not in existing])
+    return manifest
 
 
 def compute_msa(
@@ -546,9 +547,9 @@ def process_input(  # noqa: C901, PLR0912, PLR0915, D103
 ) -> None:
     try:
         # Parse data
-        if path.suffix in (".fa", ".fas", ".fasta"):
+        if path.suffix.lower() in (".fa", ".fas", ".fasta"):
             target = parse_fasta(path, ccd, mol_dir, boltz2)
-        elif path.suffix in (".yml", ".yaml"):
+        elif path.suffix.lower() in (".yml", ".yaml"):
             target = parse_yaml(path, ccd, mol_dir, boltz2)
         elif path.is_dir():
             msg = f"Found directory {path} instead of .fasta or .yaml, skipping."
@@ -690,7 +691,7 @@ def process_inputs(
     ccd_path : Path
         The path to the CCD dictionary.
     max_msa_seqs : int, optional
-        Max number of MSA sequences, by default 4096.
+        Max number of MSA sequences, by default 8192.
     use_msa_server : bool, optional
         Whether to use the MMSeqs2 server for MSA generation, by default False.
     msa_server_username : str, optional
@@ -969,7 +970,7 @@ def cli() -> None:
 @click.option(
     "--use_potentials",
     is_flag=True,
-    help="Whether to not use potentials for steering. Default is False.",
+    help="Whether to use potentials for steering. Default is False.",
 )
 @click.option(
     "--model",
@@ -1386,7 +1387,6 @@ def predict(  # noqa: C901, PLR0915, PLR0912
 
         steering_args = BoltzSteeringParams()
         steering_args.fk_steering = False
-        steering_args.guidance_update = False
         steering_args.physical_guidance_update = False
         steering_args.contact_guidance_update = False
         

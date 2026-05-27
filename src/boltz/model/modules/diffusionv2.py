@@ -585,7 +585,6 @@ class AtomDiffusion(Module):
         )
 
         return {
-            "noised_atom_coords": noised_atom_coords,
             "denoised_atom_coords": denoised_atom_coords,
             "sigmas": sigmas,
             "aligned_true_atom_coords": atom_coords,
@@ -603,7 +602,6 @@ class AtomDiffusion(Module):
     ):
         with torch.autocast("cuda", enabled=False):
             denoised_atom_coords = out_dict["denoised_atom_coords"].float()
-            noised_atom_coords = out_dict["noised_atom_coords"].float()
             sigmas = out_dict["sigmas"].float()
 
             resolved_atom_mask_uni = feats["atom_resolved_mask"].float()
@@ -616,7 +614,7 @@ class AtomDiffusion(Module):
                 multiplicity, 0
             )
 
-            align_weights = noised_atom_coords.new_ones(noised_atom_coords.shape[:2])
+            align_weights = denoised_atom_coords.new_ones(denoised_atom_coords.shape[:2])
             atom_type = (
                 torch.bmm(
                     feats["atom_to_token"].float(),

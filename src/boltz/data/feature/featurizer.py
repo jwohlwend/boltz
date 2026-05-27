@@ -550,7 +550,7 @@ def process_token_features(
         assert inference_pocket is not None
         pocket_residues = set(inference_pocket)
         for idx, token in enumerate(token_data):
-            if token["asym_id"] in inference_binder:
+            if token["asym_id"] == inference_binder:
                 pocket_feature[idx] = const.pocket_contact_info["BINDER"]
             elif (token["asym_id"], token["res_idx"]) in pocket_residues:
                 pocket_feature[idx] = const.pocket_contact_info["POCKET"]
@@ -644,6 +644,7 @@ def process_token_features(
             resolved_mask = pad_dim(resolved_mask, 0, pad_len)
             disto_mask = pad_dim(disto_mask, 0, pad_len)
             pocket_feature = pad_dim(pocket_feature, 0, pad_len)
+            cyclic_period = pad_dim(cyclic_period, 0, pad_len)
 
     token_features = {
         "token_index": token_index,
