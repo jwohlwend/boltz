@@ -1,4 +1,5 @@
 import gc
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
@@ -69,6 +70,7 @@ class Boltz2(LightningModule):
         affinity_mw_correction: bool = True,
         run_trunk_and_structure: bool = True,
         skip_run_structure: bool = False,
+        embeddings_only: bool = False,
         token_level_confidence: bool = True,
         alpha_pae: float = 0.0,
         structure_prediction_training: bool = True,
@@ -297,6 +299,7 @@ class Boltz2(LightningModule):
         self.affinity_mw_correction = affinity_mw_correction
         self.run_trunk_and_structure = run_trunk_and_structure
         self.skip_run_structure = skip_run_structure
+        self.embeddings_only = embeddings_only
         self.token_level_confidence = token_level_confidence
         self.alpha_pae = alpha_pae
         self.structure_prediction_training = structure_prediction_training
@@ -407,6 +410,8 @@ class Boltz2(LightningModule):
         diffusion_samples: int = 1,
         max_parallel_samples: Optional[int] = None,
         run_confidence_sequentially: bool = False,
+        resume_embeddings: Optional[list[tuple[Tensor, Tensor]]] = None,
+        resume_recycling_steps: Optional[int] = None,
     ) -> dict[str, Tensor]:
         with torch.set_grad_enabled(
             self.training and self.structure_prediction_training
@@ -431,12 +436,64 @@ class Boltz2(LightningModule):
             # Perform rounds of the pairwise stack
             s = torch.zeros_like(s_init)
             z = torch.zeros_like(z_init)
+            first_recycling_step = 0
+            if resume_embeddings is not None:
+                if resume_recycling_steps is None:
+                    msg = "resume_recycling_steps is required with resume_embeddings."
+                    raise ValueError(msg)
+                if len(resume_embeddings) != s.shape[0]:
+                    msg = (
+                        f"Got {len(resume_embeddings)} resume embedding rows for "
+                        f"batch size {s.shape[0]}."
+                    )
+                    raise ValueError(msg)
+
+                for batch_idx, (resume_s_raw, resume_z_raw) in enumerate(
+                    resume_embeddings
+                ):
+                    resume_s = resume_s_raw.to(device=s.device, dtype=s.dtype)
+                    resume_z = resume_z_raw.to(device=z.device, dtype=z.dtype)
+                    if resume_s.ndim != 2 or resume_z.ndim != 3:
+                        msg = (
+                            "Resume embeddings must have shapes "
+                            "(tokens, token_s) and (tokens, tokens, token_z)."
+                        )
+                        raise ValueError(msg)
+                    if (
+                        resume_s.shape[-1] != s.shape[-1]
+                        or resume_z.shape[-1] != z.shape[-1]
+                    ):
+                        msg = (
+                            "Resume embedding channel dimensions do not match the "
+                            "loaded model."
+                        )
+                        raise ValueError(msg)
+                    if (
+                        resume_s.shape[0] > s.shape[1]
+                        or resume_z.shape[0] > z.shape[1]
+                    ):
+                        msg = (
+                            "Resume embeddings have more tokens than the current batch."
+                        )
+                        raise ValueError(msg)
+                    if resume_z.shape[0] != resume_z.shape[1]:
+                        msg = "Resume z embedding must be square in token dimensions."
+                        raise ValueError(msg)
+                    if resume_z.shape[0] != resume_s.shape[0]:
+                        msg = "Resume s and z token dimensions do not match."
+                        raise ValueError(msg)
+
+                    n_tokens = resume_s.shape[0]
+                    s[batch_idx, :n_tokens] = resume_s
+                    z[batch_idx, :n_tokens, :n_tokens] = resume_z
+
+                first_recycling_step = resume_recycling_steps + 1
 
             # Compute pairwise mask
             mask = feats["token_pad_mask"].float()
             pair_mask = mask[:, :, None] * mask[:, None, :]
             if self.run_trunk_and_structure:
-                for i in range(recycling_steps + 1):
+                for i in range(first_recycling_step, recycling_steps + 1):
                     with torch.set_grad_enabled(
                         self.training
                         and self.structure_prediction_training
@@ -499,6 +556,7 @@ class Boltz2(LightningModule):
                 self.run_trunk_and_structure
                 and ((not self.training) or self.confidence_prediction)
                 and (not self.skip_run_structure)
+                and (not self.embeddings_only)
             ):
                 if self.checkpoint_diffusion_conditioning and self.training:
                     # TODO decide whether this should be with bf16 or not
@@ -582,7 +640,7 @@ class Boltz2(LightningModule):
                 feats["coords"] = feats["coords"].squeeze(1)
                 assert len(feats["coords"].shape) == 3
 
-        if self.confidence_prediction:
+        if self.confidence_prediction and not self.embeddings_only:
             dict_out.update(
                 self.confidence_module(
                     s_inputs=s_inputs.detach(),
@@ -605,7 +663,7 @@ class Boltz2(LightningModule):
                 )
             )
 
-        if self.affinity_prediction:
+        if self.affinity_prediction and not self.embeddings_only:
             pad_token_mask = feats["token_pad_mask"][0]
             rec_mask = feats["mol_type"][0] == 0
             rec_mask = rec_mask * pad_token_mask
@@ -627,6 +685,23 @@ class Boltz2(LightningModule):
 
             with torch.autocast("cuda", enabled=False):
                 if self.affinity_ensemble:
+                    affinity_embeddings = {}
+                    handles = []
+                    if self.predict_args.get("write_affinity_embeddings", False):
+                        handles.append(
+                            self.affinity_module1.affinity_heads.affinity_out_mlp.register_forward_hook(
+                                lambda module, inputs, output: affinity_embeddings.update(
+                                    {"affinity_g1": output.detach()}
+                                )
+                            )
+                        )
+                        handles.append(
+                            self.affinity_module2.affinity_heads.affinity_out_mlp.register_forward_hook(
+                                lambda module, inputs, output: affinity_embeddings.update(
+                                    {"affinity_g2": output.detach()}
+                                )
+                            )
+                        )
                     dict_out_affinity1 = self.affinity_module1(
                         s_inputs=s_inputs.detach(),
                         z=z_affinity.detach(),
@@ -634,8 +709,10 @@ class Boltz2(LightningModule):
                         feats=feats,
                         multiplicity=1,
                         use_kernels=self.use_kernels,
+                        return_embeddings=self.predict_args.get(
+                            "write_affinity_embeddings", False
+                        ),
                     )
-
                     dict_out_affinity1["affinity_probability_binary"] = (
                         torch.nn.functional.sigmoid(
                             dict_out_affinity1["affinity_logits_binary"]
@@ -648,7 +725,37 @@ class Boltz2(LightningModule):
                         feats=feats,
                         multiplicity=1,
                         use_kernels=self.use_kernels,
+                        return_embeddings=self.predict_args.get(
+                            "write_affinity_embeddings", False
+                        ),
                     )
+                    for handle in handles:
+                        handle.remove()
+                    if self.predict_args.get("write_affinity_embeddings", False):
+                        if "affinity_g1" not in affinity_embeddings:
+                            if "affinity_g" in dict_out_affinity1:
+                                affinity_embeddings["affinity_g1"] = (
+                                    dict_out_affinity1["affinity_g"].detach()
+                                )
+                        if "affinity_g2" not in affinity_embeddings:
+                            if "affinity_g" in dict_out_affinity2:
+                                affinity_embeddings["affinity_g2"] = (
+                                    dict_out_affinity2["affinity_g"].detach()
+                                )
+                        if "affinity_g1" not in affinity_embeddings and hasattr(
+                            self.affinity_module1.affinity_heads,
+                            "latest_affinity_g",
+                        ):
+                            affinity_embeddings["affinity_g1"] = (
+                                self.affinity_module1.affinity_heads.latest_affinity_g
+                            )
+                        if "affinity_g2" not in affinity_embeddings and hasattr(
+                            self.affinity_module2.affinity_heads,
+                            "latest_affinity_g",
+                        ):
+                            affinity_embeddings["affinity_g2"] = (
+                                self.affinity_module2.affinity_heads.latest_affinity_g
+                            )
                     dict_out_affinity2["affinity_probability_binary"] = (
                         torch.nn.functional.sigmoid(
                             dict_out_affinity2["affinity_logits_binary"]
@@ -697,9 +804,21 @@ class Boltz2(LightningModule):
                         )
 
                     dict_out.update(dict_out_affinity_ensemble)
+                    if self.predict_args.get("write_affinity_embeddings", False):
+                        dict_out.update(affinity_embeddings)
                     dict_out.update(dict_out_affinity1)
                     dict_out.update(dict_out_affinity2)
                 else:
+                    affinity_embeddings = {}
+                    handles = []
+                    if self.predict_args.get("write_affinity_embeddings", False):
+                        handles.append(
+                            self.affinity_module.affinity_heads.affinity_out_mlp.register_forward_hook(
+                                lambda module, inputs, output: affinity_embeddings.update(
+                                    {"affinity_g": output.detach()}
+                                )
+                            )
+                        )
                     dict_out_affinity = self.affinity_module(
                         s_inputs=s_inputs.detach(),
                         z=z_affinity.detach(),
@@ -707,7 +826,20 @@ class Boltz2(LightningModule):
                         feats=feats,
                         multiplicity=1,
                         use_kernels=self.use_kernels,
+                        return_embeddings=self.predict_args.get(
+                            "write_affinity_embeddings", False
+                        ),
                     )
+                    for handle in handles:
+                        handle.remove()
+                    if self.predict_args.get("write_affinity_embeddings", False):
+                        if "affinity_g" not in affinity_embeddings and hasattr(
+                            self.affinity_module.affinity_heads,
+                            "latest_affinity_g",
+                        ):
+                            affinity_embeddings["affinity_g"] = (
+                                self.affinity_module.affinity_heads.latest_affinity_g
+                            )
                     dict_out.update(
                         {
                             "affinity_pred_value": dict_out_affinity[
@@ -718,6 +850,8 @@ class Boltz2(LightningModule):
                             ),
                         }
                     )
+                    if self.predict_args.get("write_affinity_embeddings", False):
+                        dict_out.update(affinity_embeddings)
 
         return dict_out
 
@@ -1054,8 +1188,93 @@ class Boltz2(LightningModule):
                 # This will aggregate, compute and log all metrics
                 validator.on_epoch_end(model=self)
 
+    @staticmethod
+    def _resume_embedding_path(base_dir: Path, record_id: str) -> Path:
+        nested = base_dir / record_id / f"embeddings_{record_id}.npz"
+        if nested.exists():
+            return nested
+        return base_dir / f"embeddings_{record_id}.npz"
+
+    @staticmethod
+    def _normalize_resume_embedding(array: np.ndarray, name: str) -> Tensor:
+        tensor = torch.as_tensor(array)
+        if name == "s":
+            if tensor.ndim == 3 and tensor.shape[0] == 1:
+                tensor = tensor.squeeze(0)
+            if tensor.ndim != 2:
+                msg = (
+                    "Resume s embedding must have shape "
+                    f"(tokens, token_s), got {tuple(tensor.shape)}."
+                )
+                raise ValueError(msg)
+            return tensor
+        if name == "z":
+            if tensor.ndim == 4 and tensor.shape[0] == 1:
+                tensor = tensor.squeeze(0)
+            if tensor.ndim != 3:
+                msg = (
+                    "Resume z embedding must have shape "
+                    f"(tokens, tokens, token_z), got {tuple(tensor.shape)}."
+                )
+                raise ValueError(msg)
+            return tensor
+        msg = f"Unknown resume embedding name: {name}"
+        raise ValueError(msg)
+
+    @classmethod
+    def _load_resume_embeddings(
+        cls,
+        records: list[Any],
+        base_dir: Path,
+        token_indices: Optional[Tensor] = None,
+        token_masks: Optional[Tensor] = None,
+    ) -> list[tuple[Tensor, Tensor]]:
+        embeddings = []
+        for record_idx, record in enumerate(records):
+            path = cls._resume_embedding_path(base_dir, record.id)
+            if not path.exists():
+                msg = f"Missing resume embeddings for {record.id}: {path}"
+                raise FileNotFoundError(msg)
+            with np.load(path) as data:
+                if "s" not in data or "z" not in data:
+                    msg = (
+                        "Resume embeddings file must contain s and z arrays: "
+                        f"{path}"
+                    )
+                    raise ValueError(msg)
+                s = cls._normalize_resume_embedding(data["s"], "s")
+                z = cls._normalize_resume_embedding(data["z"], "z")
+            if token_indices is not None:
+                indices = token_indices[record_idx].detach().cpu().long()
+                if token_masks is not None:
+                    mask = token_masks[record_idx].detach().cpu().bool()
+                    indices = indices[mask]
+                if indices.numel() == 0:
+                    msg = f"No resume token indices for {record.id}."
+                    raise ValueError(msg)
+                if indices.min().item() < 0 or indices.max().item() >= s.shape[0]:
+                    msg = (
+                        f"Resume token indices for {record.id} are outside the "
+                        f"saved embedding token range 0..{s.shape[0] - 1}."
+                    )
+                    raise ValueError(msg)
+                s = s.index_select(0, indices)
+                z = z.index_select(0, indices).index_select(1, indices)
+            embeddings.append((s, z))
+        return embeddings
+
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> dict:
         try:
+            resume_embeddings = None
+            resume_embeddings_dir = self.predict_args.get("resume_embeddings_dir")
+            if resume_embeddings_dir is not None:
+                resume_embeddings = self._load_resume_embeddings(
+                    batch["record"],
+                    Path(resume_embeddings_dir),
+                    token_indices=batch.get("resume_token_idx"),
+                    token_masks=batch.get("token_pad_mask"),
+                )
+
             out = self(
                 batch,
                 recycling_steps=self.predict_args["recycling_steps"],
@@ -1063,6 +1282,8 @@ class Boltz2(LightningModule):
                 diffusion_samples=self.predict_args["diffusion_samples"],
                 max_parallel_samples=self.predict_args["max_parallel_samples"],
                 run_confidence_sequentially=True,
+                resume_embeddings=resume_embeddings,
+                resume_recycling_steps=self.predict_args.get("resume_recycling_steps"),
             )
             pred_dict = {"exception": False}
             if "keys_dict_batch" in self.predict_args:
@@ -1077,6 +1298,8 @@ class Boltz2(LightningModule):
             if "keys_dict_out" in self.predict_args:
                 for key in self.predict_args["keys_dict_out"]:
                     pred_dict[key] = out[key]
+            if self.embeddings_only:
+                return pred_dict
             pred_dict["coords"] = out["sample_atom_coords"]
             if self.confidence_prediction:
                 # pred_dict["confidence"] = out.get("ablation_confidence", None)
@@ -1118,6 +1341,14 @@ class Boltz2(LightningModule):
                     pred_dict["affinity_probability_binary2"] = out[
                         "affinity_probability_binary2"
                     ]
+                    if self.predict_args.get("write_affinity_embeddings", False):
+                        if "affinity_g1" in out:
+                            pred_dict["affinity_g1"] = out["affinity_g1"]
+                        if "affinity_g2" in out:
+                            pred_dict["affinity_g2"] = out["affinity_g2"]
+                elif self.predict_args.get("write_affinity_embeddings", False):
+                    if "affinity_g" in out:
+                        pred_dict["affinity_g"] = out["affinity_g"]
             return pred_dict
 
         except RuntimeError as e:  # catch out of memory exceptions

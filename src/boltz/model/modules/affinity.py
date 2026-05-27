@@ -4,7 +4,6 @@ from torch import nn
 import boltz.model.layers.initialize as init
 from boltz.model.layers.pairformer import PairformerNoSeqModule
 from boltz.model.modules.encodersv2 import PairwiseConditioning
-from boltz.model.modules.transformersv2 import DiffusionTransformer
 from boltz.model.modules.utils import LinearNoBias
 
 
@@ -82,6 +81,7 @@ class AffinityModule(nn.Module):
         feats,
         multiplicity=1,
         use_kernels=False,
+        return_embeddings=False,
     ):
         z = self.z_linear(self.z_norm(z))
         z = z.repeat_interleave(multiplicity, 0)
@@ -133,9 +133,13 @@ class AffinityModule(nn.Module):
 
         # affinity heads
         out_dict.update(
-            self.affinity_heads(z=z, feats=feats, multiplicity=multiplicity)
+            self.affinity_heads(
+                z=z,
+                feats=feats,
+                multiplicity=multiplicity,
+                return_embeddings=return_embeddings,
+            )
         )
-
         return out_dict
 
 
@@ -180,6 +184,7 @@ class AffinityHeadsTransformer(nn.Module):
         z,
         feats,
         multiplicity=1,
+        return_embeddings=False,
     ):
         pad_token_mask = (
             feats["token_pad_mask"].repeat_interleave(multiplicity, 0).unsqueeze(-1)
@@ -210,6 +215,7 @@ class AffinityHeadsTransformer(nn.Module):
         )
 
         g = self.affinity_out_mlp(g)
+        self.latest_affinity_g = g.detach()
 
         affinity_pred_value = self.to_affinity_pred_value(g).reshape(-1, 1)
         affinity_pred_score = self.to_affinity_pred_score(g).reshape(-1, 1)
@@ -220,4 +226,6 @@ class AffinityHeadsTransformer(nn.Module):
             "affinity_pred_value": affinity_pred_value,
             "affinity_logits_binary": affinity_logits_binary,
         }
+        if return_embeddings:
+            out_dict["affinity_g"] = g
         return out_dict

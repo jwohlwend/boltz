@@ -320,6 +320,8 @@ def filter_inputs_structure(
     manifest: Manifest,
     outdir: Path,
     override: bool = False,
+    embeddings_only: bool = False,
+    resume_embeddings: bool = False,
 ) -> Manifest:
     """Filter the manifest to only include missing predictions.
 
@@ -331,6 +333,11 @@ def filter_inputs_structure(
         The output directory.
     override: bool
         Whether to override existing predictions.
+    embeddings_only: bool
+        If True, treat an embeddings npz as the completed output.
+    resume_embeddings: bool
+        If True, ignore directories that only contain embeddings when deciding
+        whether a structure prediction already exists.
 
     Returns
     -------
@@ -341,7 +348,25 @@ def filter_inputs_structure(
     # Check if existing predictions are found (only top-level prediction folders)
     pred_dir = outdir / "predictions"
     if pred_dir.exists():
-        existing = {d.name for d in pred_dir.iterdir() if d.is_dir()}
+        if embeddings_only:
+            existing = {
+                d.name
+                for d in pred_dir.iterdir()
+                if d.is_dir() and (d / f"embeddings_{d.name}.npz").exists()
+            }
+        elif resume_embeddings:
+            existing = {
+                d.name
+                for d in pred_dir.iterdir()
+                if d.is_dir()
+                and (
+                    any(d.glob(f"{d.name}_model_*.cif"))
+                    or any(d.glob(f"{d.name}_model_*.pdb"))
+                    or (d / f"pre_affinity_{d.name}.npz").exists()
+                )
+            }
+        else:
+            existing = {d.name for d in pred_dir.iterdir() if d.is_dir()}
     else:
         existing = set()
 
@@ -724,8 +749,14 @@ def process_inputs(
     # Check if records exist at output path
     records_dir = out_dir / "processed" / "records"
     if records_dir.exists():
+        input_ids = {path.stem for path in data}
+
         # Load existing records
-        existing = [Record.load(p) for p in records_dir.glob("*.json")]
+        existing = [
+            record
+            for record in (Record.load(p) for p in records_dir.glob("*.json"))
+            if record.id in input_ids
+        ]
         processed_ids = {record.id for record in existing}
 
         # Filter to missing only
@@ -1039,6 +1070,42 @@ def cli() -> None:
     is_flag=True,
     help=" to dump the s and z embeddings into a npz file. Default is False.",
 )
+@click.option(
+    "--write_affinity_embeddings",
+    is_flag=True,
+    help=(
+        "Dump final affinity-module embeddings for affinity predictions."
+    ),
+)
+@click.option(
+    "--embeddings_only",
+    is_flag=True,
+    help=(
+        "Run only the trunk and dump s/z embeddings; skip diffusion, confidence "
+        "and affinity prediction. Implies --write_embeddings."
+    ),
+)
+@click.option(
+    "--skip_affinity",
+    is_flag=True,
+    help="Skip affinity prediction even when input records request it.",
+)
+@click.option(
+    "--resume_embeddings_dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help=(
+        "Directory containing per-record embeddings_<id>.npz files to resume "
+        "Boltz-2 recycling from. Accepts either a predictions directory with "
+        "<id>/embeddings_<id>.npz or a flat directory with embeddings_<id>.npz."
+    ),
+)
+@click.option(
+    "--resume_recycling_steps",
+    type=int,
+    default=None,
+    help="Recycling step count represented by --resume_embeddings_dir.",
+)
 def predict(  # noqa: C901, PLR0915, PLR0912
     data: str,
     out_dir: str,
@@ -1077,8 +1144,32 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     num_subsampled_msa: int = 1024,
     no_kernels: bool = False,
     write_embeddings: bool = False,
+    write_affinity_embeddings: bool = False,
+    embeddings_only: bool = False,
+    skip_affinity: bool = False,
+    resume_embeddings_dir: Optional[Path] = None,
+    resume_recycling_steps: Optional[int] = None,
 ) -> None:
     """Run predictions with Boltz."""
+    if embeddings_only and model != "boltz2":
+        msg = "--embeddings_only is only supported for Boltz-2."
+        raise click.ClickException(msg)
+
+    if embeddings_only:
+        write_embeddings = True
+
+    if resume_embeddings_dir is not None:
+        if model != "boltz2":
+            msg = "--resume_embeddings_dir is only supported for Boltz-2."
+            raise click.ClickException(msg)
+        if resume_recycling_steps is None:
+            msg = "--resume_recycling_steps is required with --resume_embeddings_dir."
+            raise click.ClickException(msg)
+        if resume_recycling_steps < 0:
+            msg = "--resume_recycling_steps must be non-negative."
+            raise click.ClickException(msg)
+        resume_embeddings_dir = resume_embeddings_dir.expanduser()
+
     # If cpu, write a friendly warning
     if accelerator == "cpu":
         msg = "Running on CPU, this will be slow. Consider using a GPU."
@@ -1184,6 +1275,8 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         manifest=manifest,
         outdir=out_dir,
         override=override,
+        embeddings_only=embeddings_only,
+        resume_embeddings=resume_embeddings_dir is not None,
     )
 
     # Load processed data
@@ -1305,12 +1398,18 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             "write_full_pae": write_full_pae,
             "write_full_pde": write_full_pde,
         }
+        if resume_embeddings_dir is not None:
+            predict_args["resume_embeddings_dir"] = str(resume_embeddings_dir)
+            predict_args["resume_recycling_steps"] = resume_recycling_steps
 
         steering_args = BoltzSteeringParams()
         steering_args.fk_steering = use_potentials
         steering_args.physical_guidance_update = use_potentials
 
         model_cls = Boltz2 if model == "boltz2" else Boltz1
+        extra_kwargs = {}
+        if model == "boltz2":
+            extra_kwargs["embeddings_only"] = embeddings_only
         model_module = model_cls.load_from_checkpoint(
             checkpoint,
             strict=True,
@@ -1322,6 +1421,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             pairformer_args=asdict(pairformer_args),
             msa_args=asdict(msa_args),
             steering_args=asdict(steering_args),
+            **extra_kwargs,
         )
         model_module.eval()
 
@@ -1333,7 +1433,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         )
 
     # Check if affinity predictions are needed
-    if any(r.affinity for r in manifest.records):
+    if not embeddings_only and not skip_affinity and any(r.affinity for r in manifest.records):
         # Print header
         click.echo("\nPredicting property: affinity\n")
 
@@ -1377,7 +1477,11 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             "write_confidence_summary": False,
             "write_full_pae": False,
             "write_full_pde": False,
+            "write_affinity_embeddings": write_affinity_embeddings,
         }
+        if resume_embeddings_dir is not None:
+            predict_affinity_args["resume_embeddings_dir"] = str(resume_embeddings_dir)
+            predict_affinity_args["resume_recycling_steps"] = resume_recycling_steps
 
         # Load affinity model
         if affinity_checkpoint is None:

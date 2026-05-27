@@ -64,6 +64,35 @@ class BoltzWriter(BasePredictionWriter):
         # Get the records
         records: list[Record] = batch["record"]
 
+        # Embeddings-only mode: no structure was sampled. Dump s/z and exit.
+        if "coords" not in prediction:
+            if (
+                not self.write_embeddings
+                or "s" not in prediction
+                or "z" not in prediction
+            ):
+                return
+            batch_size = len(records)
+            for key in ("s", "z"):
+                if prediction[key].shape[0] != batch_size:
+                    msg = (
+                        f"Prediction field {key} has batch dim "
+                        f"{prediction[key].shape[0]}, expected {batch_size}."
+                    )
+                    raise ValueError(msg)
+            for record_idx, record in enumerate(records):
+                struct_dir = self.output_dir / record.id
+                struct_dir.mkdir(exist_ok=True)
+                if batch_size == 1:
+                    s = prediction["s"].float().cpu().numpy()
+                    z = prediction["z"].float().cpu().numpy()
+                else:
+                    s = prediction["s"][record_idx].float().cpu().numpy()
+                    z = prediction["z"][record_idx].float().cpu().numpy()
+                path = struct_dir / f"embeddings_{record.id}.npz"
+                np.savez_compressed(path, s=s, z=z)
+            return
+
         # Get the predictions
         coords = prediction["coords"]
         coords = coords.unsqueeze(0)
@@ -248,8 +277,8 @@ class BoltzWriter(BasePredictionWriter):
                 
             # Save embeddings
             if self.write_embeddings and "s" in prediction and "z" in prediction:
-                s = prediction["s"].cpu().numpy()
-                z = prediction["z"].cpu().numpy()
+                s = prediction["s"].float().cpu().numpy()
+                z = prediction["z"].float().cpu().numpy()
 
                 path = (
                     struct_dir
@@ -332,6 +361,23 @@ class BoltzAffinityWriter(BasePredictionWriter):
 
         with path.open("w") as f:
             f.write(json.dumps(affinity_summary, indent=4))
+
+        embedding_keys = [
+            key
+            for key in ["affinity_g", "affinity_g1", "affinity_g2"]
+            if key in prediction
+        ]
+        if embedding_keys:
+            emb_path = struct_dir / f"affinity_embeddings_{batch['record'][0].id}.npz"
+            arrays = {
+                key: prediction[key].float().cpu().numpy()
+                for key in embedding_keys
+            }
+            if "resume_token_idx" in batch:
+                arrays["resume_token_idx"] = (
+                    batch["resume_token_idx"][0].detach().cpu().numpy()
+                )
+            np.savez_compressed(emb_path, **arrays)
 
     def on_predict_epoch_end(
         self,

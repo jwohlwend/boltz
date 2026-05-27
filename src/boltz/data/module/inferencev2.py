@@ -298,6 +298,11 @@ class PredictionDataset(torch.utils.data.Dataset):
             print(f"Featurizer failed on {record.id} with error {e}. Skipping.")  # noqa: T201
             return self.__getitem__(0)
 
+        if self.affinity:
+            features["resume_token_idx"] = torch.from_numpy(
+                tokenized.tokens["token_idx"].copy()
+            ).long()
+
         # Add record
         features["record"] = record
         return features
