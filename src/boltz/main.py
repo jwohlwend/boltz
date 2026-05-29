@@ -1035,6 +1035,12 @@ def cli() -> None:
     help="Whether to disable the kernels. Default False",
 )
 @click.option(
+    "--matmul_precision",
+    type=str,
+    help="Sets the matmul precision. Options are 'highest', 'high' and 'medium'. Running float32 matrix multiplications in lower precision may significantly increase performance, and in some applications the loss of precision has a negligible impact. https://docs.pytorch.org/docs/stable/generated/torch.set_float32_matmul_precision.html#torch.set_float32_matmul_precision",
+    default="highest"
+)
+@click.option(
     "--write_embeddings",
     is_flag=True,
     help=" to dump the s and z embeddings into a npz file. Default is False.",
@@ -1076,6 +1082,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     subsample_msa: bool = True,
     num_subsampled_msa: int = 1024,
     no_kernels: bool = False,
+    matmul_precision: str = "highest"
     write_embeddings: bool = False,
 ) -> None:
     """Run predictions with Boltz."""
@@ -1092,8 +1099,8 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     # Set no grad
     torch.set_grad_enabled(False)
 
-    # Ignore matmul precision warning
-    torch.set_float32_matmul_precision("highest")
+    # Set matmul precision
+    torch.set_float32_matmul_precision(matmul_precision)
 
     # Set rdkit pickle logic
     Chem.SetDefaultPickleProperties(Chem.PropertyPickleOptions.AllProps)
