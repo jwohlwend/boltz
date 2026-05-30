@@ -887,15 +887,17 @@ def cli() -> None:
     default=None,
 )
 @click.option(
-    "--write_full_pae",
+    "--write_full_pae/--no_write_full_pae",
     type=bool,
     is_flag=True,
+    default=True,
     help="Whether to dump the pae into a npz file. Default is True.",
 )
 @click.option(
-    "--write_full_pde",
+    "--write_full_pde/--no_write_full_pde",
     type=bool,
     is_flag=True,
+    default=True,
     help="Whether to dump the pde into a npz file. Default is False.",
 )
 @click.option(
@@ -1054,8 +1056,8 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     diffusion_samples_affinity: int = 3,
     max_parallel_samples: Optional[int] = None,
     step_scale: Optional[float] = None,
-    write_full_pae: bool = False,
-    write_full_pde: bool = False,
+    write_full_pae: bool = True,
+    write_full_pde: bool = True,
     output_format: Literal["pdb", "mmcif"] = "mmcif",
     num_workers: int = 2,
     override: bool = False,

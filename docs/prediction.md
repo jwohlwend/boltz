@@ -168,8 +168,8 @@ Examples of common options include:
 | `--msa_server_url`       | str             | `https://api.colabfold.com` | MSA server url. Used only if --use_msa_server is set.                                                                                                                               |
 | `--msa_pairing_strategy` | str             | `greedy`                    | Pairing strategy to use. Used only if --use_msa_server is set. Options are 'greedy' and 'complete'                                                                                  |
 | `--use_potentials`        | `FLAG`          | `False`                     | Whether to run the original Boltz-2 model using inference time potentials.                                                                                                        |
-| `--write_full_pae`       | `FLAG`          | `False`                     | Whether to save the full PAE matrix as a file.                                                                                                                                      |
-| `--write_full_pde`       | `FLAG`          | `False`                     | Whether to save the full PDE matrix as a file.                                                                                                                                      |
+| `--write_full_pae` <br> `--no_write_full_pae`       | `FLAG`          | `True`                     | Whether to save the full PAE matrix as a file.                                                                                                                                      |
+| `--write_full_pde` <br> `--no_write_full_pde`       | `FLAG`          | `True`                     | Whether to save the full PDE matrix as a file.                                                                                                                                      |
 
 ## Output
 
