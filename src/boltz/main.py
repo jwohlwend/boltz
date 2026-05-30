@@ -839,9 +839,11 @@ def cli() -> None:
 )
 @click.option(
     "--devices",
-    type=int,
-    help="The number of devices to use for prediction. Default is 1.",
-    default=1,
+    type=str,
+    help=(
+        "Either the number of devices to use for prediction, or a comma-separated "
+        "list of which devices to use. Default is 1."),
+    default="1",
 )
 @click.option(
     "--accelerator",
@@ -1045,7 +1047,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     cache: str = "~/.boltz",
     checkpoint: Optional[str] = None,
     affinity_checkpoint: Optional[str] = None,
-    devices: int = 1,
+    devices: str = "1",
     accelerator: str = "gpu",
     recycling_steps: int = 3,
     sampling_steps: int = 200,
@@ -1209,6 +1211,23 @@ def predict(  # noqa: C901, PLR0915, PLR0912
 
     # Set up trainer
     strategy = "auto"
+
+    # Set up device count
+    try:
+        if "," in devices:
+            devices = [int(x) for x in devices.split(",") if len(x) >= 1]
+            if not all([0 <= x < torch.cuda.device_count() for x in devices]):
+                msg = "Device ids must be non-negative integers and less than GPU count."
+                raise ValueError(msg)
+        else:
+            devices = int(devices)
+    except ValueError as e:
+        msg = (
+            "Unable to parse device count/list. Format should be an integer "
+            f"or comma-separated list of integers. Last error: {e}"
+        )
+        raise ValueError(msg) from e
+
     if (isinstance(devices, int) and devices > 1) or (
         isinstance(devices, list) and len(devices) > 1
     ):
