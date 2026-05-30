@@ -321,7 +321,7 @@ def construct_paired_msa(  # noqa: C901, PLR0915, PLR0912
 
     # Keep track of the sequences available per chain, keeping the original
     # order of the sequences in the MSA to favor the best matching sequences
-    visited = {(c, s) for c, items in taxonomy_map for s in items}
+    visited = {(chain_id, seq_idx) for taxon, items in taxonomy_map for chain_id, seq_idx in items}
     available = {}
     for c in chain_ids:
         available[c] = deque(
