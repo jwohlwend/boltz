@@ -57,7 +57,8 @@ def parse_csv(
         str_seq = line.replace("-", "").upper()
         if str_seq not in visited:
             visited.add(str_seq)
-        else:
+        elif taxonomy_id == -1:
+            # Omit duplicate unpaired sequences
             continue
 
         # Process sequence
