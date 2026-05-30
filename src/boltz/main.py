@@ -207,7 +207,7 @@ def download_boltz2(cache: Path) -> None:
     # Download CCD
     mols = cache / "mols"
     tar_mols = cache / "mols.tar"
-    if not tar_mols.exists():
+    if not (mols.exists() or tar_mols.exists()):
         click.echo(
             f"Downloading the CCD data to {tar_mols}. "
             "This may take a bit of time. You may change the cache directory "
