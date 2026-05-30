@@ -523,17 +523,25 @@ def get_local_alignments(query: str, template: str) -> list[Alignment]:
     """
     aligner = Align.PairwiseAligner(scoring="blastp")
     aligner.mode = "local"
-    aligner.open_gap_score = -1000
-    aligner.extend_gap_score = -1000
+    # Biopython blastp default gap score
+    aligner.open_gap_score = -12.0
+    aligner.extend_gap_score = -1.0
 
     alignments = []
-    for result in aligner.align(query, template):
-        coordinates = result.coordinates
+    # Take first alignment as the "best" alignment
+    result = aligner.align(query, template)[0]
+    coordinates = result.coordinates
+    for ipos in range(0, coordinates.shape[1] - 1):
+        query_st, query_en = coordinates[0, ipos:ipos+2]
+        template_st, template_en = coordinates[1, ipos:ipos+2]
+        if query_st == query_en or template_st == template_en:
+            # insertion or deltion, skip the chunk
+            continue
         alignment = Alignment(
-            query_st=int(coordinates[0][0]),
-            query_en=int(coordinates[0][1]),
-            template_st=int(coordinates[1][0]),
-            template_en=int(coordinates[1][1]),
+            query_st=int(query_st),
+            query_en=int(query_en),
+            template_st=int(template_st),
+            template_en=int(template_en)
         )
         alignments.append(alignment)
 

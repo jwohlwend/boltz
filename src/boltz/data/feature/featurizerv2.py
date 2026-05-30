@@ -1800,6 +1800,7 @@ def process_template_features(
 
         for template in templates:
             offset = template.template_st - template.query_st
+            query_templated_segments = set(range(template.query_st, template.query_en))
 
             # Get query and template tokens to map residues
             query_tokens = data.tokens
@@ -1810,7 +1811,7 @@ def process_template_features(
             # Get the template tokens at the query residues
             chain_id = tmpl_chain_name_to_asym_id[template.template_chain]
             toks = template_tokens[template_tokens["asym_id"] == chain_id]
-            toks = [t for t in toks if t["res_idx"] - offset in q_indices]
+            toks = [t for t in toks if t["res_idx"] - offset in query_templated_segments]
             for t in toks:
                 q_idx = q_indices[t["res_idx"] - offset]
                 row_tokens.append(
