@@ -2,6 +2,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+from boltz.data.mol import load_mol_from_pdb
 
 import click
 import numpy as np
@@ -1026,9 +1027,13 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         if entity_type in {"protein", "dna", "rna"}:
             seq = str(item[entity_type]["sequence"])
         elif entity_type == "ligand":
-            assert "smiles" in item[entity_type] or "ccd" in item[entity_type]
-            assert "smiles" not in item[entity_type] or "ccd" not in item[entity_type]
-            if "smiles" in item[entity_type]:
+            # must specify exactly one of: smiles, ccd, or pdb_file
+            keys = item[entity_type]
+            assert sum(k in keys for k in ("smiles","ccd","pdb_file")) == 1, \
+                "Each ligand must have exactly one of 'smiles', 'ccd', or 'pdb_file'"
+            if "pdb_file" in keys:
+                seq = str(item[entity_type]["pdb_file"])
+            elif "smiles" in keys:
                 seq = str(item[entity_type]["smiles"])
             else:
                 seq = str(item[entity_type]["ccd"])
@@ -1180,6 +1185,25 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 cyclic=cyclic,
                 mol_dir=mol_dir,
             )
+
+        # Parse a non-polymer: first, PDB-file–based ligand
+        elif entity_type == "ligand" and "pdb_file" in items[0]["ligand"]:
+            pdb_path = items[0]["ligand"]["pdb_file"]
+            mol = load_mol_from_pdb(pdb_path)
+            extra_mols[f"LIG{ligand_id}"] = mol
+            residue = parse_ccd_residue(
+                name=f"LIG{ligand_id}",
+                ref_mol=mol,
+                res_idx=0,
+            )
+            parsed_chain = ParsedChain(
+                entity=entity_id,
+                residues=[residue],
+                type=const.chain_type_ids["NONPOLYMER"],
+                cyclic_period=0,
+                sequence=None,
+            )
+            ligand_id += 1
 
         # Parse a non-polymer
         elif (entity_type == "ligand") and "ccd" in (items[0][entity_type]):
@@ -1634,7 +1658,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             template_chain_ids is not None
             and chain_ids is not None
         ):
-           
+
                 if len(template_chain_ids) == len(chain_ids):
                      if len(template_chain_ids) > 0 and len(chain_ids) > 0:
                         matched = True
