@@ -71,7 +71,7 @@ class TrainConfig:
     matmul_precision: Optional[str] = None
     find_unused_parameters: Optional[bool] = False
     save_top_k: Optional[int] = 1
-    validation_only: bool = False
+    validation_only: bool = True
     debug: bool = False
     strict_loading: bool = True
     load_confidence_from_trunk: Optional[bool] = False
@@ -222,6 +222,7 @@ def train(raw_config: str, args: list[str]) -> None:  # noqa: C901, PLR0912, PLR
         model_module.strict_loading = False
 
     if cfg.validation_only:
+        print(f'====== Running validation on {cfg.resume}===========')
         trainer.validate(
             model_module,
             datamodule=data_module,

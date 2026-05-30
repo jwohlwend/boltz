@@ -1,7 +1,8 @@
 import json
+import os
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 import numpy as np
 import torch
@@ -66,9 +67,12 @@ class BoltzWriter(BasePredictionWriter):
 
         # Get the predictions
         coords = prediction["coords"]
-        coords = coords.unsqueeze(0)
-
+        if coords.ndim == 3:
+            coords = coords.unsqueeze(0)
         pad_masks = prediction["masks"]
+        structure_paths = prediction.get("structure_paths")
+        provided_structures = prediction.get("structures")
+        custom_filenames = prediction.get("filenames")
 
         # Get ranking
         if "confidence_score" in prediction:
@@ -79,22 +83,39 @@ class BoltzWriter(BasePredictionWriter):
             idx_to_rank = {i: i for i in range(len(records))}
 
         # Iterate over the records
-        for record, coord, pad_mask in zip(records, coords, pad_masks):
+        for rec_idx, (record, coord, pad_mask) in enumerate(zip(records, coords, pad_masks)):
             # Load the structure
-            path = self.data_dir / f"{record.id}.npz"
-            if self.boltz2:
-                structure: StructureV2 = StructureV2.load(path)
+            if provided_structures is not None and rec_idx < len(provided_structures):
+                structure = provided_structures[rec_idx]
+                chain_map = {
+                    int(chain["asym_id"]): int(chain["asym_id"])
+                    for chain in structure.chains
+                }
             else:
-                structure: Structure = Structure.load(path)
+                if structure_paths is not None and rec_idx < len(structure_paths):
+                    path = Path(structure_paths[rec_idx])
+                else:
+                    path = self.data_dir / f"{record.id}.npz"
+                if self.boltz2:
+                    structure: StructureV2 = StructureV2.load(path)
+                else:
+                    structure: Structure = Structure.load(path)
 
-            # Compute chain map with masked removed, to be used later
-            chain_map = {}
-            for i, mask in enumerate(structure.mask):
-                if mask:
-                    chain_map[len(chain_map)] = i
+                # Compute chain map with masked removed, to be used later
+                chain_map = {}
+                for i, mask in enumerate(structure.mask):
+                    if mask:
+                        chain_map[len(chain_map)] = i
 
-            # Remove masked chains completely
-            structure = structure.remove_invalid_chains()
+                # Remove masked chains completely
+                structure = structure.remove_invalid_chains()
+
+            custom_names = None
+            if custom_filenames is not None and rec_idx < len(custom_filenames):
+                custom_names = custom_filenames[rec_idx]
+
+            ext_map = {"mmcif": "cif", "pdb": "pdb"}
+            out_ext = ext_map.get(self.output_format, "npz")
 
             for model_idx in range(coord.shape[0]):
                 # Get model coord
@@ -156,24 +177,29 @@ class BoltzWriter(BasePredictionWriter):
                     plddts = prediction["plddt"][model_idx]
 
                 # Create path name
-                outname = f"{record.id}_model_{idx_to_rank[model_idx]}"
+                if custom_names and model_idx < len(custom_names):
+                    name = custom_names[model_idx]
+                    if Path(name).suffix:
+                        filename = name
+                    else:
+                        filename = f"{name}.{out_ext}"
+                else:
+                    filename = f"{record.id}_model_{idx_to_rank[model_idx]}.{out_ext}"
+                output_path = struct_dir / filename
 
                 # Save the structure
                 if self.output_format == "pdb":
-                    path = struct_dir / f"{outname}.pdb"
-                    with path.open("w") as f:
+                    with output_path.open("w") as f:
                         f.write(
                             to_pdb(new_structure, plddts=plddts, boltz2=self.boltz2)
                         )
                 elif self.output_format == "mmcif":
-                    path = struct_dir / f"{outname}.cif"
-                    with path.open("w") as f:
+                    with output_path.open("w") as f:
                         f.write(
                             to_mmcif(new_structure, plddts=plddts, boltz2=self.boltz2)
                         )
                 else:
-                    path = struct_dir / f"{outname}.npz"
-                    np.savez_compressed(path, **asdict(new_structure))
+                    np.savez_compressed(output_path, **asdict(new_structure))
 
                 if self.boltz2 and record.affinity and idx_to_rank[model_idx] == 0:
                     path = struct_dir / f"pre_affinity_{record.id}.npz"
@@ -265,6 +291,26 @@ class BoltzWriter(BasePredictionWriter):
         """Print the number of failed examples."""
         # Print number of failed examples
         print(f"Number of failed examples: {self.failed}")  # noqa: T201
+
+
+def atomic_save_cif(filepath: Path, content: str) -> bool:
+    """
+    Safely write CIF content to disk (atomic rename + fsync).
+    """
+    tmp_path = filepath.parent / f".{filepath.name}.tmp"
+    try:
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        with tmp_path.open("w") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        tmp_path.replace(filepath)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        print(f"Error writing file {filepath}: {exc}")
+        if tmp_path.exists():
+            tmp_path.unlink()
+        return False
 
 
 class BoltzAffinityWriter(BasePredictionWriter):

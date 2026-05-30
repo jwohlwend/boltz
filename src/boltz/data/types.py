@@ -705,6 +705,8 @@ class Input:
     residue_constraints: Optional[ResidueConstraints] = None
     templates: Optional[dict[str, StructureV2]] = None
     extra_mols: Optional[dict[str, Mol]] = None
+    alignment_mask: Optional[np.ndarray] = None
+    rmsd_mask: Optional[np.ndarray] = None
 
 
 ####################################################################################################

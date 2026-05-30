@@ -8,6 +8,9 @@ from boltz.model.loss.confidence import (
 )
 from boltz.model.loss.diffusion import weighted_rigid_align
 
+from dataclasses import dataclass
+from torch import Tensor
+
 
 def factored_lddt_loss(
     true_atom_coords,
@@ -895,6 +898,8 @@ def weighted_minimum_rmsd(
     multiplicity=1,
     nucleotide_weight=5.0,
     ligand_weight=10.0,
+    alignment_mask=None,
+    rmsd_mask=None,
 ):
     """Compute rmsd of the aligned atom coordinates.
 
@@ -922,6 +927,27 @@ def weighted_minimum_rmsd(
     atom_mask = feats["atom_resolved_mask"]
     atom_mask = atom_mask.repeat_interleave(multiplicity, 0)
 
+    target_len = pred_atom_coords.shape[0]
+    base_len = feats["coords"].shape[0]
+
+    def _prepare_mask(mask, fallback):
+        if mask is None:
+            prepared = fallback
+        else:
+            if mask.shape[0] == target_len:
+                prepared = mask
+            elif mask.shape[0] == base_len and base_len * multiplicity == target_len:
+                prepared = mask.repeat_interleave(multiplicity, 0)
+            else:
+                raise ValueError(
+                    "Unexpected mask shape: "
+                    f"{mask.shape[0]} (expected {target_len} or {base_len})."
+                )
+        return prepared.to(dtype=fallback.dtype, device=pred_atom_coords.device)
+
+    align_mask = _prepare_mask(alignment_mask, atom_mask)
+    calc_mask = _prepare_mask(rmsd_mask, atom_mask)
+
     align_weights = atom_coords.new_ones(atom_coords.shape[:2])
     atom_type = (
         torch.bmm(
@@ -945,14 +971,15 @@ def weighted_minimum_rmsd(
 
     with torch.no_grad():
         atom_coords_aligned_ground_truth = weighted_rigid_align(
-            atom_coords, pred_atom_coords, align_weights, mask=atom_mask
+            atom_coords, pred_atom_coords, align_weights, mask=align_mask
         )
 
     # weighted MSE loss of denoised atom positions
     mse_loss = ((pred_atom_coords - atom_coords_aligned_ground_truth) ** 2).sum(dim=-1)
+    denom = torch.sum(align_weights * calc_mask, dim=-1)
     rmsd = torch.sqrt(
-        torch.sum(mse_loss * align_weights * atom_mask, dim=-1)
-        / torch.sum(align_weights * atom_mask, dim=-1)
+        torch.sum(mse_loss * align_weights * calc_mask, dim=-1)
+        / torch.clamp(denom, min=1e-8)
     )
     best_rmsd = torch.min(rmsd.reshape(-1, multiplicity), dim=1).values
 
@@ -967,6 +994,8 @@ def weighted_minimum_rmsd_single(
     mol_type,
     nucleotide_weight=5.0,
     ligand_weight=10.0,
+    alignment_mask=None,
+    rmsd_mask=None,
 ):
     """Compute rmsd of the aligned atom coordinates.
 
@@ -1012,14 +1041,23 @@ def weighted_minimum_rmsd_single(
     )
 
     with torch.no_grad():
+        mask_align = alignment_mask if alignment_mask is not None else atom_mask
         atom_coords_aligned_ground_truth = weighted_rigid_align(
-            atom_coords, pred_atom_coords, align_weights, mask=atom_mask
+            atom_coords, pred_atom_coords, align_weights, mask=mask_align
         )
 
     # weighted MSE loss of denoised atom positions
+    calc_mask = rmsd_mask if rmsd_mask is not None else atom_mask
     mse_loss = ((pred_atom_coords - atom_coords_aligned_ground_truth) ** 2).sum(dim=-1)
+    denom = torch.sum(align_weights * calc_mask, dim=-1)
     rmsd = torch.sqrt(
-        torch.sum(mse_loss * align_weights * atom_mask, dim=-1)
-        / torch.sum(align_weights * atom_mask, dim=-1)
+        torch.sum(mse_loss * align_weights * calc_mask, dim=-1)
+        / torch.clamp(denom, min=1e-8)
     )
     return rmsd, atom_coords_aligned_ground_truth, align_weights
+
+@dataclass
+class SampleMetrics:
+    sample_idx: int
+    rmsd_whole: float
+    rmsd_masked: float

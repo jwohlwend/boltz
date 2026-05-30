@@ -82,6 +82,75 @@ class Dataset:
     featurizer: BoltzFeaturizer
 
 
+def _prepare_structure(data: np.lib.npyio.NpzFile) -> tuple[Structure, Optional[np.ndarray], Optional[np.ndarray]]:
+    chains = data["chains"]
+    if "cyclic_period" not in chains.dtype.names:
+        new_dtype = chains.dtype.descr + [("cyclic_period", "i4")]
+        new_chains = np.empty(chains.shape, dtype=new_dtype)
+        for name in chains.dtype.names:
+            new_chains[name] = chains[name]
+        new_chains["cyclic_period"] = 0
+        chains = new_chains
+
+    structure = Structure(
+        atoms=data["atoms"],
+        bonds=data["bonds"],
+        residues=data["residues"],
+        chains=chains,
+        connections=data["connections"].astype(Connection),
+        interfaces=data["interfaces"],
+        mask=data["mask"],
+    )
+
+    alignment_mask = data.get("alignment_mask")
+    rmsd_mask = data.get("rmsd_mask")
+
+    if alignment_mask is not None:
+        alignment_mask = alignment_mask.astype(bool, copy=False)
+    if rmsd_mask is not None:
+        rmsd_mask = rmsd_mask.astype(bool, copy=False)
+
+    chain_mask = data["mask"].astype(bool)
+    kept_atom_total = sum(
+        int(chain["atom_num"]) for idx, chain in enumerate(data["chains"]) if chain_mask[idx]
+    )
+
+    def _reshape_mask(mask: Optional[np.ndarray]) -> Optional[np.ndarray]:
+        if mask is None:
+            return None
+        if mask.shape[0] == kept_atom_total:
+            return mask
+
+        segments = []
+        for idx, chain in enumerate(data["chains"]):
+            if not chain_mask[idx]:
+                continue
+            start = int(chain["atom_idx"])
+            end = start + int(chain["atom_num"])
+            segments.append(mask[start:end])
+        if any(seg.size == 0 for seg in segments):
+            return None
+        return np.concatenate(segments)
+
+    alignment_mask = _reshape_mask(alignment_mask)
+    rmsd_mask = _reshape_mask(rmsd_mask)
+
+    structure_clean = structure.remove_invalid_chains()
+
+    if alignment_mask is not None and alignment_mask.shape[0] != structure_clean.atoms.shape[0]:
+        print(
+            f"Alignment mask length mismatch for structure ({alignment_mask.shape[0]} vs {structure_clean.atoms.shape[0]}). Discarding mask."
+        )
+        alignment_mask = None
+    if rmsd_mask is not None and rmsd_mask.shape[0] != structure_clean.atoms.shape[0]:
+        print(
+            f"rmsd mask length mismatch for structure ({rmsd_mask.shape[0]} vs {structure_clean.atoms.shape[0]}). Discarding mask."
+        )
+        rmsd_mask = None
+
+    return structure_clean, alignment_mask, rmsd_mask
+
+
 def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
     """Load the given input data.
 
@@ -101,34 +170,9 @@ def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
 
     """
     # Load the structure
-    structure = np.load(target_dir / "structures" / f"{record.id}.npz")
-
-    # In order to add cyclic_period to chains if it does not exist
-    # Extract the chains array
-    chains = structure["chains"]
-    # Check if the field exists
-    if "cyclic_period" not in chains.dtype.names:
-        # Create a new dtype with the additional field
-        new_dtype = chains.dtype.descr + [("cyclic_period", "i4")]
-        # Create a new array with the new dtype
-        new_chains = np.empty(chains.shape, dtype=new_dtype)
-        # Copy over existing fields
-        for name in chains.dtype.names:
-            new_chains[name] = chains[name]
-        # Set the new field to 0
-        new_chains["cyclic_period"] = 0
-        # Replace old chains array with new one
-        chains = new_chains
-
-    structure = Structure(
-        atoms=structure["atoms"],
-        bonds=structure["bonds"],
-        residues=structure["residues"],
-        chains=chains,  # chains var accounting for missing cyclic_period
-        connections=structure["connections"].astype(Connection),
-        interfaces=structure["interfaces"],
-        mask=structure["mask"],
-    )
+    structure_path = target_dir / "structures" / f"{record.id}.npz"
+    npz_data = np.load(structure_path)
+    structure, alignment_mask, rmsd_mask = _prepare_structure(npz_data)
 
     msas = {}
     for chain in record.chains:
@@ -138,7 +182,13 @@ def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
             msa = np.load(msa_dir / f"{msa_id}.npz")
             msas[chain.chain_id] = MSA(**msa)
 
-    return Input(structure, msas)
+    return Input(
+        structure=structure,
+        msa=msas,
+        record=record,
+        alignment_mask=alignment_mask,
+        rmsd_mask=rmsd_mask,
+    )
 
 
 def collate(data: list[dict[str, Tensor]]) -> dict[str, Tensor]:
@@ -171,12 +221,18 @@ def collate(data: list[dict[str, Tensor]]) -> dict[str, Tensor]:
             "amino_acids_symmetries",
             "ligand_symmetries",
         ]:
-            # Check if all have the same shape
-            shape = values[0].shape
-            if not all(v.shape == shape for v in values):
-                values, _ = pad_to_max(values, 0)
+            first_value = values[0]
+            if isinstance(first_value, torch.Tensor):
+                # Check if all have the same shape
+                shape = first_value.shape
+                if not all(v.shape == shape for v in values):
+                    values, _ = pad_to_max(values, 0)
+                else:
+                    values = torch.stack(values, dim=0)
             else:
-                values = torch.stack(values, dim=0)
+                # Keep list for non-tensor entries (e.g. record ids)
+                collated[key] = values
+                continue
 
         # Stack the values
         collated[key] = values
@@ -469,6 +525,21 @@ class ValidationDataset(torch.utils.data.Dataset):
         except Exception as e:
             print(f"Featurizer failed on {record.id} with error {e}. Skipping.")
             return self.__getitem__(0)
+
+        features["record_id"] = record.id
+        features["record"] = record
+        if input_data.alignment_mask is not None:
+            features["alignment_mask"] = torch.from_numpy(
+                input_data.alignment_mask.astype(np.bool_)
+            )
+        if input_data.rmsd_mask is not None:
+            features["rmsd_mask"] = torch.from_numpy(
+                input_data.rmsd_mask.astype(np.bool_)
+            )
+        features["base_structure"] = input_data.structure
+        features["structure_path"] = str(
+            (dataset.target_dir / "structures" / f"{record.id}.npz").resolve()
+        )
 
         return features
 

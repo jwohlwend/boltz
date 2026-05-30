@@ -164,3 +164,10 @@ cython_debug/
 # Boltz prediction outputs
 #   All result files generated from a boltz prediction call
 boltz_results_*/
+
+# Local datasets and caches
+data/
+natives/
+cache/
+mhc_one_sample/
+val_cif_output/
