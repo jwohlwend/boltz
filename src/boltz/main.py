@@ -1039,6 +1039,39 @@ def cli() -> None:
     is_flag=True,
     help=" to dump the s and z embeddings into a npz file. Default is False.",
 )
+@click.option(
+    "--write_intermediates",
+    is_flag=True,
+    help=(
+        "Whether to dump intermediate trunk representations after MSA and "
+        "pairformer during inference. Default is False."
+    ),
+)
+@click.option(
+    "--capture_pairformer_layers",
+    is_flag=True,
+    help=(
+        "Whether to also dump per-layer pairformer states when writing "
+        "intermediates. Can produce very large files."
+    ),
+)
+@click.option(
+    "--capture_pairformer_layer_stride",
+    type=int,
+    default=1,
+    help=(
+        "When capturing pairformer layers, save every Nth layer "
+        "(and always the last). Default is 1."
+    ),
+)
+@click.option(
+    "--capture_mlp_layers",
+    is_flag=True,
+    help=(
+        "Whether to also dump per-layer transition MLP intermediates "
+        "when writing intermediates. Can produce very large files."
+    ),
+)
 def predict(  # noqa: C901, PLR0915, PLR0912
     data: str,
     out_dir: str,
@@ -1077,6 +1110,10 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     num_subsampled_msa: int = 1024,
     no_kernels: bool = False,
     write_embeddings: bool = False,
+    write_intermediates: bool = False,
+    capture_pairformer_layers: bool = False,
+    capture_pairformer_layer_stride: int = 1,
+    capture_mlp_layers: bool = False,
 ) -> None:
     """Run predictions with Boltz."""
     # If cpu, write a friendly warning
@@ -1155,6 +1192,18 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             method_names = list(const.method_types_ids.keys())
             msg = f"Method {method} not supported. Supported: {method_names}"
             raise ValueError(msg)
+
+    if capture_pairformer_layers and not write_intermediates:
+        msg = "--capture_pairformer_layers requires --write_intermediates."
+        raise ValueError(msg)
+    if capture_mlp_layers and not write_intermediates:
+        msg = "--capture_mlp_layers requires --write_intermediates."
+        raise ValueError(msg)
+    if (
+        write_intermediates or capture_pairformer_layers or capture_mlp_layers
+    ) and model != "boltz2":
+        msg = "Intermediate capture is currently supported only for Boltz-2."
+        raise ValueError(msg)
 
     # Process inputs
     ccd_path = cache / "ccd.pkl"
@@ -1304,6 +1353,10 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             "write_confidence_summary": True,
             "write_full_pae": write_full_pae,
             "write_full_pde": write_full_pde,
+            "capture_intermediates": write_intermediates,
+            "capture_pairformer_layers": capture_pairformer_layers,
+            "capture_pairformer_layer_stride": capture_pairformer_layer_stride,
+            "capture_transition_mlp": capture_mlp_layers,
         }
 
         steering_args = BoltzSteeringParams()

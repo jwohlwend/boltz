@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from torch import Tensor, nn
@@ -71,7 +71,8 @@ class PairformerLayer(nn.Module):
         use_kernels: bool = False,
         use_cuequiv_mul: bool = False,
         use_cuequiv_attn: bool = False,
-    ) -> tuple[Tensor, Tensor]:
+        capture_transition_mlp: bool = False,
+    ) -> Union[tuple[Tensor, Tensor], tuple[Tensor, Tensor, dict[str, Tensor]]]:
         # Compute pairwise stack
         dropout = get_dropout_mask(self.dropout, z, self.training)
         z = z + dropout * self.tri_mul_out(
@@ -99,7 +100,11 @@ class PairformerLayer(nn.Module):
             use_kernels=use_cuequiv_attn or use_kernels,
         )
 
-        z = z + self.transition_z(z)
+        if capture_transition_mlp:
+            z_delta, z_transition = self.transition_z(z, return_intermediates=True)
+            z = z + z_delta
+        else:
+            z = z + self.transition_z(z)
 
         # Compute sequence stack
         with torch.autocast("cuda", enabled=False):
@@ -107,9 +112,24 @@ class PairformerLayer(nn.Module):
             s = s.float() + self.attention(
                 s=s_normed, z=z.float(), mask=mask.float(), k_in=s_normed
             )
-            s = s + self.transition_s(s)
+            if capture_transition_mlp:
+                s_delta, s_transition = self.transition_s(s, return_intermediates=True)
+                s = s + s_delta
+            else:
+                s = s + self.transition_s(s)
             s = self.s_post_norm(s)
-
+        if capture_transition_mlp:
+            transition_state = {
+                "z_transition_x_norm": z_transition["x_norm"],
+                "z_transition_fc1": z_transition["fc1"],
+                "z_transition_fc2": z_transition["fc2"],
+                "z_transition_hidden": z_transition["hidden"],
+                "s_transition_x_norm": s_transition["x_norm"],
+                "s_transition_fc1": s_transition["fc1"],
+                "s_transition_fc2": s_transition["fc2"],
+                "s_transition_hidden": s_transition["hidden"],
+            }
+            return s, z, transition_state
         return s, z
 
 
@@ -160,7 +180,9 @@ class PairformerModule(nn.Module):
         mask: Tensor,
         pair_mask: Tensor,
         use_kernels: bool = False,
-    ) -> tuple[Tensor, Tensor]:
+        capture_layers: bool = False,
+        capture_transition_mlp: bool = False,
+    ) -> Union[tuple[Tensor, Tensor], tuple[Tensor, Tensor, list[dict[str, Tensor]]]]:
         """Perform the forward pass.
 
         Parameters
@@ -185,7 +207,19 @@ class PairformerModule(nn.Module):
         else:
             chunk_size_tri_attn = None
 
+        layer_states = []
         for layer in self.layers:
+            transition_state = {}
+            if (
+                capture_transition_mlp
+                and self.activation_checkpointing
+                and self.training
+            ):
+                msg = (
+                    "capture_transition_mlp is not supported with activation "
+                    "checkpointing during training."
+                )
+                raise ValueError(msg)
             if self.activation_checkpointing and self.training:
                 s, z = torch.utils.checkpoint.checkpoint(
                     layer,
@@ -197,7 +231,29 @@ class PairformerModule(nn.Module):
                     use_kernels,
                 )
             else:
-                s, z = layer(s, z, mask, pair_mask, chunk_size_tri_attn, use_kernels)
+                layer_out = layer(
+                    s,
+                    z,
+                    mask,
+                    pair_mask,
+                    chunk_size_tri_attn,
+                    use_kernels,
+                    capture_transition_mlp=capture_transition_mlp,
+                )
+                if capture_transition_mlp:
+                    s, z, transition_state = layer_out
+                else:
+                    s, z = layer_out
+            if capture_layers or capture_transition_mlp:
+                state = {}
+                if capture_layers:
+                    state["s"] = s
+                    state["z"] = z
+                if capture_transition_mlp:
+                    state.update(transition_state)
+                layer_states.append(state)
+        if capture_layers or capture_transition_mlp:
+            return s, z, layer_states
         return s, z
 
 

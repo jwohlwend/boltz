@@ -1,5 +1,6 @@
-from typing import Optional
+from typing import Optional, Union
 
+import torch
 from torch import Tensor, nn
 
 import boltz.model.layers.initialize as init
@@ -44,7 +45,12 @@ class Transition(nn.Module):
         init.lecun_normal_init_(self.fc2.weight)
         init.final_init_(self.fc3.weight)
 
-    def forward(self, x: Tensor, chunk_size: int = None) -> Tensor:
+    def forward(
+        self,
+        x: Tensor,
+        chunk_size: Optional[int] = None,
+        return_intermediates: bool = False,
+    ) -> Union[Tensor, tuple[Tensor, dict[str, Tensor]]]:
         """Perform a forward pass.
 
         Parameters
@@ -59,20 +65,46 @@ class Transition(nn.Module):
 
         """
         x = self.norm(x)
+        x_norm = x
 
         if chunk_size is None or self.training:
-            x = self.silu(self.fc1(x)) * self.fc2(x)
-            x = self.fc3(x)
-            return x
-        else:
-            # Compute in chunks
-            for i in range(0, self.hidden, chunk_size):
-                fc1_slice = self.fc1.weight[i : i + chunk_size, :]
-                fc2_slice = self.fc2.weight[i : i + chunk_size, :]
-                fc3_slice = self.fc3.weight[:, i : i + chunk_size]
-                x_chunk = self.silu((x @ fc1_slice.T)) * (x @ fc2_slice.T)
-                if i == 0:
-                    x_out = x_chunk @ fc3_slice.T
-                else:
-                    x_out = x_out + x_chunk @ fc3_slice.T
-            return x_out
+            fc1 = self.fc1(x)
+            fc2 = self.fc2(x)
+            hidden = self.silu(fc1) * fc2
+            out = self.fc3(hidden)
+            if return_intermediates:
+                return out, {
+                    "x_norm": x_norm,
+                    "fc1": fc1,
+                    "fc2": fc2,
+                    "hidden": hidden,
+                }
+            return out
+
+        # Compute in chunks
+        fc1_chunks = []
+        fc2_chunks = []
+        hidden_chunks = []
+        for i in range(0, self.hidden, chunk_size):
+            fc1_slice = self.fc1.weight[i : i + chunk_size, :]
+            fc2_slice = self.fc2.weight[i : i + chunk_size, :]
+            fc3_slice = self.fc3.weight[:, i : i + chunk_size]
+            fc1_chunk = x @ fc1_slice.T
+            fc2_chunk = x @ fc2_slice.T
+            x_chunk = self.silu(fc1_chunk) * fc2_chunk
+            out = x_chunk @ fc3_slice.T if i == 0 else out + x_chunk @ fc3_slice.T
+            if return_intermediates:
+                fc1_chunks.append(fc1_chunk)
+                fc2_chunks.append(fc2_chunk)
+                hidden_chunks.append(x_chunk)
+        if return_intermediates:
+            fc1 = torch.cat(fc1_chunks, dim=-1)
+            fc2 = torch.cat(fc2_chunks, dim=-1)
+            hidden = torch.cat(hidden_chunks, dim=-1)
+            return out, {
+                "x_norm": x_norm,
+                "fc1": fc1,
+                "fc2": fc2,
+                "hidden": hidden,
+            }
+        return out

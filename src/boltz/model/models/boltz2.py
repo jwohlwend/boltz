@@ -409,13 +409,47 @@ class Boltz2(LightningModule):
         max_parallel_samples: Optional[int] = None,
         run_confidence_sequentially: bool = False,
     ) -> dict[str, Tensor]:
+        capture_intermediates = bool(
+            (not self.training)
+            and self.predict_args
+            and self.predict_args.get("capture_intermediates", False)
+        )
+        capture_pairformer_layers = bool(
+            capture_intermediates
+            and self.predict_args
+            and self.predict_args.get("capture_pairformer_layers", False)
+        )
+        capture_transition_mlp = bool(
+            capture_intermediates
+            and self.predict_args
+            and self.predict_args.get("capture_transition_mlp", False)
+        )
+        capture_layer_stride = int(
+            self.predict_args.get("capture_pairformer_layer_stride", 1)
+            if self.predict_args
+            else 1
+        )
+        capture_layer_stride = max(1, capture_layer_stride)
+
+        def _to_cpu_snapshot(t: Tensor) -> Tensor:
+            t = t.detach().cpu()
+            if t.is_floating_point():
+                return t.to(torch.float16)
+            return t
+
+        intermediates = {} if capture_intermediates else None
+
         with torch.set_grad_enabled(
             self.training and self.structure_prediction_training
         ):
             s_inputs = self.input_embedder(feats)
+            if capture_intermediates:
+                intermediates["s_inputs"] = _to_cpu_snapshot(s_inputs)
 
             # Initialize the sequence embeddings
             s_init = self.s_init(s_inputs)
+            if capture_intermediates:
+                intermediates["s_init"] = _to_cpu_snapshot(s_init)
 
             # Initialize pairwise embeddings
             z_init = (
@@ -428,6 +462,8 @@ class Boltz2(LightningModule):
             if self.bond_type_feature:
                 z_init = z_init + self.token_bonds_type(feats["type_bonds"].long())
             z_init = z_init + self.contact_conditioning(feats)
+            if capture_intermediates:
+                intermediates["z_init"] = _to_cpu_snapshot(z_init)
 
             # Perform rounds of the pairwise stack
             s = torch.zeros_like(s_init)
@@ -454,6 +490,9 @@ class Boltz2(LightningModule):
                         # Apply recycling
                         s = s_init + self.s_recycle(self.s_norm(s))
                         z = z_init + self.z_recycle(self.z_norm(z))
+                        if capture_intermediates:
+                            intermediates[f"s_recycle_{i}"] = _to_cpu_snapshot(s)
+                            intermediates[f"z_recycle_{i}"] = _to_cpu_snapshot(z)
 
                         # Compute pairwise stack
                         if self.use_templates:
@@ -474,6 +513,8 @@ class Boltz2(LightningModule):
                         z = z + msa_module(
                             z, s_inputs, feats, use_kernels=self.use_kernels
                         )
+                        if capture_intermediates:
+                            intermediates[f"z_after_msa_{i}"] = _to_cpu_snapshot(z)
 
                         # Revert to uncompiled version for validation
                         if self.is_pairformer_compiled and not self.training:
@@ -481,13 +522,54 @@ class Boltz2(LightningModule):
                         else:
                             pairformer_module = self.pairformer_module
 
-                        s, z = pairformer_module(
-                            s,
-                            z,
-                            mask=mask,
-                            pair_mask=pair_mask,
-                            use_kernels=self.use_kernels,
-                        )
+                        if capture_pairformer_layers or capture_transition_mlp:
+                            s, z, layer_states = pairformer_module(
+                                s,
+                                z,
+                                mask=mask,
+                                pair_mask=pair_mask,
+                                use_kernels=self.use_kernels,
+                                capture_layers=capture_pairformer_layers,
+                                capture_transition_mlp=capture_transition_mlp,
+                            )
+                            num_layers = len(layer_states)
+                            for layer_idx, layer_state in enumerate(layer_states):
+                                if (
+                                    (layer_idx % capture_layer_stride) == 0
+                                    or layer_idx == num_layers - 1
+                                ):
+                                    if capture_pairformer_layers:
+                                        intermediates[
+                                            f"s_pairformer_{i}_layer_{layer_idx}"
+                                        ] = _to_cpu_snapshot(layer_state["s"])
+                                        intermediates[
+                                            f"z_pairformer_{i}_layer_{layer_idx}"
+                                        ] = _to_cpu_snapshot(layer_state["z"])
+                                    if capture_transition_mlp:
+                                        for key, value in layer_state.items():
+                                            if key in {"s", "z"}:
+                                                continue
+                                            intermediates[
+                                                (
+                                                    f"{key}_pairformer_{i}"
+                                                    f"_layer_{layer_idx}"
+                                                )
+                                            ] = _to_cpu_snapshot(value)
+                        else:
+                            s, z = pairformer_module(
+                                s,
+                                z,
+                                mask=mask,
+                                pair_mask=pair_mask,
+                                use_kernels=self.use_kernels,
+                            )
+                        if capture_intermediates:
+                            intermediates[f"s_after_pairformer_{i}"] = (
+                                _to_cpu_snapshot(s)
+                            )
+                            intermediates[f"z_after_pairformer_{i}"] = (
+                                _to_cpu_snapshot(z)
+                            )
 
             pdistogram = self.distogram_module(z)
             dict_out = {
@@ -719,6 +801,22 @@ class Boltz2(LightningModule):
                             ),
                         }
                     )
+
+        if capture_intermediates:
+            intermediates["capture_pairformer_layers"] = torch.tensor(
+                capture_pairformer_layers
+            )
+            intermediates["capture_transition_mlp"] = torch.tensor(
+                capture_transition_mlp
+            )
+            intermediates["capture_pairformer_layer_stride"] = torch.tensor(
+                capture_layer_stride
+            )
+            intermediates["recycling_steps"] = torch.tensor(recycling_steps)
+            intermediates["token_count"] = torch.tensor(
+                feats["token_pad_mask"].shape[1]
+            )
+            dict_out["intermediates"] = intermediates
 
         return dict_out
 
@@ -1105,6 +1203,8 @@ class Boltz2(LightningModule):
                     pred_dict["ligand_iptm"] = out["ligand_iptm"]
                     pred_dict["protein_iptm"] = out["protein_iptm"]
                     pred_dict["pair_chains_iptm"] = out["pair_chains_iptm"]
+            if "intermediates" in out:
+                pred_dict["intermediates"] = out["intermediates"]
             if self.affinity_prediction:
                 pred_dict["affinity_pred_value"] = out["affinity_pred_value"]
                 pred_dict["affinity_probability_binary"] = out[
