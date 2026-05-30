@@ -1409,6 +1409,159 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             return_predictions=False,
         )
 
+@cli.command(short_help="Generate MSA CSVs from input (uses online server).")
+@click.argument("input_path", type=click.Path(exists=True, path_type=Path), nargs=-1)
+@click.option(
+    "--out-dir",
+    type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    default=Path("./msa_results"),
+    show_default=True,
+    help="Output directory for MSA CSVs.",
+)
+@click.option(
+    "--cache",
+    type=click.Path(exists=False, file_okay=False, dir_okay=True, path_type=Path),
+    default=lambda: Path(get_cache_path()),
+    show_default=True,
+    help="Path to Boltz cache (used for CCD/mols).",
+)
+@click.option(
+    "--msa-server-url",
+    type=str,
+    default="https://api.colabfold.com",
+    show_default=True,
+    help="URL of the MMseqs2 MSA server.",
+)
+@click.option(
+    "--msa-pairing-strategy",
+    type=click.Choice(["greedy", "complete"]),
+    default="greedy",
+    show_default=True,
+    help="MSA pairing strategy to use.",
+)
+@click.option(
+    "--max-msa-seqs",
+    type=int,
+    default=8192,
+    show_default=True,
+    help="Maximum number of MSA sequences to retain.",
+)
+@click.option(
+    "--preprocessing-threads",
+    type=int,
+    default=1,
+    show_default=True,
+    help="Number of threads to use for parallel MSA generation.",
+)
+@click.option(
+    "--model",
+    default="boltz2",
+    type=click.Choice(["boltz1", "boltz2"]),
+    help="The model to use for prediction. Default is boltz2.",
+)
+@click.option(
+    "--msa_server_username",
+    type=str,
+    help="MSA server username for basic auth. Used only if --use_msa_server is set. Can also be set via BOLTZ_MSA_USERNAME environment variable.",
+    default=None,
+)
+@click.option(
+    "--msa_server_password",
+    type=str,
+    help="MSA server password for basic auth. Used only if --use_msa_server is set. Can also be set via BOLTZ_MSA_PASSWORD environment variable.",
+    default=None,
+)
+@click.option(
+    "--api_key_header",
+    type=str,
+    help="Custom header key for API key authentication (default: X-API-Key).",
+    default=None,
+)
+@click.option(
+    "--api_key_value",
+    type=str,
+    help="Custom header value for API key authentication.",
+    default=None,
+)
+def msa(
+    input_path: tuple[Path, ...],
+    out_dir: Path,
+    cache: Path,
+    msa_server_url: str,
+    msa_pairing_strategy: str,
+    max_msa_seqs: int,
+    preprocessing_threads: int,
+    model: Literal["boltz1", "boltz2"],
+    msa_server_username: Optional[str],
+    msa_server_password: Optional[str],
+    api_key_header: Optional[str],
+    api_key_value: Optional[str],
+):
+    """
+    Generate MSAs from input FASTA or YAML files and save them as CSV.
+    This command uses an online MSA server (MMseqs2 at ColabFold) to compute
+    alignments. It should not be used with confidential or unpublished sequences.
+    The output CSVs can be reused on systems without internet access.
+    """
+
+    # Ensure cache path exists
+    cache.mkdir(parents=True, exist_ok=True)
+    if not cache.is_dir():
+        raise NotADirectoryError(f"The cache path {cache} exists but is not a directory.")
+
+    all_inputs = []
+    for path in input_path:
+        all_inputs.extend(check_inputs(path))
+
+    # Download CCD data if needed
+    ccd = cache / "ccd.pkl"
+    mol_dir = cache / "mols"
+
+    if model == "boltz1":   
+        if not ccd.exists():
+            click.echo(
+                f"Downloading the CCD dictionary to {ccd}. You may "
+                "change the cache directory with the --cache flag."
+            )
+            urllib.request.urlretrieve(CCD_URL, str(ccd))  # noqa: S310
+    else:
+
+        tar_mols = cache / "mols.tar"
+        if not tar_mols.exists():
+            click.echo(
+                f"Downloading the CCD data to {tar_mols}. "
+                "This may take a bit of time. You may change the cache directory "
+                "with the --cache flag."
+            )
+            urllib.request.urlretrieve(MOL_URL, str(tar_mols))  # noqa: S310
+        if not mol_dir.exists():
+            click.echo(
+                f"Extracting the CCD data to {mol_dir}. "
+                "This may take a bit of time. You may change the cache directory "
+                "with the --cache flag."
+            )
+            with tarfile.open(str(tar_mols), "r") as tar:
+                tar.extractall(cache)  # noqa: S202
+
+    # Create output structure
+    process_inputs(
+        data=all_inputs,
+        out_dir=out_dir,
+        ccd_path=ccd,
+        mol_dir=mol_dir,
+        use_msa_server=True,
+        msa_server_url=msa_server_url,
+        msa_pairing_strategy=msa_pairing_strategy,
+        max_msa_seqs=max_msa_seqs,
+        boltz2=model=='boltz2',
+        preprocessing_threads=preprocessing_threads,
+        msa_server_username=msa_server_username,
+        msa_server_password=msa_server_password,
+        api_key_header=api_key_header,
+        api_key_value=api_key_value,
+    )
+
+    click.echo(f"MSAs written to: {out_dir / 'msa'}")
 
 if __name__ == "__main__":
     cli()

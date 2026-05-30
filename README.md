@@ -54,7 +54,31 @@ There are two main predictions in the affinity output: `affinity_pred_value` and
 ## Authentication to MSA Server
 
 When using the `--use_msa_server` option with a server that requires authentication, you can provide credentials in one of two ways. More information is available in our [prediction instructions](docs/prediction.md).
- 
+
+## MSA-only generation
+
+Compute MSAs without running any structure prediction:
+
+```bash
+boltz msa [OPTIONS] path/to/input.fasta
+```
+
+By default this will:
+
+- Use the online MMSeqs2 server (`https://api.colabfold.com`)  
+- Write one CSV per input under `./msa_results/msa`
+
+Available options (e.g. `--out-dir`, `--msa-pairing-strategy`, authentication flags) mirror those in `boltz predict`.  
+For the full list of flags, run:
+
+```bash
+boltz msa --help
+```
+
+> **Warning:** Don’t send unpublished or confidential sequences to the public server.  
+> If you need private or offline operation, point `--msa-server-url` at your own MSA service.
+
+
 ## Evaluation
 
 ⚠️ **Coming soon: updated evaluation code for Boltz-2!**
