@@ -53,7 +53,7 @@ There are two main predictions in the affinity output: `affinity_pred_value` and
 
 ## Authentication to MSA Server
 
-When using the `--use_msa_server` option with a server that requires authentication, you can provide credentials in one of two ways. More information is available in our [prediction instructions](docs/prediction.md).
+When using the `--use_msa_server` option with a server that requires authentication, you can provide credentials in one of two ways. More information is available in our [prediction instructions](docs/prediction.md#authentication-to-msa-server).
  
 ## Evaluation
 
