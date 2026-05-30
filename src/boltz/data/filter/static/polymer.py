@@ -141,6 +141,7 @@ class ConsecutiveCA(StaticFilter):
             res_start = chain["res_idx"]
             res_end = res_start + chain["res_num"]
             residues = structure.residues[res_start:res_end]
+            residues = residues[np.where(residues["is_standard"])]
 
             # Get c-alphas
             ca_ids = residues["atom_center"]
