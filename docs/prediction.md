@@ -345,3 +345,40 @@ N[C@@H](Cc1ccc(O)cc1)C(=O)O
 ## Troubleshooting
 
  - When running on old NVIDIA GPUs, you may encounter an error related to the `cuequivariance` library. In this case, you should run the model with the `--no_kernels` flag, which will disable the use of the `cuequivariance` library and allow the model to run without it. This may result in slightly lower performance, but it will allow you to run the model on older hardware.
+## Troubleshooting
+
+### `Aborted!` or an unpickling error during prediction
+
+**Symptom**
+
+`boltz predict` exits immediately after "Running structure prediction for N
+inputs." with a bare `Aborted!` or a long Python traceback ending somewhere
+inside PyTorch Lightning's checkpoint loader.
+
+**Likely cause**
+
+One of the auto-downloaded checkpoint files (`boltz2_conf.ckpt`,
+`boltz2_aff.ckpt`, or `boltz1_conf.ckpt`) is empty or truncated — a common
+result of a network interruption during the first run.  Because the file
+already exists, subsequent runs skip the download and pass the bad path
+directly to the model loader.
+
+**Fix**
+
+Delete the suspect file and rerun. Boltz will re-download it automatically.
+
+```bash
+# Default cache location is ~/.boltz
+rm ~/.boltz/boltz2_conf.ckpt      # structure weights
+rm ~/.boltz/boltz2_aff.ckpt       # affinity weights   (if needed)
+rm ~/.boltz/boltz1_conf.ckpt      # Boltz-1 weights    (if using --model boltz1)
+
+boltz predict <your_input> ...
+```
+
+If you set a custom cache via `--cache` or `$BOLTZ_CACHE`, replace `~/.boltz`
+with that path.
+
+> **Note:** From v2.2.2 onwards, Boltz validates every checkpoint file
+> immediately after download and again before loading, so a corrupted file
+> will surface as a clear error message rather than a silent `Aborted!`.
