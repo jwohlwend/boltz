@@ -77,7 +77,7 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
                 res = requests.post(
                     f"{host_url}/{submission_endpoint}",
                     data={"q": query, "mode": mode},
-                    timeout=6.02,
+                    timeout=300,
                     headers=headers,
                     auth=auth,
                 )

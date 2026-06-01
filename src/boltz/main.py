@@ -294,26 +294,38 @@ def check_inputs(data: Path) -> list[Path]:
     """
     click.echo("Checking input data.")
 
-    # Check if data is a directory
+    # Define supported extensions
+    valid_exts = {".fa", ".fas", ".fasta", ".yml", ".yaml"}
+
+    # If it's a directory, search recursively
     if data.is_dir():
-        data: list[Path] = list(data.glob("*"))
+        # Use rglob to walk through all subdirectories
+        all_files = list(data.rglob("*"))
 
-        # Filter out non .fasta or .yaml files, raise
-        # an error on directory and other file types
-        for d in data:
-            if d.is_dir():
-                msg = f"Found directory {d} instead of .fasta or .yaml."
-                raise RuntimeError(msg)
-            if d.suffix.lower() not in (".fa", ".fas", ".fasta", ".yml", ".yaml"):
-                msg = (
-                    f"Unable to parse filetype {d.suffix}, "
-                    "please provide a .fasta or .yaml file."
-                )
-                raise RuntimeError(msg)
-    else:
-        data = [data]
+        # Filter only supported file types
+        data_files = [
+            f for f in all_files
+            if f.is_file()
+            and f.suffix.lower() in valid_exts
+            and f.name != 'hparams.yaml'
+        ]
 
-    return data
+        # Warn or raise if no valid files found
+        if not data_files:
+            raise RuntimeError(
+                f"No .fasta or .yaml files found under directory {data}"
+            )
+
+        return data_files
+
+    # Single file case
+    # else:
+    if data.suffix.lower() not in valid_exts:
+        raise RuntimeError(
+            f"Unable to parse filetype {data.suffix}, "
+            "please provide a .fasta or .yaml file."
+        )
+    return [data]
 
 
 def filter_inputs_structure(
