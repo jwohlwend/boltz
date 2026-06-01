@@ -508,7 +508,7 @@ class Boltz1(LightningModule):
             )
         else:
             confidence_loss_dict = {
-                "loss": torch.tensor(0.0).to(batch["token_index"].device),
+                "loss": torch.tensor(0.0, device=batch["token_index"].device),
                 "loss_breakdown": {},
             }
 
