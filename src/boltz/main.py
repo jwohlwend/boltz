@@ -793,6 +793,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     scale_laplacian_strategy: str = "pck",
     scale_laplacian_index: int = 1,
     scale_laplacian_weights: Optional[list[float]] = None,
+    write_embeddings: bool = False,
 ) -> None:
     """Run predictions with Boltz."""
     # If cpu, write a friendly warning
@@ -971,6 +972,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         output_dir=out_dir / "predictions",
         output_format=output_format,
         boltz2=model == "boltz2",
+        write_embeddings=write_embeddings,
     )
 
     # Set up trainer

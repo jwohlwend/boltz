@@ -13,6 +13,18 @@ from torch.types import Device
 
 LinearNoBias = partial(Linear, bias=False)
 
+def autocast_device_type(device_type: str) -> str:
+    """Return a device_type string accepted by ``torch.autocast``.
+
+    When autocast is used with ``enabled=False`` (to disable autocasting),
+    PyTorch still validates the device_type. MPS was not a valid autocast
+    device type until PyTorch 2.4. Since ``enabled=False`` is a no-op, we
+    fall back to ``"cpu"``, which is always accepted.
+    """
+    from torch.amp.autocast_mode import is_autocast_available
+
+    return device_type if is_autocast_available(device_type) else "cpu"
+
 
 def exists(v):
     return v is not None

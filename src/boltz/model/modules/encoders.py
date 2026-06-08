@@ -510,7 +510,7 @@ class AtomAttentionEncoder(Module):
             # only here the multiplicity kicks in because we use the different positions r
             q = q.repeat_interleave(multiplicity, 0)
             r_input = torch.cat(
-                [r, torch.zeros((B * multiplicity, N, 7)).to(r)],
+                [r, torch.zeros((B * multiplicity, N, 7), device=r.device, dtype=r.dtype)],
                 dim=-1,
             )
             r_to_q = self.r_to_q_trans(r_input)

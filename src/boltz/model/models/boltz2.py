@@ -35,6 +35,7 @@ from boltz.model.modules.trunkv2 import (
 )
 from boltz.model.optim.ema import EMA
 from boltz.model.optim.scheduler import AlphaFoldLRScheduler
+from boltz.model.modules.utils import autocast_device_type
 
 
 class Boltz2(LightningModule):
@@ -708,7 +709,7 @@ class Boltz2(LightningModule):
                     "token_trans_bias": token_trans_bias,
                 }
 
-                with torch.autocast("cuda", enabled=False):
+                with torch.autocast(autocast_device_type(s.device.type), enabled=False):
                     struct_out = self.structure_module.sample(
                         s_trunk=s.float(),
                         s_inputs=s_inputs.float(),
@@ -748,7 +749,7 @@ class Boltz2(LightningModule):
                 feats["coords"] = atom_coords  # (multiplicity, L, 3)
                 assert len(feats["coords"].shape) == 3
 
-                with torch.autocast("cuda", enabled=False):
+                with torch.autocast(autocast_device_type(s.device.type), enabled=False):
                     struct_out = self.structure_module(
                         s_trunk=s.float(),
                         s_inputs=s_inputs.float(),
@@ -806,7 +807,7 @@ class Boltz2(LightningModule):
             ]
             s_inputs = self.input_embedder(feats, affinity=True)
 
-            with torch.autocast("cuda", enabled=False):
+            with torch.autocast(autocast_device_type(s.device.type), enabled=False):
                 if self.affinity_ensemble:
                     dict_out_affinity1 = self.affinity_module1(
                         s_inputs=s_inputs.detach(),

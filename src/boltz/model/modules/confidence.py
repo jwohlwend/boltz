@@ -433,8 +433,10 @@ class ConfidenceHeads(nn.Module):
         pred_distogram_prob = nn.functional.softmax(
             pred_distogram_logits, dim=-1
         ).repeat_interleave(multiplicity, 0)
-        contacts = torch.zeros((1, 1, 1, 64), dtype=pred_distogram_prob.dtype).to(
-            pred_distogram_prob.device
+        contacts = torch.zeros(
+            (1, 1, 1, 64),
+            dtype=pred_distogram_prob.dtype,
+            device=pred_distogram_prob.device,
         )
         contacts[:, :, :, :20] = 1.0
         prob_contact = (pred_distogram_prob * contacts).sum(-1)
