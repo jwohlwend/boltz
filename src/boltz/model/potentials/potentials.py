@@ -73,7 +73,16 @@ class Potential(ABC):
         )
 
         if union_index is not None:
-            neg_exp_energy = torch.exp(-1 * parameters["union_lambda"] * energy)
+            lam_energy = -1 * parameters["union_lambda"] * energy
+            # Numerically stable softmax: subtract per-group max to prevent underflow
+            group_max = torch.full(
+                (*energy.shape[:-1], union_index.max() + 1),
+                float("-inf"),
+                device=energy.device,
+                dtype=energy.dtype,
+            ).scatter_reduce(-1, union_index.expand_as(lam_energy), lam_energy, "amax")
+            shifted = lam_energy - group_max[..., union_index]
+            neg_exp_energy = torch.exp(shifted)
             Z = torch.zeros(
                 (*energy.shape[:-1], union_index.max() + 1), device=union_index.device
             ).scatter_reduce(
@@ -83,7 +92,6 @@ class Potential(ABC):
                 "sum",
             )
             softmax_energy = neg_exp_energy / Z[..., union_index]
-            softmax_energy[Z[..., union_index] == 0] = 0
             return (energy * softmax_energy).sum(dim=-1)
 
         return energy.sum(dim=tuple(range(1, energy.dim())))
@@ -140,7 +148,16 @@ class Potential(ABC):
             *args, negation_mask=negation_mask, compute_derivative=True
         )
         if union_index is not None:
-            neg_exp_energy = torch.exp(-1 * parameters["union_lambda"] * energy)
+            lam_energy = -1 * parameters["union_lambda"] * energy
+            # Numerically stable softmax: subtract per-group max to prevent underflow
+            group_max = torch.full(
+                (*energy.shape[:-1], union_index.max() + 1),
+                float("-inf"),
+                device=energy.device,
+                dtype=energy.dtype,
+            ).scatter_reduce(-1, union_index.expand_as(lam_energy), lam_energy, "amax")
+            shifted = lam_energy - group_max[..., union_index]
+            neg_exp_energy = torch.exp(shifted)
             Z = torch.zeros(
                 (*energy.shape[:-1], union_index.max() + 1), device=union_index.device
             ).scatter_reduce(
@@ -150,7 +167,6 @@ class Potential(ABC):
                 "sum",
             )
             softmax_energy = neg_exp_energy / Z[..., union_index]
-            softmax_energy[Z[..., union_index] == 0] = 0
             f = torch.zeros(
                 (*energy.shape[:-1], union_index.max() + 1), device=union_index.device
             ).scatter_reduce(
