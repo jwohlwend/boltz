@@ -136,7 +136,7 @@ def benchmark(size, provider):
         requires_grad=False,
     ).float()
 
-    with torch.autocast("cuda", dtype=PRECISION):
+    with torch.autocast(device_type=s.device.type, dtype=PRECISION):
         fn = fwd if INFERENCE else backward
         if provider == "Default":
             ms = speed(
@@ -224,7 +224,7 @@ for size in SEQ_LEN:
         requires_grad=False,
     ).float()
 
-    with torch.autocast("cuda", dtype=PRECISION):
+    with torch.autocast(device_type=s.device.type, dtype=PRECISION):
         memory_default = memory_measure(
             lambda: fwd(
                 model,

@@ -345,6 +345,17 @@ def filter_inputs_structure(
     else:
         existing = set()
 
+    # For records that need affinity prediction, also require pre_affinity_*.npz.
+    # If it's missing (e.g. a prior run without affinity), force re-prediction.
+    affinity_missing = {
+        r.id
+        for r in manifest.records
+        if r.id in existing
+        and r.affinity
+        and not (pred_dir / r.id / f"pre_affinity_{r.id}.npz").exists()
+    }
+    existing -= affinity_missing
+
     # Remove them from the input data
     if existing and not override:
         manifest = Manifest([r for r in manifest.records if r.id not in existing])
@@ -1035,6 +1046,17 @@ def cli() -> None:
     help="Whether to disable the kernels. Default False",
 )
 @click.option(
+    "--flash_attn",
+    is_flag=True,
+    help=(
+        "Enable PyTorch scaled_dot_product_attention (FlashAttention-2 / "
+        "memory-efficient attention) for all attention layers. "
+        "Requires an Ampere (sm_80+) or newer GPU and PyTorch ≥ 2.0. "
+        "Provides O(N) memory usage vs O(N²) and significant throughput gains "
+        "on large sequences. Default False."
+    ),
+)
+@click.option(
     "--write_embeddings",
     is_flag=True,
     help=" to dump the s and z embeddings into a npz file. Default is False.",
@@ -1076,6 +1098,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     subsample_msa: bool = True,
     num_subsampled_msa: int = 1024,
     no_kernels: bool = False,
+    flash_attn: bool = False,
     write_embeddings: bool = False,
 ) -> None:
     """Run predictions with Boltz."""
@@ -1209,21 +1232,27 @@ def predict(  # noqa: C901, PLR0915, PLR0912
 
     # Set up trainer
     strategy = "auto"
-    if (isinstance(devices, int) and devices > 1) or (
-        isinstance(devices, list) and len(devices) > 1
-    ):
-        start_method = "fork" if platform.system() != "win32" and platform.system() != "Windows" else "spawn"
-        strategy = DDPStrategy(start_method=start_method)
-        if len(filtered_manifest.records) < devices:
-            msg = (
-                "Number of requested devices is greater "
-                "than the number of predictions, taking the minimum."
-            )
-            click.echo(msg)
-            if isinstance(devices, list):
-                devices = devices[: max(1, len(filtered_manifest.records))]
-            else:
-                devices = max(1, min(len(filtered_manifest.records), devices))
+    # Don't use DDP on macOS with MPS
+    if torch.backends.mps.is_available():
+        strategy = "auto"
+        devices = 1  # Force single-device for MPS
+        num_workers = 0  # MPS does not support multiple workers
+    else:
+        if (isinstance(devices, int) and devices > 1) or (
+            isinstance(devices, list) and len(devices) > 1
+        ):
+            start_method = "fork" if platform.system() != "win32" else "spawn"
+            strategy = DDPStrategy(start_method=start_method)
+            if len(filtered_manifest.records) < devices:
+                msg = (
+                    "Number of requested devices is greater "
+                    "than the number of predictions, taking the minimum."
+                )
+                click.echo(msg)
+                if isinstance(devices, list):
+                    devices = devices[: max(1, len(filtered_manifest.records))]
+                else:
+                    devices = max(1, min(len(filtered_manifest.records), devices))
 
     # Set up model parameters
     if model == "boltz2":
@@ -1259,7 +1288,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         callbacks=[pred_writer],
         accelerator=accelerator,
         devices=devices,
-        precision=32 if model == "boltz1" else "bf16-mixed",
+        precision=32 if (model == "boltz1" or torch.backends.mps.is_available()) else "bf16-mixed",
     )
 
     if filtered_manifest.records:
@@ -1319,6 +1348,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             diffusion_process_args=asdict(diffusion_params),
             ema=False,
             use_kernels=not no_kernels,
+            use_flash_attn=flash_attn,
             pairformer_args=asdict(pairformer_args),
             msa_args=asdict(msa_args),
             steering_args=asdict(steering_args),

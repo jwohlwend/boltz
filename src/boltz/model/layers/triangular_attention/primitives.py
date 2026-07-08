@@ -17,6 +17,12 @@ import math
 from typing import Callable, List, Optional, Tuple
 
 import torch
+import torch.nn.functional as F
+
+if torch.cuda.is_available():
+    from cuequivariance_torch.primitives.triangle import triangle_attention
+else:
+    triangle_attention = None
 from einops import rearrange
 from torch import nn
 
@@ -103,7 +109,7 @@ class Linear(nn.Linear):
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         d = input.dtype
         if self.precision is not None:
-            with torch.autocast("cuda", enabled=False):
+            with torch.autocast(device_type=d.device.type, enabled=False):
                 bias = (
                     self.bias.to(dtype=self.precision)
                     if self.bias is not None
@@ -116,7 +122,7 @@ class Linear(nn.Linear):
                 ).to(dtype=d)
 
         if d is torch.bfloat16:
-            with torch.autocast("cuda", enabled=False):
+            with torch.autocast(device_type=d.device.type, enabled=False):
                 bias = self.bias.to(dtype=d) if self.bias is not None else None
                 return nn.functional.linear(input, self.weight.to(dtype=d), bias)
 
@@ -136,7 +142,7 @@ class LayerNorm(nn.Module):
     def forward(self, x):
         d = x.dtype
         if d is torch.bfloat16:
-            with torch.autocast("cuda", enabled=False):
+            with torch.autocast(device_type=d.device.type, enabled=False):
                 out = nn.functional.layer_norm(
                     x,
                     self.c_in,
@@ -164,7 +170,7 @@ def softmax_no_cast(t: torch.Tensor, dim: int = -1) -> torch.Tensor:
     """
     d = t.dtype
     if d is torch.bfloat16:
-        with torch.autocast("cuda", enabled=False):
+        with torch.autocast(device_type=d.device.type, enabled=False):
             s = torch.nn.functional.softmax(t, dim=dim)
     else:
         s = torch.nn.functional.softmax(t, dim=dim)
@@ -194,6 +200,45 @@ def _attention(
     a = torch.matmul(a, value)
 
     return a
+
+
+def _attention_sdpa(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    biases: List[torch.Tensor],
+) -> torch.Tensor:
+    """Memory-efficient attention using PyTorch SDPA (FlashAttention-2 backend).
+
+    Accepts q/k/v in shape [*, H, Q/K, C_hidden] (same as ``_attention``).
+    Biases may be broadcast-shaped tensors that expand to [*, H, Q, K].
+
+    The q tensor is pre-scaled by 1/sqrt(c_hidden) before being passed here,
+    so we use scale=1.0 in SDPA to avoid double-scaling.
+    """
+    # Flatten all leading batch dimensions into one so SDPA sees a 4-D tensor.
+    *batch_dims, H, N_q, D = query.shape
+    N_k = key.shape[-2]
+    B_eff = math.prod(batch_dims) if batch_dims else 1
+
+    q = query.reshape(B_eff, H, N_q, D)
+    k = key.reshape(B_eff, H, N_k, D)
+    v = value.reshape(B_eff, H, N_k, D)
+
+    # Biases may have broadcast shapes (e.g. (B, I, 1, 1, J) for a mask or
+    # (B, 1, H, I, J) for the triangle bias).  Sum them first while allowing
+    # PyTorch to handle the broadcasting, then reshape the fully-expanded
+    # result to (B_eff, H, N_q, N_k) for SDPA.
+    attn_bias: Optional[torch.Tensor] = None
+    if biases:
+        combined = biases[0]
+        for b in biases[1:]:
+            combined = combined + b          # broadcast sum over all biases
+        attn_bias = combined.reshape(B_eff, H, N_q, N_k)
+
+    # scale=1.0 because q is already divided by sqrt(c_hidden).
+    o = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_bias, scale=1.0)
+    return o.reshape(*batch_dims, H, N_q, D)
 
 
 @torch.compiler.disable
@@ -315,6 +360,7 @@ class Attention(nn.Module):
         mask_bias: torch.Tensor,
         mask: torch.Tensor,
         use_kernels: bool = False,
+        use_sdpa: bool = False,
     ) -> torch.Tensor:
         """Compute attention.
 
@@ -331,19 +377,20 @@ class Attention(nn.Module):
         mask : torch.Tensor
             [*, Q, K] mask
         use_kernels : bool, default=False
-            Whether to use optimized CUDA kernels
+            Whether to use optimized CUDA kernels (cuequivariance)
+        use_sdpa : bool, default=False
+            Whether to use PyTorch scaled_dot_product_attention (FlashAttention-2
+            / memory-efficient attention) instead of the manual einsum path.
 
         Returns
         -------
             [*, Q, C_q] attention update
 
         """
-        # Attention kernel applies scaling internally
-        q, k, v = self._prep_qkv(
-            q_x,
-            kv_x,
-            apply_scale=not use_kernels,
-        )
+        # The kernel handles scaling internally; both the standard and SDPA paths
+        # expect q to be pre-divided by sqrt(c_hidden) (apply_scale=True).
+        apply_scale = not use_kernels
+        q, k, v = self._prep_qkv(q_x, kv_x, apply_scale=apply_scale)
 
         if use_kernels:
             scale = 1.0 / math.sqrt(self.c_hidden)
@@ -355,6 +402,12 @@ class Attention(nn.Module):
                 mask=mask.bool(),
                 scale=scale,
             )
+            o = o.transpose(-2, -3)
+        elif use_sdpa:
+            # q is already pre-scaled (divide by sqrt(c_hidden) in _prep_qkv),
+            # so we pass scale=1.0 to SDPA to avoid double-scaling.
+            biases = [mask_bias, tri_bias]
+            o = _attention_sdpa(q, k, v, biases)
             o = o.transpose(-2, -3)
         else:
             biases = [mask_bias, tri_bias]

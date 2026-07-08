@@ -66,6 +66,7 @@ class TriangleAttention(nn.Module):
         mask: torch.Tensor,
         chunk_size: int,
         use_kernels: bool = False,
+        use_flash_attn: bool = False,
     ) -> torch.Tensor:
         """Compute triangle attention.
 
@@ -79,6 +80,8 @@ class TriangleAttention(nn.Module):
             Size of chunks for memory efficient computation
         use_kernels : bool, default=False
             Whether to use optimized CUDA kernels
+        use_flash_attn : bool, default=False
+            Whether to use PyTorch SDPA (FlashAttention-2) backend
 
         Returns
         -------
@@ -111,6 +114,7 @@ class TriangleAttention(nn.Module):
         mask: Optional[torch.Tensor] = None,
         chunk_size: Optional[int] = None,
         use_kernels: bool = False,
+        use_flash_attn: bool = False,
     ) -> torch.Tensor:
         """Compute triangle attention.
 
@@ -123,7 +127,11 @@ class TriangleAttention(nn.Module):
         chunk_size : int, optional
             Size of chunks for memory efficient computation
         use_kernels : bool, default=False
-            Whether to use optimized CUDA kernels
+            Whether to use optimized CUDA kernels (cuequivariance)
+        use_flash_attn : bool, default=False
+            Whether to use PyTorch SDPA (FlashAttention-2) backend.
+            When True, chunking is skipped because SDPA handles memory
+            efficiency internally.
 
         Returns
         -------
@@ -154,7 +162,8 @@ class TriangleAttention(nn.Module):
         # [*, 1, H, I, J]
         triangle_bias = triangle_bias.unsqueeze(-4)
 
-        if chunk_size is not None and not use_kernels:
+        # SDPA handles its own memory paging; skip chunk loop when enabled.
+        if chunk_size is not None and not use_kernels and not use_flash_attn:
             x = self._chunk(
                 x,
                 triangle_bias,
@@ -162,6 +171,7 @@ class TriangleAttention(nn.Module):
                 mask,
                 chunk_size,
                 use_kernels=use_kernels,
+                use_flash_attn=use_flash_attn,
             )
         else:
             x = self.mha(

@@ -105,6 +105,7 @@ class Boltz2(LightningModule):
         checkpoint_diffusion_conditioning: bool = False,
         use_templates_v2: bool = False,
         use_kernels: bool = False,
+        use_flash_attn: bool = False,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["validators"])
@@ -160,8 +161,9 @@ class Boltz2(LightningModule):
         self.is_msa_compiled = False
         self.is_template_compiled = False
 
-        # Kernels
+        # Kernels / GPU acceleration
         self.use_kernels = use_kernels
+        self.use_flash_attn = use_flash_attn
 
         # Input embeddings
         full_embedder_args = {
@@ -365,6 +367,10 @@ class Boltz2(LightningModule):
             and torch.cuda.get_device_properties(torch.device("cuda")).major >= 8.0  # noqa: PLR2004
         ):
             self.use_kernels = False
+            # FlashAttention-2 requires Ampere (sm_80) or newer GPUs.
+            # For older hardware PyTorch SDPA falls back to the math backend,
+            # which is slower than our existing float32 path, so disable it.
+            self.use_flash_attn = False
 
         if (
             stage != "predict"
@@ -463,7 +469,9 @@ class Boltz2(LightningModule):
                                 template_module = self.template_module
 
                             z = z + template_module(
-                                z, feats, pair_mask, use_kernels=self.use_kernels
+                                z, feats, pair_mask,
+                                use_kernels=self.use_kernels,
+                                use_flash_attn=self.use_flash_attn,
                             )
 
                         if self.is_msa_compiled and not self.training:
@@ -472,7 +480,9 @@ class Boltz2(LightningModule):
                             msa_module = self.msa_module
 
                         z = z + msa_module(
-                            z, s_inputs, feats, use_kernels=self.use_kernels
+                            z, s_inputs, feats,
+                            use_kernels=self.use_kernels,
+                            use_flash_attn=self.use_flash_attn,
                         )
 
                         # Revert to uncompiled version for validation
@@ -487,6 +497,7 @@ class Boltz2(LightningModule):
                             mask=mask,
                             pair_mask=pair_mask,
                             use_kernels=self.use_kernels,
+                            use_flash_attn=self.use_flash_attn,
                         )
 
             pdistogram = self.distogram_module(z)
@@ -986,7 +997,7 @@ class Boltz2(LightningModule):
         ]
         if len(parameters) == 0:
             return torch.tensor(
-                0.0, device="cuda" if torch.cuda.is_available() else "cpu"
+                0.0, device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
             )
         norm = torch.stack(parameters).sum().sqrt()
         return norm
@@ -995,7 +1006,7 @@ class Boltz2(LightningModule):
         parameters = [p.norm(p=2) ** 2 for p in module.parameters() if p.requires_grad]
         if len(parameters) == 0:
             return torch.tensor(
-                0.0, device="cuda" if torch.cuda.is_available() else "cpu"
+                0.0, device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
             )
         norm = torch.stack(parameters).sum().sqrt()
         return norm
@@ -1023,8 +1034,9 @@ class Boltz2(LightningModule):
                 if "out of memory" in str(e):
                     msg = f"| WARNING: ran out of memory, skipping batch, {idx_dataset}"
                     print(msg)
-                    torch.cuda.empty_cache()
-                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        gc.collect()
                     return
                 raise e
         else:
@@ -1043,7 +1055,10 @@ class Boltz2(LightningModule):
                 if "out of memory" in str(e):
                     msg = f"| WARNING: ran out of memory, skipping batch, {idx_dataset}"
                     print(msg)
-                    torch.cuda.empty_cache()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    if torch.backends.mps.is_available():
+                        torch.backends.mps.empty_cache()
                     gc.collect()
                     return
                 raise e
@@ -1124,8 +1139,9 @@ class Boltz2(LightningModule):
         except RuntimeError as e:  # catch out of memory exceptions
             if "out of memory" in str(e):
                 print("| WARNING: ran out of memory, skipping batch")
-                torch.cuda.empty_cache()
-                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    gc.collect()
                 return {"exception": True}
             else:
                 raise e

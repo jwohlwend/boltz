@@ -47,7 +47,6 @@ def weighted_rigid_align(
     # Compute the SVD of the covariance matrix, required float32 for svd and determinant
     original_dtype = cov_matrix.dtype
     cov_matrix_32 = cov_matrix.to(dtype=torch.float32)
-
     U, S, V = torch.linalg.svd(
         cov_matrix_32, driver="gesvd" if cov_matrix_32.is_cuda else None
     )

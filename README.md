@@ -37,6 +37,37 @@ cd boltz; pip install -e .[cuda]
 
 If you are installing on CPU-only or non-CUDA GPus hardware, remove `[cuda]` from the above commands. Note that the CPU version is significantly slower than the GPU version.
 
+## For Mac users
+
+Create a new conda environment for boltz with python 3.12, numba, lvmlite and numpy:
+
+```
+conda create --name boltz-2 python=3.12 llvmlite==0.44.0 numba==0.61.0 numpy==1.26.3
+conda activate boltz-2
+```
+
+Install the PyTorch nightly build. This is required to get native MPS (Apple GPU)
+support for `torch.linalg.svd`/`torch.det`, which the structure alignment step relies
+on; without it, those ops silently fall back to the CPU on every diffusion step, which
+is significantly slower:
+```
+pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
+```
+
+Clone this repository
+```
+git clone https://github.com/fnachon/boltz.git
+cd boltz
+pip install -e .
+```
+Several wheels (torch, scikit-learn) bundle their own copy of `libomp.dylib`, and
+loading more than one OpenMP runtime into the same process crashes with an `OMP:
+Error` about libomp being initialized twice. Rather than silencing that check with
+`KMP_DUPLICATE_LIB_OK=TRUE`, repoint the duplicate copies at a single one:
+```
+python scripts/fix_macos_libomp.py
+```
+
 ## Inference
 
 You can run inference using Boltz with:

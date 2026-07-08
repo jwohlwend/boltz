@@ -178,7 +178,6 @@ class BoltzWriter(BasePredictionWriter):
                 if self.boltz2 and record.affinity and idx_to_rank[model_idx] == 0:
                     path = struct_dir / f"pre_affinity_{record.id}.npz"
                     np.savez_compressed(path, **asdict(new_structure))
-                    np.array(atoms["coords"][:, None], dtype=Coords)
 
                 # Save confidence summary
                 if "plddt" in prediction:
