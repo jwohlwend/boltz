@@ -170,6 +170,7 @@ Examples of common options include:
 | `--use_potentials`        | `FLAG`          | `False`                     | Whether to run the original Boltz-2 model using inference time potentials.                                                                                                        |
 | `--write_full_pae`       | `FLAG`          | `False`                     | Whether to save the full PAE matrix as a file.                                                                                                                                      |
 | `--write_full_pde`       | `FLAG`          | `False`                     | Whether to save the full PDE matrix as a file.                                                                                                                                      |
+| `--write_distogram`      | `FLAG`          | `False`                     | Whether to save the distogram logits as a file.                                                                                                                                     |
 
 ## Output
 
@@ -186,6 +187,7 @@ out_dir/
         ├── pae_[input_file1]_model_0.npz                      # The predicted PAE score for every pair of tokens
         ├── pde_[input_file1]_model_0.npz                      # The predicted PDE score for every pair of tokens
         ├── plddt_[input_file1]_model_0.npz                    # The predicted pLDDT score for every token
+        ├── distogram_[input_file1].npz                        # The predicted distogram logits for every pair of tokens
         ...
         └── [input_file1]_model_[diffusion_samples-1].cif      # The predicted structure in CIF format
         ...
@@ -247,6 +249,18 @@ The `affinity_pred_value` aims to measure the specific affinity of different bin
 - IC50 of $10^{-4}$ M $\longrightarrow$ our model outputs $2$ (weak binder / decoy)
 
 You can convert the model's output to pIC50 in `kcal/mol` by using `y --> (6 - y) * 1.364` where `y` is the model's prediction.
+
+The distogram `.npz` file, written when `--write_distogram` is set, contains the raw logits of the distogram head together with the annotation of its token axes:
+
+| **Array**           | **Shape**              | **Description**                                                                                                              |
+|---------------------|------------------------|------------------------------------------------------------------------------------------------------------------------------|
+| `distogram_logits`  | `(num_tokens, num_tokens, num_bins)` | The unnormalised logits over distance bins, as `float16`. The bins are `num_bins - 1` boundaries evenly spaced over 2 to 22 Å, with a first and a last bin catching the distances below and above that range. Apply a softmax over the last axis to obtain distance probabilities. |
+| `asym_id`           | `(num_tokens,)`        | The chain each token belongs to.                                                                                             |
+| `residue_index`     | `(num_tokens,)`        | The residue index of each token.                                                                                             |
+| `entity_id`         | `(num_tokens,)`        | The entity each token belongs to.                                                                                            |
+| `mol_type`          | `(num_tokens,)`        | The molecule type of each token.                                                                                             |
+
+The distogram is a trunk output, shared by all diffusion samples of a prediction, so a single file is written per input rather than one per sample.
 
 
 ## Authentication to MSA Server

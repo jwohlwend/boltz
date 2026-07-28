@@ -1074,6 +1074,8 @@ class Boltz2(LightningModule):
             pred_dict["token_masks"] = batch["token_pad_mask"]
             pred_dict["s"] = out["s"]
             pred_dict["z"] = out["z"]
+            if self.predict_args.get("write_distogram", False):
+                pred_dict["pdistogram"] = out["pdistogram"]
 
             if "keys_dict_out" in self.predict_args:
                 for key in self.predict_args["keys_dict_out"]:
