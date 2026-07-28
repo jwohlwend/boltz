@@ -24,6 +24,7 @@ class BoltzWriter(BasePredictionWriter):
         output_format: Literal["pdb", "mmcif"] = "mmcif",
         boltz2: bool = False,
         write_embeddings: bool = False,
+        write_distogram: bool = False,
     ) -> None:
         """Initialize the writer.
 
@@ -45,6 +46,7 @@ class BoltzWriter(BasePredictionWriter):
         self.boltz2 = boltz2
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.write_embeddings = write_embeddings
+        self.write_distogram = write_distogram
 
     def write_on_batch_end(
         self,
@@ -79,7 +81,9 @@ class BoltzWriter(BasePredictionWriter):
             idx_to_rank = {i: i for i in range(len(records))}
 
         # Iterate over the records
-        for record, coord, pad_mask in zip(records, coords, pad_masks):
+        for record_idx, (record, coord, pad_mask) in enumerate(
+            zip(records, coords, pad_masks)
+        ):
             # Load the structure
             path = self.data_dir / f"{record.id}.npz"
             if self.boltz2:
@@ -246,6 +250,11 @@ class BoltzWriter(BasePredictionWriter):
                     )
                     np.savez_compressed(path, pde=pde.cpu().numpy())
                 
+            # Save distogram
+            if self.write_distogram and "pdistogram" in prediction:
+                path = struct_dir / f"distogram_{record.id}.npz"
+                self._write_distogram(path, prediction, batch, record_idx)
+
             # Save embeddings
             if self.write_embeddings and "s" in prediction and "z" in prediction:
                 s = prediction["s"].cpu().numpy()
@@ -256,6 +265,46 @@ class BoltzWriter(BasePredictionWriter):
                     / f"embeddings_{record.id}.npz"
                 )
                 np.savez_compressed(path, s=s, z=z)
+
+    def _write_distogram(
+        self,
+        path: Path,
+        prediction: dict[str, Tensor],
+        batch: dict[str, Tensor],
+        record_idx: int,
+    ) -> None:
+        """Save the raw distogram logits of a record.
+
+        Parameters
+        ----------
+        path : Path
+            The file to write the distogram to.
+        prediction : dict[str, Tensor]
+            The predictions of the batch.
+        batch : dict[str, Tensor]
+            The features of the batch.
+        record_idx : int
+            The index of the record within the batch.
+
+        """
+        logits = prediction["pdistogram"][record_idx]
+
+        # Boltz-2 predicts a stack of distograms, Boltz-1 a single one
+        if logits.dim() == 4 and logits.shape[2] == 1:  # noqa: PLR2004
+            logits = logits[:, :, 0, :]
+
+        # Restrict to the tokens of the record
+        token_mask = batch["token_pad_mask"][record_idx].bool()
+        logits = logits[token_mask][:, token_mask].float()
+
+        # Token annotation of the distogram axes
+        arrays = {"distogram_logits": logits.cpu().numpy().astype(np.float16)}
+        for key in ("asym_id", "residue_index", "entity_id", "mol_type"):
+            if key in batch:
+                value = batch[key][record_idx][token_mask]
+                arrays[key] = value.cpu().numpy().astype(np.int32)
+
+        np.savez_compressed(path, **arrays)
 
     def on_predict_epoch_end(
         self,

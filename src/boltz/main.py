@@ -1039,6 +1039,14 @@ def cli() -> None:
     is_flag=True,
     help=" to dump the s and z embeddings into a npz file. Default is False.",
 )
+@click.option(
+    "--write_distogram",
+    is_flag=True,
+    help=(
+        "Whether to dump the distogram logits into a npz file. "
+        "Default is False."
+    ),
+)
 def predict(  # noqa: C901, PLR0915, PLR0912
     data: str,
     out_dir: str,
@@ -1077,6 +1085,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     num_subsampled_msa: int = 1024,
     no_kernels: bool = False,
     write_embeddings: bool = False,
+    write_distogram: bool = False,
 ) -> None:
     """Run predictions with Boltz."""
     # If cpu, write a friendly warning
@@ -1250,6 +1259,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         output_format=output_format,
         boltz2=model == "boltz2",
         write_embeddings=write_embeddings,
+        write_distogram=write_distogram,
     )
 
     # Set up trainer
@@ -1304,6 +1314,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             "write_confidence_summary": True,
             "write_full_pae": write_full_pae,
             "write_full_pde": write_full_pde,
+            "write_distogram": write_distogram,
         }
 
         steering_args = BoltzSteeringParams()
