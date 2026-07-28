@@ -246,7 +246,9 @@ The `affinity_pred_value` aims to measure the specific affinity of different bin
 - IC50 of $10^{-6}$ M $\longrightarrow$ our model outputs $0$ (moderate binder)
 - IC50 of $10^{-4}$ M $\longrightarrow$ our model outputs $2$ (weak binder / decoy)
 
-You can convert the model's output to pIC50 in `kcal/mol` by using `y --> (6 - y) * 1.364` where `y` is the model's prediction.
+You can convert the model's output to pIC50 using $\mathrm{pIC}_{50} = 6 - y$, where $y = \log_{10}(\mathrm{IC}_{50} / \mu\mathrm{M})$. pIC50 is dimensionless.
+
+If IC50 is approximated as an equilibrium dissociation constant, the corresponding standard binding free energy at 298 K and a 1 M standard state is approximately $\Delta G^\circ \approx -(1.364\ \mathrm{kcal\,mol}^{-1})\mathrm{pIC}_{50}$. This approximation should be interpreted cautiously because IC50 is assay-dependent and is not generally equal to $K_d$ or $K_i$.
 
 
 ## Authentication to MSA Server
