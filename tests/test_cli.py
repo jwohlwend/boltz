@@ -9,7 +9,9 @@ import pytest
 
 from boltz.main import (
     _available_cpu_count,
+    _normalize_accelerator,
     _resolve_affinity_max_parallel_samples,
+    _resolve_checkpoint_load_map_location,
     _validate_checkpoint_for_load,
     predict,
 )
@@ -166,6 +168,37 @@ class TestCheckpointValidation:
         checkpoint.write_bytes(b"not-empty")
 
         _validate_checkpoint_for_load(checkpoint, "Boltz-2 weights")
+
+    def test_checkpoint_map_location_falls_back_to_cpu_without_mps_current_device(self, monkeypatch):
+        """MPS checkpoint loads should fall back to CPU if current_device is missing."""
+        import types
+
+        import torch
+
+        class _FakeMPSBackends:
+            @staticmethod
+            def is_available():
+                return True
+
+        monkeypatch.setattr(torch.backends, "mps", _FakeMPSBackends(), raising=False)
+        monkeypatch.setattr(torch, "mps", types.SimpleNamespace(), raising=False)
+
+        assert _resolve_checkpoint_load_map_location("mps") == "cpu"
+
+    def test_normalizes_gpu_to_mps_on_mps_host(self, monkeypatch):
+        """The default GPU accelerator should resolve to MPS on Apple Silicon."""
+        import types
+
+        import torch
+
+        class _FakeMPSBackends:
+            @staticmethod
+            def is_available():
+                return True
+
+        monkeypatch.setattr(torch.backends, "mps", _FakeMPSBackends(), raising=False)
+
+        assert _normalize_accelerator("gpu") == "mps"
 
 
 class TestDownloadBoltz1CheckpointValidation:

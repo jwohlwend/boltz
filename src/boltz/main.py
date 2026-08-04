@@ -145,6 +145,62 @@ def _resolve_affinity_max_parallel_samples(
     return min(max_parallel_samples, diffusion_samples_affinity)
 
 
+def _resolve_checkpoint_load_map_location(accelerator: str) -> str:
+    """Return the checkpoint restore device for the requested accelerator.
+
+    Some newer PyTorch MPS builds advertise Metal support but do not expose
+    ``torch.mps.current_device()``, which breaks checkpoint deserialization when
+    ``map_location='mps'`` is passed into ``torch.load``/Lightning. In that case,
+    we fall back to CPU for loading and let the Trainer move the model to MPS
+    after it has been created.
+    """
+    if accelerator == "cpu":
+        return "cpu"
+    if accelerator == "mps":
+        try:
+            import torch
+        except ImportError:
+            return "cpu"
+
+        mps_available = getattr(torch.backends, "mps", None)
+        if mps_available is None or not mps_available.is_available():
+            return "cpu"
+
+        if not hasattr(torch.mps, "current_device"):
+            return "cpu"
+        return "mps"
+    return "cuda"
+
+
+def _ensure_torch_mps_current_device_compat() -> None:
+    """Provide a minimal ``torch.mps.current_device`` shim when missing.
+
+    Some nightly/dev builds report MPS availability but omit the
+    ``current_device`` attribute entirely. That breaks Torch's deserializer
+    when it probes the active Metal device while restoring checkpoint tensors.
+    """
+    try:
+        import torch
+    except ImportError:
+        return
+
+    if not hasattr(torch.mps, "current_device"):
+        torch.mps.current_device = lambda: 0  # type: ignore[attr-defined]
+
+
+def _normalize_accelerator(accelerator: str) -> str:
+    """Use MPS for Apple Silicon when the user requests the generic GPU path."""
+    try:
+        import torch
+    except ImportError:
+        return accelerator
+
+    if accelerator == "gpu" and getattr(torch.backends, "mps", None) is not None:
+        if torch.backends.mps.is_available():
+            return "mps"
+    return accelerator
+
+
 @dataclass
 class BoltzProcessedInput:
     """Processed input data."""
@@ -1403,6 +1459,8 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     from boltz.model.models.boltz1 import Boltz1
     from boltz.model.models.boltz2 import Boltz2
 
+    accelerator = _normalize_accelerator(accelerator)
+
     # PyTorch 2.6+ defaults torch.load to weights_only=True, which rejects
     # Lightning checkpoints containing OmegaConf config objects and custom types.
     # Since boltz only loads its own checkpoints from trusted sources, restore
@@ -1411,10 +1469,26 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         _original_torch_load = torch.load
 
         def _patched_load(*a, _orig=_original_torch_load, **kw):
+            location = kw.get("map_location")
+            try:
+                location_text = str(location)
+            except Exception:
+                location_text = ""
+
+            if torch.backends.mps.is_available() and not hasattr(torch.mps, "current_device"):
+                if location_text.startswith(("mps", "cuda")):
+                    kw["map_location"] = "cpu"
             return _orig(*a, **{**kw, "weights_only": False})
 
         _patched_load._boltz_patched = True  # type: ignore[attr-defined]
         torch.load = _patched_load  # type: ignore[assignment]
+
+    # Some dev/nightly MPS builds expose Metal support but omit
+    # torch.mps.current_device(), which breaks checkpoint deserialization.
+    # Apply the guard unconditionally when MPS is available so both explicit
+    # --accelerator mps and default GPU runs stay compatible.
+    if torch.backends.mps.is_available():
+        _ensure_torch_mps_current_device_compat()
 
     # If cpu, write a friendly warning
     if accelerator == "cpu":
@@ -1648,12 +1722,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         precision=precision,
     )
 
-    if accelerator == "cpu":
-        map_location = "cpu"
-    elif accelerator == "mps":
-        map_location = "mps"
-    else:
-        map_location = "cuda"
+    map_location = _resolve_checkpoint_load_map_location(accelerator)
 
     pin_memory = accelerator not in ("cpu", "mps")
 

@@ -81,6 +81,14 @@ def test_autocast_device_type_mps():
         pass
 
 
+def test_checkpoint_map_location_falls_back_to_cpu_for_mps():
+    """MPS checkpoint loads should avoid the broken torch.mps.current_device path."""
+    from boltz.main import _resolve_checkpoint_load_map_location
+
+    result = _resolve_checkpoint_load_map_location("mps")
+    assert result == "cpu"
+
+
 def test_predict_peptide_mps():
     """Run boltz predict on MPS with a small peptide."""
     input_yaml = """\
