@@ -313,3 +313,29 @@ def random_rotations(
     """
     quaternions = random_quaternions(n, dtype=dtype, device=device)
     return quaternion_to_matrix(quaternions)
+
+
+DEFAULT_STEERING_ARGS = {
+    "fk_steering": False,
+    "num_particles": 1,
+    "fk_lambda": 0.0,
+    "fk_resampling_interval": 1,
+    "physical_guidance_update": False,
+    "contact_guidance_update": False,
+    "num_gd_steps": 1,
+}
+
+
+def resolve_steering_args(steering_args):
+    """Return a complete steering_args dict, defaulting when None or partial.
+
+    Instantiating Boltz2 from a checkpoint often leaves steering_args as None
+    because Hydra YAML values are not serialized. Callers that index
+    steering_args["fk_steering"] need a full dict.
+    """
+    if steering_args is None:
+        return dict(DEFAULT_STEERING_ARGS)
+    return {
+        key: steering_args.get(key, default)
+        for key, default in DEFAULT_STEERING_ARGS.items()
+    }

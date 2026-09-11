@@ -35,7 +35,7 @@ from boltz.model.modules.trunkv2 import (
 )
 from boltz.model.optim.ema import EMA
 from boltz.model.optim.scheduler import AlphaFoldLRScheduler
-from boltz.model.modules.utils import autocast_device_type
+from boltz.model.modules.utils import autocast_device_type, resolve_steering_args
 
 
 class Boltz2(LightningModule):
@@ -133,7 +133,7 @@ class Boltz2(LightningModule):
         self.validation_args = validation_args
         self.diffusion_loss_args = diffusion_loss_args
         self.predict_args = predict_args
-        self.steering_args = steering_args
+        self.steering_args = resolve_steering_args(steering_args)
 
         # Training metrics
         if validate_structure:
