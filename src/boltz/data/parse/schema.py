@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional
 
@@ -1062,10 +1062,10 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 msg = f"Could not find binder with name {binder} in the input!"
                 raise ValueError(msg)
 
-            if chain_name_to_entity_type[binder] != "ligand":
+            if chain_name_to_entity_type[binder] not in { "ligand", "dna", "rna"}:
                 msg = (
-                    f"Chain {binder} is not a ligand! "
-                    "Affinity is currently only supported for ligands."
+                    f"Chain {binder} is not a supported affinity binder! "
+                    "Affinity is supported for ligand, DNA, or RNA chains."
                 )
                 raise ValueError(msg)
 
@@ -1180,6 +1180,13 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 cyclic=cyclic,
                 mol_dir=mol_dir,
             )
+
+            if affinity:
+                parsed_chain = replace(
+                    parsed_chain,
+                    affinity=True,
+                    affinity_mw=0.0,
+                )
 
         # Parse a non-polymer
         elif (entity_type == "ligand") and "ccd" in (items[0][entity_type]):
