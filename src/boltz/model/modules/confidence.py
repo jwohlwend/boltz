@@ -4,6 +4,8 @@ from torch import nn
 
 import boltz.model.layers.initialize as init
 from boltz.data import const
+from boltz.model.layers.confidence_utils import compute_pae_summaries
+from boltz.model.loss.confidence import compute_frame_pred
 from boltz.model.modules.confidence_utils import (
     compute_aggregated_metric,
     compute_ptms,
@@ -216,19 +218,20 @@ class ConfidenceModule(nn.Module):
 
             out_dict = {}
             for key in out_dicts[0]:
-                if key != "pair_chains_iptm":
+                if not isinstance(out_dicts[0][key], dict):
                     out_dict[key] = torch.cat([out[key] for out in out_dicts], dim=0)
                 else:
-                    pair_chains_iptm = {}
-                    for chain_idx1 in out_dicts[0][key].keys():
-                        chains_iptm = {}
-                        for chain_idx2 in out_dicts[0][key][chain_idx1].keys():
-                            chains_iptm[chain_idx2] = torch.cat(
+                    # Nested per-chain-pair dicts (pair_chains_iptm, pair_chains_pae)
+                    pair_chains = {}
+                    for chain_idx1 in out_dicts[0][key]:
+                        chains = {}
+                        for chain_idx2 in out_dicts[0][key][chain_idx1]:
+                            chains[chain_idx2] = torch.cat(
                                 [out[key][chain_idx1][chain_idx2] for out in out_dicts],
                                 dim=0,
                             )
-                        pair_chains_iptm[chain_idx1] = chains_iptm
-                    out_dict[key] = pair_chains_iptm
+                        pair_chains[chain_idx1] = chains
+                    out_dict[key] = pair_chains
             return out_dict
         if self.imitate_trunk:
             s_inputs = self.input_embedder(feats)
@@ -479,5 +482,16 @@ class ConfidenceHeads(nn.Module):
             out_dict["ligand_iptm"] = ligand_iptm
             out_dict["protein_iptm"] = protein_iptm
             out_dict["pair_chains_iptm"] = pair_chains_iptm
+
+            # Aggregated PAE summaries (complex, interface, per chain pair)
+            _, frame_mask = compute_frame_pred(
+                x_pred, feats["frames_idx"], feats, multiplicity, inference=True
+            )
+            complex_pae, complex_ipae, pair_chains_pae = compute_pae_summaries(
+                out_dict["pae"], feats, multiplicity, frame_mask=frame_mask
+            )
+            out_dict["complex_pae"] = complex_pae
+            out_dict["complex_ipae"] = complex_ipae
+            out_dict["pair_chains_pae"] = pair_chains_pae
 
         return out_dict

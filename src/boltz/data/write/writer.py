@@ -1,7 +1,8 @@
 import json
+import math
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 import numpy as np
 import torch
@@ -12,6 +13,11 @@ from torch import Tensor
 from boltz.data.types import Coords, Interface, Record, Structure, StructureV2
 from boltz.data.write.mmcif import to_mmcif
 from boltz.data.write.pdb import to_pdb
+
+
+def _nan_to_none(value: float) -> Optional[float]:
+    """Convert NaN to None so that it serializes to a valid JSON null."""
+    return None if math.isnan(value) else value
 
 
 class BoltzWriter(BasePredictionWriter):
@@ -212,6 +218,29 @@ class BoltzWriter(BasePredictionWriter):
                         }
                         for idx1 in prediction["pair_chains_iptm"]
                     }
+                    # Aggregated PAE summaries. Undefined values (e.g. the
+                    # interface PAE of a single-chain input) are written as null.
+                    if "complex_pae" in prediction:
+                        for key in ["complex_pae", "complex_ipae"]:
+                            confidence_summary_dict[key] = _nan_to_none(
+                                prediction[key][model_idx].item()
+                            )
+                        pair_chains_pae = prediction.get("pair_chains_pae", {})
+                        confidence_summary_dict["chains_pae"] = {
+                            idx: _nan_to_none(
+                                pair_chains_pae[idx][idx][model_idx].item()
+                            )
+                            for idx in pair_chains_pae
+                        }
+                        confidence_summary_dict["pair_chains_pae"] = {
+                            idx1: {
+                                idx2: _nan_to_none(
+                                    pair_chains_pae[idx1][idx2][model_idx].item()
+                                )
+                                for idx2 in pair_chains_pae[idx1]
+                            }
+                            for idx1 in pair_chains_pae
+                        }
                     with path.open("w") as f:
                         f.write(
                             json.dumps(

@@ -6,6 +6,8 @@ import boltz.model.layers.initialize as init
 from boltz.data import const
 from boltz.model.layers.confidence_utils import (
     compute_aggregated_metric,
+    compute_frame_pred,
+    compute_pae_summaries,
     compute_ptms,
 )
 from boltz.model.layers.pairformer import PairformerModule
@@ -138,19 +140,20 @@ class ConfidenceModule(nn.Module):
 
             out_dict = {}
             for key in out_dicts[0]:
-                if key != "pair_chains_iptm":
+                if not isinstance(out_dicts[0][key], dict):
                     out_dict[key] = torch.cat([out[key] for out in out_dicts], dim=0)
                 else:
-                    pair_chains_iptm = {}
+                    # Nested per-chain-pair dicts (pair_chains_iptm, pair_chains_pae)
+                    pair_chains = {}
                     for chain_idx1 in out_dicts[0][key]:
-                        chains_iptm = {}
+                        chains = {}
                         for chain_idx2 in out_dicts[0][key][chain_idx1]:
-                            chains_iptm[chain_idx2] = torch.cat(
+                            chains[chain_idx2] = torch.cat(
                                 [out[key][chain_idx1][chain_idx2] for out in out_dicts],
                                 dim=0,
                             )
-                        pair_chains_iptm[chain_idx1] = chains_iptm
-                    out_dict[key] = pair_chains_iptm
+                        pair_chains[chain_idx1] = chains
+                    out_dict[key] = pair_chains
             return out_dict
 
         s_inputs = self.s_inputs_norm(s_inputs)
@@ -493,5 +496,23 @@ class ConfidenceHeads(nn.Module):
             out_dict["ligand_iptm"] = torch.zeros_like(complex_plddt)
             out_dict["protein_iptm"] = torch.zeros_like(complex_plddt)
             out_dict["pair_chains_iptm"] = torch.zeros_like(complex_plddt)
+
+        # Compute the aggregated PAE summaries (complex, interface, per chain pair)
+        try:
+            _, frame_mask = compute_frame_pred(
+                x_pred, feats["frames_idx"], feats, multiplicity, inference=True
+            )
+            complex_pae, complex_ipae, pair_chains_pae = compute_pae_summaries(
+                out_dict["pae"], feats, multiplicity, frame_mask=frame_mask
+            )
+            out_dict["complex_pae"] = complex_pae
+            out_dict["complex_ipae"] = complex_ipae
+            out_dict["pair_chains_pae"] = pair_chains_pae
+        except Exception as e:
+            print(f"Error in compute_pae_summaries: {e}")
+            nan = torch.full_like(complex_plddt, float("nan"))
+            out_dict["complex_pae"] = nan
+            out_dict["complex_ipae"] = nan
+            out_dict["pair_chains_pae"] = {}
 
         return out_dict

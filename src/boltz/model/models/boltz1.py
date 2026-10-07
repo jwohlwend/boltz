@@ -1186,6 +1186,9 @@ class Boltz1(LightningModule):
                     "complex_iplddt",
                     "complex_pde",
                     "complex_ipde",
+                    "complex_pae",
+                    "complex_ipae",
+                    "pair_chains_pae",
                     "plddt",
                 ]:
                     pred_dict[key] = out[key]
