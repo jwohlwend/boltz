@@ -1105,6 +1105,9 @@ class Boltz2(LightningModule):
                     pred_dict["ligand_iptm"] = out["ligand_iptm"]
                     pred_dict["protein_iptm"] = out["protein_iptm"]
                     pred_dict["pair_chains_iptm"] = out["pair_chains_iptm"]
+                    pred_dict["complex_pae"] = out["complex_pae"]
+                    pred_dict["complex_ipae"] = out["complex_ipae"]
+                    pred_dict["pair_chains_pae"] = out["pair_chains_pae"]
             if self.affinity_prediction:
                 pred_dict["affinity_pred_value"] = out["affinity_pred_value"]
                 pred_dict["affinity_probability_binary"] = out[

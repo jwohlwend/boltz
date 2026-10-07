@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 from torch import nn
 
@@ -132,11 +134,13 @@ def tm_function(d, Nres):
     return 1 / (1 + (d / d0) ** 2)
 
 
-def compute_ptms(logits, x_preds, feats, multiplicity):
+def compute_ptms(logits, x_preds, feats, multiplicity, frame_mask=None):
     # It needs to take as input the mask of the frames as they are not used to compute the PTM
-    _, mask_collinear_pred = compute_frame_pred(
-        x_preds, feats["frames_idx"], feats, multiplicity, inference=True
-    )
+    if frame_mask is None:
+        _, frame_mask = compute_frame_pred(
+            x_preds, feats["frames_idx"], feats, multiplicity, inference=True
+        )
+    mask_collinear_pred = frame_mask
     # mask overlapping, collinear tokens and ions (invalid frames)
     mask_pad = feats["token_pad_mask"].repeat_interleave(multiplicity, 0)
     maski = mask_collinear_pred.reshape(-1, mask_collinear_pred.shape[-1])
@@ -229,3 +233,84 @@ def compute_ptms(logits, x_preds, feats, multiplicity):
         chain_pair_iptm[idx1] = chain_iptm
 
     return ptm, iptm, ligand_iptm, protein_iptm, chain_pair_iptm
+
+
+def compute_pae_summaries(
+    pae: torch.Tensor,
+    feats: dict[str, torch.Tensor],
+    multiplicity: int,
+    frame_mask: Optional[torch.Tensor] = None,
+) -> tuple[torch.Tensor, torch.Tensor, dict[int, dict[int, torch.Tensor]]]:
+    """Aggregate the PAE matrix into complex-, interface- and chain-level scores.
+
+    The PAE matrix is asymmetric: ``pae[b, i, j]`` is the expected position
+    error of token ``j`` after aligning the prediction on the frame of token
+    ``i``. All aggregates are plain (unweighted) means over the valid token
+    pairs, which makes the interface value directly comparable to the
+    ``pae_interaction`` filter commonly used for binder design.
+
+    Parameters
+    ----------
+    pae : torch.Tensor
+        The aggregated PAE values, shape (B * multiplicity, N, N), in Angstrom.
+    feats : Dict[str, torch.Tensor]
+        The input features.
+    multiplicity : int
+        The batch size of the diffusion roll-out.
+    frame_mask : torch.Tensor, optional
+        Mask of tokens with a valid (non-collinear) frame, shape
+        (B * multiplicity, N). Applied to the aligned-frame axis, as done
+        for pTM / ipTM. If None, no frame mask is applied.
+
+    Returns
+    -------
+    Tensor
+        complex_pae: mean PAE over all off-diagonal token pairs, shape (B,).
+    Tensor
+        complex_ipae: mean PAE over inter-chain token pairs, shape (B,).
+        NaN when the complex has a single chain.
+    Dict[int, Dict[int, Tensor]]
+        pair_chains_pae[c1][c2]: mean PAE of tokens in chain ``c2`` when
+        aligned on the frames of chain ``c1``, each of shape (B,). The
+        diagonal entries are the intra-chain PAE. NaN when no valid pair
+        exists (e.g. a single-token chain).
+
+    """
+    mask_pad = feats["token_pad_mask"].repeat_interleave(multiplicity, 0).float()
+    asym_id = feats["asym_id"].repeat_interleave(multiplicity, 0)
+    if frame_mask is None:
+        frame_mask = mask_pad
+    frame_mask = frame_mask.reshape(-1, frame_mask.shape[-1]).float()
+
+    num_tokens = mask_pad.shape[-1]
+    not_diag = 1.0 - torch.eye(num_tokens, device=pae.device, dtype=pae.dtype)
+    pair_mask = (
+        (frame_mask * mask_pad)[:, :, None]
+        * mask_pad[:, None, :]
+        * not_diag.unsqueeze(0)
+    )
+
+    def _masked_mean(mask: torch.Tensor) -> torch.Tensor:
+        total = (pae * mask).sum(dim=(1, 2))
+        count = mask.sum(dim=(1, 2))
+        return torch.where(
+            count > 0,
+            total / count.clamp(min=1.0),
+            torch.full_like(total, float("nan")),
+        )
+
+    complex_pae = _masked_mean(pair_mask)
+
+    different_chain = (asym_id[:, :, None] != asym_id[:, None, :]).to(pae.dtype)
+    complex_ipae = _masked_mean(pair_mask * different_chain)
+
+    pair_chains_pae = {}
+    for idx1 in torch.unique(asym_id).tolist():
+        in_chain1 = (asym_id == idx1).to(pae.dtype)
+        pair_chains_pae[idx1] = {}
+        for idx2 in torch.unique(asym_id).tolist():
+            in_chain2 = (asym_id == idx2).to(pae.dtype)
+            chain_pair_mask = pair_mask * in_chain1[:, :, None] * in_chain2[:, None, :]
+            pair_chains_pae[idx1][idx2] = _masked_mean(chain_pair_mask)
+
+    return complex_pae, complex_ipae, pair_chains_pae

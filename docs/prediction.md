@@ -180,7 +180,7 @@ out_dir/
 ├── predictions/                                               # Contains the model's predictions
     ├── [input_file1]/
         ├── [input_file1]_model_0.cif                          # The predicted structure in CIF format, with the inclusion of per token pLDDT scores
-        ├── confidence_[input_file1]_model_0.json              # The confidence scores (confidence_score, ptm, iptm, ligand_iptm, protein_iptm, complex_plddt, complex_iplddt, chains_ptm, pair_chains_iptm)
+        ├── confidence_[input_file1]_model_0.json              # The confidence scores (confidence_score, ptm, iptm, ligand_iptm, protein_iptm, complex_plddt, complex_iplddt, complex_pde, complex_ipde, chains_ptm, pair_chains_iptm, complex_pae, complex_ipae, chains_pae, pair_chains_pae)
         ├── affinity_[input_file1].json                        # The affinity scores (affinity_pred_value, affinity_probability_binary, affinity_pred_value1, affinity_probability_binary1, affinity_pred_value2, affinity_probability_binary2)
 
         ├── pae_[input_file1]_model_0.npz                      # The predicted PAE score for every pair of tokens
@@ -220,10 +220,26 @@ Each output folder includes a confidence `.json` file with aggregated confidence
             "0": 0.8225,
             "1": 0.8330
         }
+    },
+    "complex_pae": 3.1204,            # Average PAE over all valid off-diagonal token pairs (Angstrom)
+    "complex_ipae": 6.8431,           # Average PAE over valid inter-chain token pairs (interface PAE); null for single-chain inputs
+    "chains_pae": {                   # Average PAE within each chain
+        "0": 2.4120,
+        "1": 2.8975
+    },
+    "pair_chains_pae": {              # pair_chains_pae[i][j]: average PAE of chain j tokens when aligned on the frames of chain i
+        "0": {
+            "0": 2.4120,
+            "1": 7.0312
+        },
+        "1": {
+            "0": 6.6550,
+            "1": 2.8975
+        }
     }
 }
 ```
-`confidence_score`, `ptm` and `plddt` scores (and their interface and individual chain analogues) have a range of [0, 1], where higher values indicate higher confidence. `pde` scores have a unit of angstroms, where lower values indicate higher confidence.
+`confidence_score`, `ptm` and `plddt` scores (and their interface and individual chain analogues) have a range of [0, 1], where higher values indicate higher confidence. `pde` and `pae` scores have a unit of angstroms, where lower values indicate higher confidence. The `pae` summaries are unweighted means over the valid token pairs (padding, the diagonal and aligned tokens without a valid frame are excluded) (the full matrix is still written to `pae_*.npz`); `complex_ipae` corresponds to the interface PAE (`pae_interaction`) commonly used to filter designed binders.
 
 The output affinity `.json` file is organized as follows:
 ```yaml
