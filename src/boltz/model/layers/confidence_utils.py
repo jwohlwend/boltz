@@ -134,11 +134,13 @@ def tm_function(d, Nres):
     return 1 / (1 + (d / d0) ** 2)
 
 
-def compute_ptms(logits, x_preds, feats, multiplicity):
+def compute_ptms(logits, x_preds, feats, multiplicity, frame_mask=None):
     # It needs to take as input the mask of the frames as they are not used to compute the PTM
-    _, mask_collinear_pred = compute_frame_pred(
-        x_preds, feats["frames_idx"], feats, multiplicity, inference=True
-    )
+    if frame_mask is None:
+        _, frame_mask = compute_frame_pred(
+            x_preds, feats["frames_idx"], feats, multiplicity, inference=True
+        )
+    mask_collinear_pred = frame_mask
     # mask overlapping, collinear tokens and ions (invalid frames)
     mask_pad = feats["token_pad_mask"].repeat_interleave(multiplicity, 0)
     maski = mask_collinear_pred.reshape(-1, mask_collinear_pred.shape[-1])

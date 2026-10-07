@@ -474,8 +474,11 @@ class ConfidenceHeads(nn.Module):
         if self.compute_pae:
             out_dict["pae_logits"] = pae_logits
             out_dict["pae"] = compute_aggregated_metric(pae_logits, end=32)
+            _, frame_mask = compute_frame_pred(
+                x_pred, feats["frames_idx"], feats, multiplicity, inference=True
+            )
             ptm, iptm, ligand_iptm, protein_iptm, pair_chains_iptm = compute_ptms(
-                pae_logits, x_pred, feats, multiplicity
+                pae_logits, x_pred, feats, multiplicity, frame_mask=frame_mask
             )
             out_dict["ptm"] = ptm
             out_dict["iptm"] = iptm
@@ -484,9 +487,6 @@ class ConfidenceHeads(nn.Module):
             out_dict["pair_chains_iptm"] = pair_chains_iptm
 
             # Aggregated PAE summaries (complex, interface, per chain pair)
-            _, frame_mask = compute_frame_pred(
-                x_pred, feats["frames_idx"], feats, multiplicity, inference=True
-            )
             complex_pae, complex_ipae, pair_chains_pae = compute_pae_summaries(
                 out_dict["pae"], feats, multiplicity, frame_mask=frame_mask
             )

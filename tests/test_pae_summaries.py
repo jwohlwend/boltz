@@ -123,3 +123,32 @@ def test_frame_mask_without_padding_matches_plain_mean():
     assert torch.isclose(a[0], off_diag.mean())
     assert torch.isclose(a[0], b[0])
     assert not math.isnan(a[0].item())
+
+
+def test_compute_ptms_accepts_precomputed_frame_mask():
+    """Passing the frame mask must give the same result as recomputing it."""
+    from boltz.model.layers.confidence_utils import compute_frame_pred, compute_ptms
+
+    torch.manual_seed(0)
+    n_tokens, n_atoms = 6, 18  # 3 atoms per token, two protein chains
+    feats = {
+        "asym_id": torch.tensor([[0, 0, 0, 1, 1, 1]]),
+        "token_pad_mask": torch.ones(1, n_tokens),
+        "atom_pad_mask": torch.ones(1, n_atoms),
+        "mol_type": torch.zeros(1, n_tokens, dtype=torch.long),
+        "atom_to_token": torch.repeat_interleave(torch.eye(n_tokens), 3, dim=0)[None],
+        "frames_idx": torch.arange(n_atoms).reshape(1, n_tokens, 3),
+    }
+    coords = torch.randn(1, n_atoms, 3)
+    logits = torch.randn(1, n_tokens, n_tokens, 64)
+
+    _, frame_mask = compute_frame_pred(
+        coords, feats["frames_idx"], feats, 1, inference=True
+    )
+    ref = compute_ptms(logits, coords, feats, 1)
+    out = compute_ptms(logits, coords, feats, 1, frame_mask=frame_mask)
+    for a, b in zip(ref[:4], out[:4]):
+        assert torch.allclose(a, b)
+    for c1 in ref[4]:
+        for c2 in ref[4][c1]:
+            assert torch.allclose(ref[4][c1][c2], out[4][c1][c2])

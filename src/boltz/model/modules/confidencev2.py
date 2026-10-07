@@ -480,9 +480,13 @@ class ConfidenceHeads(nn.Module):
         out_dict["pae_logits"] = pae_logits
         out_dict["pae"] = compute_aggregated_metric(pae_logits, end=32)
 
+        frame_mask = None
         try:
+            _, frame_mask = compute_frame_pred(
+                x_pred, feats["frames_idx"], feats, multiplicity, inference=True
+            )
             ptm, iptm, ligand_iptm, protein_iptm, pair_chains_iptm = compute_ptms(
-                pae_logits, x_pred, feats, multiplicity
+                pae_logits, x_pred, feats, multiplicity, frame_mask=frame_mask
             )
             out_dict["ptm"] = ptm
             out_dict["iptm"] = iptm
@@ -497,22 +501,14 @@ class ConfidenceHeads(nn.Module):
             out_dict["protein_iptm"] = torch.zeros_like(complex_plddt)
             out_dict["pair_chains_iptm"] = torch.zeros_like(complex_plddt)
 
-        # Compute the aggregated PAE summaries (complex, interface, per chain pair)
-        try:
-            _, frame_mask = compute_frame_pred(
-                x_pred, feats["frames_idx"], feats, multiplicity, inference=True
-            )
-            complex_pae, complex_ipae, pair_chains_pae = compute_pae_summaries(
-                out_dict["pae"], feats, multiplicity, frame_mask=frame_mask
-            )
-            out_dict["complex_pae"] = complex_pae
-            out_dict["complex_ipae"] = complex_ipae
-            out_dict["pair_chains_pae"] = pair_chains_pae
-        except Exception as e:
-            print(f"Error in compute_pae_summaries: {e}")
-            nan = torch.full_like(complex_plddt, float("nan"))
-            out_dict["complex_pae"] = nan
-            out_dict["complex_ipae"] = nan
-            out_dict["pair_chains_pae"] = {}
+        # Aggregated PAE summaries (complex, interface, per chain pair). Reuses
+        # the frame mask computed for pTM; falls back to the padding mask only
+        # if frame construction failed above.
+        complex_pae, complex_ipae, pair_chains_pae = compute_pae_summaries(
+            out_dict["pae"], feats, multiplicity, frame_mask=frame_mask
+        )
+        out_dict["complex_pae"] = complex_pae
+        out_dict["complex_ipae"] = complex_ipae
+        out_dict["pair_chains_pae"] = pair_chains_pae
 
         return out_dict
