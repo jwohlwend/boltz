@@ -371,7 +371,8 @@ class TestSkipBadInputsClickOption:
     def test_option_exists_and_defaults_false(self):
         for param in predict.params:
             if param.name == "skip_bad_inputs":
-                assert param.default is False
+                # click>=8.3 reports an UNSET sentinel for param.default.
+                assert param.get_default(click.Context(predict)) is False
                 assert param.is_flag
                 return
         pytest.fail("skip_bad_inputs parameter not found on predict command")
