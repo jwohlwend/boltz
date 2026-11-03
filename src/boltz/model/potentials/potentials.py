@@ -162,7 +162,8 @@ class Potential(ABC):
             dSoftmax = (
                 dEnergy
                 * softmax_energy
-                * (1 + parameters["union_lambda"] * (energy - f[..., union_index]))
+                # d(sum(w * E))/dE = w * (1 - lambda * (E - sum(w * E))).
+                * (1 - parameters["union_lambda"] * (energy - f[..., union_index]))
             )
             prod = dSoftmax.tile(grad_value.shape[-3]).unsqueeze(
                 -1
