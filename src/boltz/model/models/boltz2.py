@@ -33,9 +33,9 @@ from boltz.model.modules.trunkv2 import (
     TemplateModule,
     TemplateV2Module,
 )
+from boltz.model.modules.utils import autocast_device_type
 from boltz.model.optim.ema import EMA
 from boltz.model.optim.scheduler import AlphaFoldLRScheduler
-from boltz.model.modules.utils import autocast_device_type
 
 
 class Boltz2(LightningModule):
@@ -408,7 +408,58 @@ class Boltz2(LightningModule):
         diffusion_samples: int = 1,
         max_parallel_samples: Optional[int] = None,
         run_confidence_sequentially: bool = False,
+        affinity_from_input_structure: bool = False,
     ) -> dict[str, Tensor]:
+        """Run prediction, optionally scoring one supplied, resolved holo structure.
+
+        ``affinity_from_input_structure`` is an opt-in evaluation-only path for
+        affinity checkpoints. It retains the trunk but bypasses diffusion and
+        confidence ranking. ``feats['coords']`` must contain one fully resolved
+        complex, in the same atom order as the remaining features, with shape
+        ``[1, 1, atoms, 3]`` and dtype float32, as in the released featurizer.
+        No coordinates are optimized or generated.
+        """
+        if affinity_from_input_structure:
+            if self.training or not self.affinity_prediction:
+                msg = "Input-structure affinity requires an affinity model in eval mode."
+                raise ValueError(msg)
+            if not self.run_trunk_and_structure:
+                msg = "Input-structure affinity requires the trunk to be enabled."
+                raise ValueError(msg)
+            coords = feats.get("coords")
+            if (
+                not isinstance(coords, Tensor)
+                or coords.ndim != 4
+                or coords.shape[:2] != (1, 1)
+                or coords.shape[-1] != 3
+                or coords.dtype != torch.float32
+            ):
+                msg = "Input coordinates must be float32 with shape [1, 1, atoms, 3]."
+                raise ValueError(msg)
+            atom_mask = feats["atom_pad_mask"].bool()
+            resolved = feats["atom_resolved_mask"].bool()
+            if (
+                atom_mask.shape != coords[:, 0, :, 0].shape
+                or resolved.shape != atom_mask.shape
+                or not atom_mask.any()
+                or not torch.isfinite(coords).all()
+                or (atom_mask & ~resolved).any()
+            ):
+                msg = "Input structure must have finite, resolved coordinates for every real atom."
+                raise ValueError(msg)
+            token_mask = feats["token_pad_mask"].bool()
+            ligand_mask = feats["affinity_token_mask"].bool() & token_mask
+            protein_mask = (feats["mol_type"] == const.chain_type_ids["PROTEIN"]) & token_mask
+            if (
+                not ligand_mask.any()
+                or not protein_mask.any()
+                or (token_mask & ~(protein_mask | ligand_mask)).any()
+                or (ligand_mask & (feats["mol_type"] != const.chain_type_ids["NONPOLYMER"])).any()
+                or feats["asym_id"][ligand_mask].unique().numel() != 1
+            ):
+                msg = "Input-structure affinity supports protein and one small-molecule ligand only."
+                raise ValueError(msg)
+
         with torch.set_grad_enabled(
             self.training and self.structure_prediction_training
         ):
@@ -495,11 +546,14 @@ class Boltz2(LightningModule):
                 "s": s,
                 "z": z,
             }
+            if affinity_from_input_structure:
+                dict_out["sample_atom_coords"] = feats["coords"][:, 0].detach()
 
             if (
                 self.run_trunk_and_structure
                 and ((not self.training) or self.confidence_prediction)
                 and (not self.skip_run_structure)
+                and (not affinity_from_input_structure)
             ):
                 if self.checkpoint_diffusion_conditioning and self.training:
                     # TODO decide whether this should be with bf16 or not
@@ -583,7 +637,7 @@ class Boltz2(LightningModule):
                 feats["coords"] = feats["coords"].squeeze(1)
                 assert len(feats["coords"].shape) == 3
 
-        if self.confidence_prediction:
+        if self.confidence_prediction and not affinity_from_input_structure:
             dict_out.update(
                 self.confidence_module(
                     s_inputs=s_inputs.detach(),
@@ -619,11 +673,14 @@ class Boltz2(LightningModule):
             )
             z_affinity = z * cross_pair_mask[None, :, :, None]
 
-            argsort = torch.argsort(dict_out["iptm"], descending=True)
-            best_idx = argsort[0].item()
-            coords_affinity = dict_out["sample_atom_coords"].detach()[best_idx][
-                None, None
-            ]
+            if affinity_from_input_structure:
+                coords_affinity = feats["coords"].detach()
+            else:
+                argsort = torch.argsort(dict_out["iptm"], descending=True)
+                best_idx = argsort[0].item()
+                coords_affinity = dict_out["sample_atom_coords"].detach()[best_idx][
+                    None, None
+                ]
             s_inputs = self.input_embedder(feats, affinity=True)
 
             with torch.autocast(autocast_device_type(s.device.type), enabled=False):
