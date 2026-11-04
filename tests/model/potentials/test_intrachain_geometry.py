@@ -9,6 +9,7 @@ import torch
 from boltz.data import const
 from boltz.data.feature.featurizerv2 import process_residue_constraint_features
 from boltz.data.types import (
+    AtomV2,
     BondV2,
     Chain,
     ChiralAtomConstraint,
@@ -17,6 +18,7 @@ from boltz.data.types import (
     PlanarRing6Constraint,
     RDKitBoundsConstraint,
     ResidueConstraints,
+    Residue,
     StereoBondConstraint,
 )
 from boltz.model.potentials.potentials import (
@@ -37,6 +39,7 @@ def constraint_input(bonds):
     chains["asym_id"] = [2, 5]
     chains["atom_idx"] = [0, 4]
     chains["atom_num"] = [4, 4]
+    chains["mol_type"] = const.chain_type_ids["NONPOLYMER"]
     constraints = ResidueConstraints(
         rdkit_bounds_constraints=np.array(
             [
@@ -86,6 +89,38 @@ def test_missing_residue_constraints_are_empty():
     features = process_residue_constraint_features(data)
     assert features["intrachain_covalent_bound_indices"].shape == (0,)
     assert features["rdkit_bounds_index"].shape == (2, 0)
+
+
+@pytest.mark.parametrize("gap,missing", [(False, False), (True, False), (False, True)])
+def test_adjacent_peptide_bonds_are_protected_without_bridging_missing_residues(
+    gap, missing
+):
+    data = constraint_input([(2, 2, 0, 1, 0, 3, COVALENT)])
+    data.residue_constraints = None
+    data.structure.chains[0]["mol_type"] = const.chain_type_ids["PROTEIN"]
+    data.structure.chains[0]["res_idx"] = 0
+    data.structure.chains[0]["res_num"] = 2
+    residues = np.zeros(2, dtype=Residue)
+    residues["res_idx"] = [0, 2 if gap else 1]
+    residues["atom_idx"] = [0, 2]
+    residues["atom_num"] = 2
+    data.structure.residues = residues
+    atoms = np.zeros(8, dtype=AtomV2)
+    atoms["name"][:4] = ["C", "O", "N", "CA"]
+    atoms["is_present"] = True
+    if missing:
+        atoms[2]["is_present"] = False
+    data.structure.atoms = atoms
+    feats = process_residue_constraint_features(data)
+    if gap or missing:
+        assert feats["rdkit_bounds_index"].shape == (2, 0)
+    else:
+        assert feats["rdkit_bounds_index"].T.tolist() == [[0, 2]]
+        assert feats["intrachain_covalent_bound_indices"].tolist() == [0]
+        assert feats["rdkit_bounds_bond_mask"].tolist() == [True]
+        assert (
+            1.2 < feats["rdkit_lower_bounds"][0] < feats["rdkit_upper_bounds"][0] < 1.5
+        )
 
 
 def potential_features():

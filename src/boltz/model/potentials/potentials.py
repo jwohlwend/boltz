@@ -437,9 +437,15 @@ class IntraChainGeometryPotential(PoseBustersPotential):
 
         indices = indices[0]
         selected = dict(feats)
-        selected["rdkit_bounds_index"] = feats["rdkit_bounds_index"].index_select(-1, indices)
-        for name in ("rdkit_lower_bounds", "rdkit_upper_bounds",
-                     "rdkit_bounds_bond_mask", "rdkit_bounds_angle_mask"):
+        selected["rdkit_bounds_index"] = feats["rdkit_bounds_index"].index_select(
+            -1, indices
+        )
+        for name in (
+            "rdkit_lower_bounds",
+            "rdkit_upper_bounds",
+            "rdkit_bounds_bond_mask",
+            "rdkit_bounds_angle_mask",
+        ):
             selected[name] = feats[name].index_select(-1, indices)
         return super().compute_args(selected, parameters)
 
@@ -455,7 +461,9 @@ class ConnectionsPotential(FlatBottomPotential, DistancePotential):
             lower_bounds = feats["connected_atom_lower_bounds"][0]
         if "connected_atom_upper_bounds" in feats:
             specified_upper = feats["connected_atom_upper_bounds"][0]
-            upper_bounds = torch.where(specified_upper > 0, specified_upper, upper_bounds)
+            upper_bounds = torch.where(
+                specified_upper > 0, specified_upper, upper_bounds
+            )
         k = torch.ones_like(upper_bounds)
 
         return pair_index, (k, lower_bounds, upper_bounds), None, None, None

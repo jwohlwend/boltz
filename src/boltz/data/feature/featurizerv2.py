@@ -8,7 +8,8 @@ import numpy.typing as npt
 import rdkit.Chem.Descriptors
 import torch
 from numba import types
-from rdkit.Chem import GetPeriodicTable, Mol
+from rdkit.Chem import GetPeriodicTable, Mol, MolFromSmiles
+from rdkit.Chem.rdDistGeom import GetMoleculeBoundsMatrix
 from scipy.spatial.distance import cdist
 from torch import Tensor, from_numpy
 from torch.nn.functional import one_hot
@@ -2018,6 +2019,61 @@ def process_residue_constraint_features(data: Tokenized) -> dict[str, Tensor]:
                 (bound_atoms >= start) & (bound_atoms < end)
             ).all(axis=0)
 
+    # CCD bounds stop at residue boundaries. Protect the peptide links as
+    # well, otherwise closing an internal link can stretch the neighboring
+    # C--N bond instead of an intra-residue bond.
+    peptide_pairs = []
+    for chain in data.structure.chains:
+        if (
+            chain["asym_id"] not in linked_chains
+            or chain["mol_type"] != const.chain_type_ids["PROTEIN"]
+        ):
+            continue
+        residues = data.structure.residues[
+            chain["res_idx"] : chain["res_idx"] + chain["res_num"]
+        ]
+        for left, right in zip(residues[:-1], residues[1:]):
+            if right["res_idx"] != left["res_idx"] + 1:
+                continue
+            endpoints = []
+            for residue, name in ((left, "C"), (right, "N")):
+                start = residue["atom_idx"]
+                atoms = data.structure.atoms[start : start + residue["atom_num"]]
+                matches = np.flatnonzero((atoms["name"] == name) & atoms["is_present"])
+                if len(matches) == 1:
+                    endpoints.append(int(start + matches[0]))
+            if len(endpoints) == 2:
+                peptide_pairs.append(endpoints)
+    if peptide_pairs:
+        # An amide reference supplies the existing RDKit bond-range prior.
+        # The usual bond_buffer is applied by PoseBustersPotential.
+        amide_bounds = GetMoleculeBoundsMatrix(MolFromSmiles("CC(=O)NC"))
+        count = len(peptide_pairs)
+        rdkit_bounds_index = torch.cat(
+            (rdkit_bounds_index, torch.tensor(peptide_pairs).T), dim=1
+        )
+        rdkit_lower_bounds = torch.cat(
+            (
+                rdkit_lower_bounds,
+                torch.full((count,), amide_bounds[3, 1], dtype=torch.float),
+            )
+        )
+        rdkit_upper_bounds = torch.cat(
+            (
+                rdkit_upper_bounds,
+                torch.full((count,), amide_bounds[1, 3], dtype=torch.float),
+            )
+        )
+        rdkit_bounds_bond_mask = torch.cat(
+            (rdkit_bounds_bond_mask, torch.ones(count, dtype=torch.bool))
+        )
+        rdkit_bounds_angle_mask = torch.cat(
+            (rdkit_bounds_angle_mask, torch.zeros(count, dtype=torch.bool))
+        )
+        intrachain_covalent_bounds_mask = np.concatenate(
+            (intrachain_covalent_bounds_mask, np.ones(count, dtype=bool))
+        )
+
     return {
         "rdkit_bounds_index": rdkit_bounds_index,
         "intrachain_covalent_bound_indices": torch.from_numpy(
@@ -2055,7 +2111,9 @@ def process_chain_feature_constraints(
                 # chain. Ordinary residue-internal bonds use RDKit bounds.
                 if connection["type"] != const.bond_type_ids["COVALENT"]:
                     continue
-                pair = tuple(sorted((int(connection["atom_1"]), int(connection["atom_2"]))))
+                pair = tuple(
+                    sorted((int(connection["atom_1"]), int(connection["atom_2"])))
+                )
                 if pair[0] == pair[1]:
                     raise ValueError("A covalent bond must connect two distinct atoms.")
                 if pair in intra_chain_pairs:
@@ -2080,7 +2138,9 @@ def process_chain_feature_constraints(
                             stacklevel=2,
                         )
             else:
-                connected_chain_index.append([connection["chain_1"], connection["chain_2"]])
+                connected_chain_index.append(
+                    [connection["chain_1"], connection["chain_2"]]
+                )
             connected_atom_index.append([connection["atom_1"], connection["atom_2"]])
             lower_bounds.append(lower)
             upper_bounds.append(upper)
