@@ -1,4 +1,5 @@
 import math
+import warnings
 from typing import Optional
 from collections import deque
 import numba
@@ -7,7 +8,7 @@ import numpy.typing as npt
 import rdkit.Chem.Descriptors
 import torch
 from numba import types
-from rdkit.Chem import Mol
+from rdkit.Chem import GetPeriodicTable, Mol
 from scipy.spatial.distance import cdist
 from torch import Tensor, from_numpy
 from torch.nn.functional import one_hot
@@ -2038,12 +2039,17 @@ def process_residue_constraint_features(data: Tokenized) -> dict[str, Tensor]:
     }
 
 
-def process_chain_feature_constraints(data: Tokenized) -> dict[str, Tensor]:
+def process_chain_feature_constraints(
+    data: Tokenized, ref_element: Optional[Tensor] = None
+) -> dict[str, Tensor]:
     structure = data.structure
+    lower_bounds, upper_bounds = [], []
+    elements = ref_element.argmax(-1).numpy() if ref_element is not None else None
     if structure.bonds.shape[0] > 0:
         connected_chain_index, connected_atom_index = [], []
         intra_chain_pairs = set()
         for connection in structure.bonds:
+            lower, upper = 0.0, 0.0
             if connection["chain_1"] == connection["chain_2"]:
                 # Explicit YAML covalent links may close a ring within one
                 # chain. Ordinary residue-internal bonds use RDKit bounds.
@@ -2055,9 +2061,29 @@ def process_chain_feature_constraints(data: Tokenized) -> dict[str, Tensor]:
                 if pair in intra_chain_pairs:
                     continue
                 intra_chain_pairs.add(pair)
+                if elements is not None:
+                    atom_elements = elements[list(pair)]
+                    if (atom_elements > 0).all() and (atom_elements <= 118).all():
+                        radius_sum = sum(
+                            GetPeriodicTable().GetRcovalent(int(element))
+                            for element in atom_elements
+                        )
+                        if np.isfinite(radius_sum) and radius_sum > 0:
+                            # YAML supplies endpoints, not a bond order. Use a
+                            # buffered element-based range rather than only
+                            # attracting atoms below a universal upper bound.
+                            lower, upper = radius_sum * 0.875, radius_sum * 1.125
+                    if upper == 0.0:
+                        warnings.warn(
+                            f"Unknown element in intra-chain covalent bond {pair}; "
+                            "using the legacy connection upper bound only.",
+                            stacklevel=2,
+                        )
             else:
                 connected_chain_index.append([connection["chain_1"], connection["chain_2"]])
             connected_atom_index.append([connection["atom_1"], connection["atom_2"]])
+            lower_bounds.append(lower)
+            upper_bounds.append(upper)
         if len(connected_chain_index) > 0:
             connected_chain_index = torch.tensor(
                 connected_chain_index, dtype=torch.long
@@ -2088,6 +2114,8 @@ def process_chain_feature_constraints(data: Tokenized) -> dict[str, Tensor]:
     return {
         "connected_chain_index": connected_chain_index,
         "connected_atom_index": connected_atom_index,
+        "connected_atom_lower_bounds": torch.tensor(lower_bounds, dtype=torch.float),
+        "connected_atom_upper_bounds": torch.tensor(upper_bounds, dtype=torch.float),
         "symmetric_chain_index": symmetric_chain_index,
     }
 
@@ -2368,7 +2396,9 @@ class Boltz2Featurizer:
         contact_constraint_features = {}
         if compute_constraint_features:
             residue_constraint_features = process_residue_constraint_features(data)
-            chain_constraint_features = process_chain_feature_constraints(data)
+            chain_constraint_features = process_chain_feature_constraints(
+                data, atom_features["ref_element"]
+            )
             contact_constraint_features = process_contact_feature_constraints(
                 data=data,
                 inference_pocket_constraints=inference_pocket_constraints if inference_pocket_constraints else [],

@@ -309,7 +309,8 @@ class DistancePotential(Potential):
         r_ij_norm = torch.linalg.norm(r_ij, dim=-1)
         # Match the zero subgradient of torch.linalg.norm for coincident
         # atoms instead of producing NaNs, including for inactive bounds.
-        r_hat_ij = r_ij / r_ij_norm.clamp_min(1e-8).unsqueeze(-1)
+        denominator = r_ij_norm.masked_fill(r_ij_norm == 0, 1.0)
+        r_hat_ij = r_ij / denominator.unsqueeze(-1)
 
         if not compute_gradient:
             return r_ij_norm
@@ -450,6 +451,11 @@ class ConnectionsPotential(FlatBottomPotential, DistancePotential):
         upper_bounds = torch.full(
             (pair_index.shape[1],), parameters["buffer"], device=pair_index.device
         )
+        if "connected_atom_lower_bounds" in feats:
+            lower_bounds = feats["connected_atom_lower_bounds"][0]
+        if "connected_atom_upper_bounds" in feats:
+            specified_upper = feats["connected_atom_upper_bounds"][0]
+            upper_bounds = torch.where(specified_upper > 0, specified_upper, upper_bounds)
         k = torch.ones_like(upper_bounds)
 
         return pair_index, (k, lower_bounds, upper_bounds), None, None, None
