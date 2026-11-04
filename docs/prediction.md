@@ -96,6 +96,8 @@ The `cyclic` flag indicates whether a polymer chain (not ligands) is cyclic.
 ### Templates
 `templates` is optional and allows specification of structural templates for protein chains. At minimum, provide the path to a CIF or PDB file.
 
+If a template has no polymer sequence metadata (for example, a PDB without SEQRES), Boltz warns and uses its observed residues as the template sequence. Missing residues are not reconstructed from author residue numbering. Templates with an existing full sequence retain that sequence and its unresolved positions.
+
 If you wish to explicitly define which of the chains in your YAML should be templated using this file, you can use the `chain_id` entry to specify them. If providing a PDB file, chain ids will be incrementally assigned to each subchain in a parent PDB chain resulting in template chain ids of A1, A2, B1, etc for PDB chains A and B. Make sure to look at the structure of the template PDB file to determine the corresponding value of `template_id` to provide. Whether a set of ids is provided or not, Boltz will find the best matching chains from the provided template. If you wish to explicitly define the mapping yourself, you may provide the corresponding `template_id`. 
 
 For any template you provide, you can also specify a `force` flag which will use a potential to enforce that the backbone does not deviate excessively from the template during the prediction. When using `force` one must specify also the `threshold` field which controls the distance (in Angstroms) that the prediction can deviate from the template. 

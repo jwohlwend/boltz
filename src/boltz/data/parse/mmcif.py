@@ -1,4 +1,5 @@
 import contextlib
+import warnings
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from typing import Optional
@@ -567,6 +568,15 @@ def parse_polymer(  # noqa: C901, PLR0915, PLR0912
         If the alignment fails.
 
     """
+    if not sequence:
+        warnings.warn(
+            f"No polymer sequence is available for chain {chain_id}; using observed "
+            "residues only. Missing residues cannot be inferred from this template.",
+            UserWarning,
+            stacklevel=2,
+        )
+        sequence = polymer.extract_sequence()
+
     # Ignore microheterogeneities (pick first)
     sequence = [gemmi.Entity.first_mon(item) for item in sequence]
 
