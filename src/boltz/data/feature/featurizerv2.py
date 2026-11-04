@@ -2021,18 +2021,24 @@ def process_chain_feature_constraints(data: Tokenized) -> dict[str, Tensor]:
         connected_chain_index, connected_atom_index = [], []
         for connection in structure.bonds:
             if connection["chain_1"] == connection["chain_2"]:
-                continue
-            connected_chain_index.append([connection["chain_1"], connection["chain_2"]])
+                # Explicit YAML covalent links may close a ring within one
+                # chain. Ordinary residue-internal bonds use RDKit bounds.
+                if connection["type"] != const.bond_type_ids["COVALENT"]:
+                    continue
+            else:
+                connected_chain_index.append([connection["chain_1"], connection["chain_2"]])
             connected_atom_index.append([connection["atom_1"], connection["atom_2"]])
         if len(connected_chain_index) > 0:
             connected_chain_index = torch.tensor(
                 connected_chain_index, dtype=torch.long
             ).T
+        else:
+            connected_chain_index = torch.empty((2, 0), dtype=torch.long)
+        if len(connected_atom_index) > 0:
             connected_atom_index = torch.tensor(
                 connected_atom_index, dtype=torch.long
             ).T
         else:
-            connected_chain_index = torch.empty((2, 0), dtype=torch.long)
             connected_atom_index = torch.empty((2, 0), dtype=torch.long)
     else:
         connected_chain_index = torch.empty((2, 0), dtype=torch.long)
