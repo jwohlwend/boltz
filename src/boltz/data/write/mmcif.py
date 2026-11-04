@@ -3,6 +3,7 @@ import re
 from collections.abc import Iterator
 from typing import Optional
 
+import gemmi
 import ihm
 import modelcif
 from modelcif import Assembly, AsymUnit, Entity, System, dumper
@@ -12,6 +13,99 @@ from torch import Tensor
 
 from boltz.data import const
 from boltz.data.types import Structure
+
+
+def _add_covalent_connections(text: str, structure: Structure, boltz2: bool) -> str:
+    """Preserve explicit bond endpoints as mmCIF covalent connections."""
+    links = (
+        [b for b in structure.bonds if b["type"] == const.bond_type_ids["COVALENT"]]
+        if boltz2
+        else list(structure.connections)
+    )
+    links = [
+        b
+        for b in links
+        if structure.atoms[b["atom_1"]]["is_present"]
+        and structure.atoms[b["atom_2"]]["is_present"]
+    ]
+    if not links:
+        return text
+    document = gemmi.cif.read_string(text)
+    block = document.sole_block()
+    model = gemmi.make_structure_from_block(block)
+
+    def address_key(address):
+        return (
+            address.chain_name,
+            address.res_id.seqid.num,
+            address.res_id.seqid.icode,
+            address.atom_name,
+        )
+
+    existing_pairs = {
+        frozenset((address_key(c.partner1), address_key(c.partner2)))
+        for c in model.connections
+        if c.type == gemmi.ConnectionType.Covale
+    }
+    existing_ids = {c.name for c in model.connections}
+    model.connections.clear()
+    for link in links:
+        endpoints = []
+        for side in (1, 2):
+            chain = structure.chains[link[f"chain_{side}"]]
+            residue = structure.residues[link[f"res_{side}"]]
+            atom = structure.atoms[link[f"atom_{side}"]]
+            name = (
+                str(atom["name"])
+                if boltz2
+                else "".join(chr(int(c) + 32) for c in atom["name"] if c != 0)
+            )
+            endpoints.append(
+                gemmi.AtomAddress(
+                    str(chain["name"]),
+                    gemmi.SeqId(int(residue["res_idx"]) + 1, " "),
+                    str(residue["name"]),
+                    name,
+                )
+            )
+        pair = frozenset(address_key(a) for a in endpoints)
+        if pair in existing_pairs:
+            continue
+        existing_pairs.add(pair)
+        index = len(existing_ids) + 1
+        while f"boltz_bond_{index}" in existing_ids:
+            index += 1
+        connection = gemmi.Connection()
+        connection.name = f"boltz_bond_{index}"
+        existing_ids.add(connection.name)
+        connection.type = gemmi.ConnectionType.Covale
+        connection.asu = gemmi.Asu.Same
+        connection.partner1, connection.partner2 = endpoints
+        xyz1 = structure.atoms[link["atom_1"]]["coords"]
+        xyz2 = structure.atoms[link["atom_2"]]["coords"]
+        connection.reported_distance = float(
+            sum((float(a) - float(b)) ** 2 for a, b in zip(xyz1, xyz2)) ** 0.5
+        )
+        model.connections.append(connection)
+    if not model.connections:
+        return text
+    generated = model.make_mmcif_block(gemmi.MmcifOutputGroups(False, conn=True))
+    for category in ("_struct_conn.", "_struct_conn_type."):
+        old = block.get_mmcif_category(category, raw=True)
+        new = generated.get_mmcif_category(category, raw=True)
+        if not new:
+            continue
+        old_count = len(next(iter(old.values()), []))
+        ids = set(old.get("id", []))
+        keep = [i for i, name in enumerate(new["id"]) if name not in ids]
+        new_count = len(new["id"])
+        merged = {
+            key: old.get(key, ["?"] * old_count)
+            + [new.get(key, ["?"] * new_count)[i] for i in keep]
+            for key in dict.fromkeys([*old, *new])
+        }
+        block.set_mmcif_category(category, merged, raw=True)
+    return document.as_string()
 
 
 def to_mmcif(
@@ -303,4 +397,4 @@ def to_mmcif(
 
     fh = io.StringIO()
     dumper.write(fh, [system])
-    return fh.getvalue()
+    return _add_covalent_connections(fh.getvalue(), structure, boltz2)
