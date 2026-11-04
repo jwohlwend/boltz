@@ -1,4 +1,4 @@
-"""Explicit intra-chain bonds must reach guidance and survive mmCIF output."""
+"""Explicit intra-chain bonds must reach guidance without duplicated forces."""
 
 from types import SimpleNamespace
 
@@ -73,3 +73,30 @@ def test_same_chain_connection_energy_and_gradient(distance):
     if distance > 2.0:
         after = potential.compute(xyz.detach() - 0.1 * actual, feats, parameters)
         assert (after < energy).all()
+
+
+def test_repeated_and_reversed_internal_links_have_one_force():
+    chains = np.zeros(1, dtype=Chain)
+    rows = [
+        (0, 0, 0, 1, 2, 8, COVALENT),
+        (0, 0, 1, 0, 8, 2, COVALENT),
+        (0, 0, 0, 1, 2, 8, COVALENT),
+    ]
+    data = SimpleNamespace(
+        structure=SimpleNamespace(chains=chains, bonds=np.array(rows, dtype=BondV2))
+    )
+    before = data.structure.bonds.copy()
+    features = process_chain_feature_constraints(data)
+    assert features["connected_atom_index"].T.tolist() == [[2, 8]]
+    np.testing.assert_array_equal(data.structure.bonds, before)
+
+
+def test_self_bond_has_clear_error():
+    data = SimpleNamespace(
+        structure=SimpleNamespace(
+            chains=np.zeros(1, dtype=Chain),
+            bonds=np.array([(0, 0, 0, 0, 2, 2, COVALENT)], dtype=BondV2),
+        )
+    )
+    with pytest.raises(ValueError, match="two distinct atoms"):
+        process_chain_feature_constraints(data)

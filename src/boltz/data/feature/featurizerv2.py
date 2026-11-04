@@ -1997,8 +1997,31 @@ def process_residue_constraint_features(data: Tokenized) -> dict[str, Tensor]:
         planar_ring_5_index = torch.empty((5, 0), dtype=torch.long)
         planar_ring_6_index = torch.empty((6, 0), dtype=torch.long)
 
+    # A newly guided intra-chain link must not pull apart the modified
+    # residues in that chain. Select their existing geometry bounds for an
+    # additional guidance term; unrelated chains retain their usual weight.
+    intrachain_covalent_bounds_mask = np.zeros(rdkit_bounds_index.shape[1], dtype=bool)
+    bonds = data.structure.bonds
+    linked_chains = np.unique(
+        bonds["chain_1"][
+            (bonds["chain_1"] == bonds["chain_2"])
+            & (bonds["type"] == const.bond_type_ids["COVALENT"])
+        ]
+    )
+    bound_atoms = rdkit_bounds_index.numpy()
+    for chain in data.structure.chains:
+        if chain["asym_id"] in linked_chains:
+            start = chain["atom_idx"]
+            end = start + chain["atom_num"]
+            intrachain_covalent_bounds_mask |= (
+                (bound_atoms >= start) & (bound_atoms < end)
+            ).all(axis=0)
+
     return {
         "rdkit_bounds_index": rdkit_bounds_index,
+        "intrachain_covalent_bound_indices": torch.from_numpy(
+            np.flatnonzero(intrachain_covalent_bounds_mask)
+        ),
         "rdkit_bounds_bond_mask": rdkit_bounds_bond_mask,
         "rdkit_bounds_angle_mask": rdkit_bounds_angle_mask,
         "rdkit_upper_bounds": rdkit_upper_bounds,
@@ -2019,12 +2042,19 @@ def process_chain_feature_constraints(data: Tokenized) -> dict[str, Tensor]:
     structure = data.structure
     if structure.bonds.shape[0] > 0:
         connected_chain_index, connected_atom_index = [], []
+        intra_chain_pairs = set()
         for connection in structure.bonds:
             if connection["chain_1"] == connection["chain_2"]:
                 # Explicit YAML covalent links may close a ring within one
                 # chain. Ordinary residue-internal bonds use RDKit bounds.
                 if connection["type"] != const.bond_type_ids["COVALENT"]:
                     continue
+                pair = tuple(sorted((int(connection["atom_1"]), int(connection["atom_2"]))))
+                if pair[0] == pair[1]:
+                    raise ValueError("A covalent bond must connect two distinct atoms.")
+                if pair in intra_chain_pairs:
+                    continue
+                intra_chain_pairs.add(pair)
             else:
                 connected_chain_index.append([connection["chain_1"], connection["chain_2"]])
             connected_atom_index.append([connection["atom_1"], connection["atom_2"]])
