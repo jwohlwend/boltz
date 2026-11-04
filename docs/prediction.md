@@ -195,6 +195,8 @@ out_dir/
 ```
 The `predictions` folder contains a unique folder for each input file. The input folders contain `diffusion_samples` predictions saved in the output_format ordered by confidence score as well as additional files containing the predictions of the confidence model and affinity model. The `processed` folder contains the processed input files that the model uses during inference.
 
+PDB output has a single alphanumeric character for each chain ID. Valid single-character IDs are preserved; longer or unsupported labels receive unique aliases recorded as `REMARK 950 CHAIN_ID <alias> <JSON-quoted original label>`. More than 62 chains require mmCIF, which retains the full labels. PDB coordinates have three decimal places, while mmCIF coordinates have five. Compare exports of the same predicted coordinates when checking formats: independent diffusion runs can produce different structures even for the same sequence.
+
 Each output folder includes a confidence `.json` file with aggregated confidence scores for that sample. Its structure is:
 ```yaml
 {

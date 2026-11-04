@@ -1,4 +1,6 @@
+import json
 import re
+import string
 from typing import Optional
 
 from rdkit import Chem
@@ -26,7 +28,21 @@ def to_pdb(
         the output PDB file
 
     """
-    pdb_lines = []
+    # PDB has one alphanumeric chain-ID column. Longer labels otherwise shift
+    # residue numbers and every coordinate column; truncation can merge chains.
+    names = [str(chain["name"]) for chain in structure.chains]
+    alphabet = string.ascii_uppercase + string.ascii_lowercase + string.digits
+    if len(names) != len(set(names)) or len(names) > len(alphabet):
+        msg = "PDB requires unique chain IDs and supports at most 62 chains; use mmCIF."
+        raise ValueError(msg)
+    preserved = {name for name in names if len(name) == 1 and name in alphabet}
+    available = iter(c for c in alphabet if c not in preserved)
+    chain_ids = {name: name if name in preserved else next(available) for name in names}
+    pdb_lines = [
+        f"REMARK 950 CHAIN_ID {chain_ids[name]} {json.dumps(name, ensure_ascii=True)}"
+        for name in names
+        if chain_ids[name] != name
+    ]
 
     atom_index = 1
     atom_reindex_ter = []
@@ -46,7 +62,7 @@ def to_pdb(
     for chain in structure.chains:
         # We rename the chains in alphabetical order
         chain_idx = chain["asym_id"]
-        chain_tag = chain["name"]
+        chain_tag = chain_ids[str(chain["name"])]
 
         res_start = chain["res_idx"]
         res_end = chain["res_idx"] + chain["res_num"]
