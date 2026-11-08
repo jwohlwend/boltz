@@ -41,6 +41,7 @@ class Potential(ABC):
                 unpad_com_index.unsqueeze(-1).expand_as(unpad_coords),
                 unpad_coords,
                 "mean",
+                include_self=False,
             )
         else:
             com_index, atom_pad_mask = None, None
@@ -107,6 +108,7 @@ class Potential(ABC):
                 unpad_com_index.unsqueeze(-1).expand_as(unpad_coords),
                 unpad_coords,
                 "mean",
+                include_self=False,
             )
             com_counts = torch.bincount(com_index[atom_pad_mask])
         else:
@@ -193,7 +195,11 @@ class Potential(ABC):
             )
 
         if com_index is not None:
-            grad_atom = grad_atom[..., com_index, :]
+            grad_atom = (
+                grad_atom[..., com_index, :]
+                / com_counts[com_index].unsqueeze(-1)
+            )
+            grad_atom[..., ~atom_pad_mask, :] = 0.0
         elif ref_token_index is not None:
             grad_atom = grad_atom[..., ref_token_index, :]
 
