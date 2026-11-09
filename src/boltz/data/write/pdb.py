@@ -8,11 +8,11 @@ from boltz.data import const
 from boltz.data.types import Structure
 
 
-def to_pdb(
+def to_pdb(  # noqa: C901, PLR0912, PLR0915
     structure: Structure,
     plddts: Optional[Tensor] = None,
     boltz2: bool = False,
-) -> str:  # noqa: PLR0915
+) -> str:
     """Write a structure into a PDB file.
 
     Parameters
@@ -29,7 +29,7 @@ def to_pdb(
     pdb_lines = []
 
     atom_index = 1
-    atom_reindex_ter = []
+    atom_reindex_ter = {}
 
     # Load periodic table for element mapping
     periodic_table = Chem.GetPeriodicTable()
@@ -43,9 +43,8 @@ def to_pdb(
     ligand_index_offset = 0
 
     # Add all atom sites.
-    for chain in structure.chains:
+    for chain_idx, chain in enumerate(structure.chains):
         # We rename the chains in alphabetical order
-        chain_idx = chain["asym_id"]
         chain_tag = chain["name"]
 
         res_start = chain["res_idx"]
@@ -133,7 +132,7 @@ def to_pdb(
                     f"{element:>2}{charge:>2}"
                 )
                 pdb_lines.append(atom_line)
-                atom_reindex_ter.append(atom_index)
+                atom_reindex_ter[atom_start + i] = atom_index
                 atom_index += 1
 
             if record_type != "HETATM":
@@ -160,6 +159,11 @@ def to_pdb(
         atom1 = structure.atoms[bond["atom_1"]]
         atom2 = structure.atoms[bond["atom_2"]]
         if not atom1["is_present"] or not atom2["is_present"]:
+            continue
+        if (
+            bond["atom_1"] not in atom_reindex_ter
+            or bond["atom_2"] not in atom_reindex_ter
+        ):
             continue
         atom1_idx = atom_reindex_ter[bond["atom_1"]]
         atom2_idx = atom_reindex_ter[bond["atom_2"]]
