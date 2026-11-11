@@ -344,4 +344,13 @@ N[C@@H](Cc1ccc(O)cc1)C(=O)O
 
 ## Troubleshooting
 
+If any input fails during structure or affinity prediction (including a caught
+CUDA out-of-memory error), `boltz predict` exits nonzero after the current
+prediction phase. Successful outputs from that phase are kept. This also applies
+to a mixed batch of successful and failed inputs. Failure counts are summed
+across distributed ranks, so a failure on another worker is not silently ignored.
+A failed structure phase stops before affinity prediction; missing intermediate
+files are not passed to the affinity loader. Reduce the memory requirements or
+retry the failed inputs before continuing. A fully successful run still exits 0.
+
  - When running on old NVIDIA GPUs, you may encounter an error related to the `cuequivariance` library. In this case, you should run the model with the `--no_kernels` flag, which will disable the use of the `cuequivariance` library and allow the model to run without it. This may result in slightly lower performance, but it will allow you to run the model on older hardware.

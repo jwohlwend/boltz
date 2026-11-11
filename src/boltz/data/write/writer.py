@@ -14,6 +14,27 @@ from boltz.data.write.mmcif import to_mmcif
 from boltz.data.write.pdb import to_pdb
 
 
+class PredictionError(RuntimeError):
+    """One or more inputs failed during a prediction phase."""
+
+
+def _check_prediction_failures(
+    trainer: Trainer,
+    pl_module: LightningModule,
+    failed: int,
+) -> None:
+    """Fail every rank after all successful predictions have been written."""
+    count = torch.tensor(failed, dtype=torch.int64, device=pl_module.device)
+    count = int(trainer.strategy.reduce(count, reduce_op="sum").item())
+    print(f"Number of failed examples: {count}")  # noqa: T201
+    if count:
+        msg = (
+            f"{count} prediction(s) failed. Successful outputs were kept. "
+            "Fix or retry the failed inputs before continuing."
+        )
+        raise PredictionError(msg)
+
+
 class BoltzWriter(BasePredictionWriter):
     """Custom writer for predictions."""
 
@@ -58,7 +79,7 @@ class BoltzWriter(BasePredictionWriter):
     ) -> None:
         """Write the predictions to disk."""
         if prediction["exception"]:
-            self.failed += 1
+            self.failed += len(batch["record"])
             return
 
         # Get the records
@@ -259,12 +280,11 @@ class BoltzWriter(BasePredictionWriter):
 
     def on_predict_epoch_end(
         self,
-        trainer: Trainer,  # noqa: ARG002
-        pl_module: LightningModule,  # noqa: ARG002
+        trainer: Trainer,
+        pl_module: LightningModule,
     ) -> None:
-        """Print the number of failed examples."""
-        # Print number of failed examples
-        print(f"Number of failed examples: {self.failed}")  # noqa: T201
+        """Report failures across ranks and refuse an incomplete prediction."""
+        _check_prediction_failures(trainer, pl_module, self.failed)
 
 
 class BoltzAffinityWriter(BasePredictionWriter):
@@ -301,7 +321,7 @@ class BoltzAffinityWriter(BasePredictionWriter):
     ) -> None:
         """Write the predictions to disk."""
         if prediction["exception"]:
-            self.failed += 1
+            self.failed += len(batch["record"])
             return
         # Dump affinity summary
         affinity_summary = {}
@@ -335,9 +355,8 @@ class BoltzAffinityWriter(BasePredictionWriter):
 
     def on_predict_epoch_end(
         self,
-        trainer: Trainer,  # noqa: ARG002
-        pl_module: LightningModule,  # noqa: ARG002
+        trainer: Trainer,
+        pl_module: LightningModule,
     ) -> None:
-        """Print the number of failed examples."""
-        # Print number of failed examples
-        print(f"Number of failed examples: {self.failed}")  # noqa: T201
+        """Report failures across ranks and refuse an incomplete prediction."""
+        _check_prediction_failures(trainer, pl_module, self.failed)

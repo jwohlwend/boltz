@@ -29,7 +29,7 @@ from boltz.data.parse.csv import parse_csv
 from boltz.data.parse.fasta import parse_fasta
 from boltz.data.parse.yaml import parse_yaml
 from boltz.data.types import MSA, Manifest, Record
-from boltz.data.write.writer import BoltzAffinityWriter, BoltzWriter
+from boltz.data.write.writer import BoltzAffinityWriter, BoltzWriter, PredictionError
 from boltz.model.models.boltz1 import Boltz1
 from boltz.model.models.boltz2 import Boltz2
 
@@ -1326,11 +1326,14 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         model_module.eval()
 
         # Compute structure predictions
-        trainer.predict(
-            model_module,
-            datamodule=data_module,
-            return_predictions=False,
-        )
+        try:
+            trainer.predict(
+                model_module,
+                datamodule=data_module,
+                return_predictions=False,
+            )
+        except PredictionError as error:
+            raise click.ClickException(str(error)) from error
 
     # Check if affinity predictions are needed
     if any(r.affinity for r in manifest.records):
@@ -1403,11 +1406,14 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         model_module.eval()
 
         trainer.callbacks[0] = pred_writer
-        trainer.predict(
-            model_module,
-            datamodule=data_module,
-            return_predictions=False,
-        )
+        try:
+            trainer.predict(
+                model_module,
+                datamodule=data_module,
+                return_predictions=False,
+            )
+        except PredictionError as error:
+            raise click.ClickException(str(error)) from error
 
 
 if __name__ == "__main__":
