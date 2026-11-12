@@ -207,6 +207,10 @@ Each output folder includes a confidence `.json` file with aggregated confidence
     "complex_iplddt": 0.8241,         # Average pLDDT score when upweighting interface tokens
     "complex_pde": 0.8912,            # Average PDE score for the complex
     "complex_ipde": 5.1650,           # Average PDE score when aggregating at interfaces  
+    "chain_ids": {                    # Original input IDs for the score indices below
+        "0": "A",
+        "1": "B"
+    },
     "chains_ptm": {                   # Predicted TM score within each chain
         "0": 0.8533,
         "1": 0.8330
@@ -224,6 +228,14 @@ Each output folder includes a confidence `.json` file with aggregated confidence
 }
 ```
 `confidence_score`, `ptm` and `plddt` scores (and their interface and individual chain analogues) have a range of [0, 1], where higher values indicate higher confidence. `pde` scores have a unit of angstroms, where lower values indicate higher confidence.
+
+`chains_ptm` and `pair_chains_iptm` retain their numeric index keys for
+compatibility. The `chain_ids` mapping translates those indices to the original
+input chain IDs, including after invalid chains have been removed and the
+remaining indices reassigned. JSON object keys are strings: for example,
+`chain_ids["1"]` names the chain scored by `chains_ptm["1"]` and the row/column
+`"1"` of `pair_chains_iptm`. The mapping is included in each confidence summary
+for both Boltz-1 and Boltz-2; scores and structure outputs are unchanged.
 
 The output affinity `.json` file is organized as follows:
 ```yaml

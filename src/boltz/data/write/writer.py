@@ -212,6 +212,11 @@ class BoltzWriter(BasePredictionWriter):
                         }
                         for idx1 in prediction["pair_chains_iptm"]
                     }
+                    # Indices are reassigned after masked chains are removed.
+                    # Keep score keys stable and expose the original input IDs.
+                    confidence_summary_dict["chain_ids"] = {
+                        chain.chain_id: chain.chain_name for chain in chain_info
+                    }
                     with path.open("w") as f:
                         f.write(
                             json.dumps(

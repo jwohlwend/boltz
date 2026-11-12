@@ -1,0 +1,15 @@
+{
+  "record_id": "L3001",
+  "source_confidence_sha256": "e6cd58f1193df9917b3ce6e0892febdb50e95764fa9dba266682dc109d54c45e",
+  "chain_ids": {
+    "0": "A",
+    "1": "B"
+  },
+  "all_legacy_confidence_fields_equal_saved_prediction": true,
+  "unchanged_output_files_or_npz_payloads": [
+    "L3001_model_0.cif",
+    "plddt_L3001_model_0.npz",
+    "pre_affinity_L3001.npz"
+  ],
+  "execution": "CPU replay of saved prediction; no new model inference or quality claim"
+}
