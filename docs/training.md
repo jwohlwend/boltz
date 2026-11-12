@@ -251,8 +251,28 @@ redis-server --dbfilename ccd.rdb --port 7777
 
 In a separate shell, run the processing script, make sure to use the `clustering/clustering.json` file you previously created.
 ```bash
-python rcsb.py --datadir PATH_TO_MMCIF_DIR --cluster clustering/clustering.json --outdir YOUR_OUTPUT_DIR --use-assembly --max-file-size 7000000 --redis-port 7777
+python rcsb.py --datadir PATH_TO_MMCIF_DIR --clusters clustering/clustering.json --msa-dir YOUR_MSA_OUTPUT_DIR --outdir YOUR_OUTPUT_DIR --use-assembly --max-file-size 7000000 --redis-port 7777
 ```
+
+`--msa-dir` is the directory of processed `.npz` MSAs produced in step 6,
+not the raw `.a3m` directory. Protein chains are linked only when a file named
+`SHA256(full_query_sequence).npz` exists there. Missing files, RNA/DNA chains,
+and ligands retain an empty `msa_id`; omitting `--msa-dir` keeps all MSAs
+unlinked. This step does not generate, download, or validate MSA contents, so
+the processed file must belong to the same full query sequence.
+
+Polymer cluster lookups use the same full-sequence SHA256 keys as `cluster.py`,
+including residues absent from the coordinates. Known modified residues use
+their canonical parent letter (for example, MSE maps to M). Single-residue
+non-polymers use their CCD code; multi-residue non-polymer chains have no single
+CCD cluster key. Legacy `pdb_id_entity_index` cluster mappings remain a fallback.
+The record's `entity_id` is the numeric entity index stored in the processed
+structure, not necessarily the original mmCIF entity name.
+
+Existing structure/record pairs are skipped by the processor. To apply these
+metadata changes to an older dataset, preprocess into a fresh output directory
+and point the training configuration to that dataset; existing records and
+trained models are not migrated automatically.
 
 > Important: the script looks for `.cif` or `cif.gz` files in the directory, make sure to match this extension and file format.
 

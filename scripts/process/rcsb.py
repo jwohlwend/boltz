@@ -10,11 +10,13 @@ from typing import Any, Optional
 
 import numpy as np
 import rdkit
+from cluster import hash_sequence
 from mmcif import parse_mmcif
 from p_tqdm import p_umap
 from redis import Redis
 from tqdm import tqdm
 
+from boltz.data import const
 from boltz.data.filter.static.filter import StaticFilter
 from boltz.data.filter.static.ligand import ExcludedLigands
 from boltz.data.filter.static.polymer import (
@@ -110,7 +112,12 @@ def finalize(outdir: Path) -> None:
         json.dump(records, f)
 
 
-def parse(data: PDB, resource: Resource, clusters: dict) -> Target:
+def parse(
+    data: PDB,
+    resource: Resource,
+    clusters: dict,
+    msa_dir: Optional[Path] = None,
+) -> Target:
     """Process a structure.
 
     Parameters
@@ -137,15 +144,33 @@ def parse(data: PDB, resource: Resource, clusters: dict) -> Target:
     # Create chain metadata
     chain_info = []
     for i, chain in enumerate(structure.chains):
-        key = f"{pdb_id}_{chain['entity_id']}"
+        legacy_key = f"{pdb_id}_{chain['entity_id']}"
+        cluster_id = clusters.get(legacy_key, -1)
+        sequence = parsed.sequences.get(i)
+        sequence_id = hash_sequence(sequence) if sequence else None
+        if sequence_id is not None:
+            cluster_id = clusters.get(sequence_id, cluster_id)
+        elif chain["mol_type"] == const.chain_type_ids["NONPOLYMER"] and chain["res_num"] == 1:
+            ccd = str(structure.residues[chain["res_idx"]]["name"])
+            cluster_id = clusters.get(ccd.lower(), clusters.get(ccd, cluster_id))
+
+        msa_id = ""
+        if (
+            chain["mol_type"] == const.chain_type_ids["PROTEIN"]
+            and sequence_id is not None
+            and msa_dir is not None
+            and (msa_dir / f"{sequence_id}.npz").is_file()
+        ):
+            msa_id = sequence_id
         chain_info.append(
             ChainInfo(
                 chain_id=i,
                 chain_name=chain["name"],
-                msa_id="",  # FIX
+                msa_id=msa_id,
                 mol_type=int(chain["mol_type"]),
-                cluster_id=clusters.get(key, -1),
+                cluster_id=cluster_id,
                 num_residues=int(chain["res_num"]),
+                entity_id=int(chain["entity_id"]),
             )
         )
 
@@ -178,6 +203,7 @@ def process_structure(
     outdir: Path,
     filters: list[StaticFilter],
     clusters: dict,
+    msa_dir: Optional[Path] = None,
 ) -> None:
     """Process a target.
 
@@ -200,7 +226,7 @@ def process_structure(
 
     try:
         # Parse the target
-        target: Target = parse(data, resource, clusters)
+        target: Target = parse(data, resource, clusters, msa_dir=msa_dir)
         structure = target.structure
 
         # Apply the filters
@@ -240,6 +266,10 @@ def process_structure(
 
 def process(args) -> None:
     """Run the data processing task."""
+    msa_dir = getattr(args, "msa_dir", None)
+    if msa_dir is not None and not msa_dir.is_dir():
+        msg = f"Processed MSA directory does not exist: {msa_dir}"
+        raise ValueError(msg)
     # Create output directory
     args.outdir.mkdir(parents=True, exist_ok=True)
 
@@ -290,6 +320,7 @@ def process(args) -> None:
             outdir=args.outdir,
             clusters=clusters,
             filters=filters,
+            msa_dir=msa_dir,
         )
         # Run processing in parallel
         p_umap(fn, data, num_cpus=num_processes)
@@ -301,6 +332,7 @@ def process(args) -> None:
                 outdir=args.outdir,
                 clusters=clusters,
                 filters=filters,
+                msa_dir=msa_dir,
             )
 
     # Finalize
@@ -320,6 +352,12 @@ if __name__ == "__main__":
         type=Path,
         required=True,
         help="Path to the cluster file.",
+    )
+    parser.add_argument(
+        "--msa-dir",
+        type=Path,
+        default=None,
+        help="Optional directory of processed protein MSAs named by query-sequence SHA256.",
     )
     parser.add_argument(
         "--outdir",

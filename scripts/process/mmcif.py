@@ -1,5 +1,5 @@
 import contextlib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Optional
 
 import gemmi
@@ -72,7 +72,7 @@ class ParsedChain:
     entity: str
     type: str
     residues: list[ParsedResidue]
-    sequence: list[str]
+    sequence: Optional[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +94,7 @@ class ParsedStructure:
     data: Structure
     info: StructureInfo
     covalents: list[int]
+    sequences: dict[int, str] = field(default_factory=dict)
 
 
 ####################################################################################################
@@ -747,7 +748,12 @@ def parse_polymer(  # noqa: C901, PLR0915, PLR0912
         entity=entity,
         residues=parsed,
         type=chain_type,
-        sequence=gemmi.one_letter_code(sequence),
+        # SEQRES/MSA query names use canonical parent letters for modified
+        # residues (e.g. MSE -> M); Gemmi's FASTA helper replaces them with X.
+        sequence="".join(
+            gemmi.find_tabulated_residue(name).one_letter_code.upper().strip() or "X"
+            for name in sequence
+        ),
     )
 
 
@@ -905,7 +911,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
 
     # Parse chains
     chains: list[ParsedChain] = []
-    chain_seqs = []
+    chain_seqs = {}
     for raw_chain in structure[0].subchains():
         # Check chain type
         subchain_id = raw_chain.subchain_id()
@@ -933,7 +939,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
             )
             if parsed_polymer is not None:
                 chains.append(parsed_polymer)
-                chain_seqs.append(parsed_polymer.sequence)
+                chain_seqs[len(chains) - 1] = parsed_polymer.sequence
 
         # Parse a non-polymer
         elif entity_type in {"NonPolymer", "Branched"}:
@@ -1024,6 +1030,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
                 atom_num,
                 res_idx,
                 res_num,
+                0,  # No cyclic-period annotation in this training parser.
             )
         )
         chain_to_idx[chain.name] = asym_id
@@ -1120,4 +1127,4 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
         mask=mask,
     )
 
-    return ParsedStructure(data=data, info=info, covalents=[])
+    return ParsedStructure(data=data, info=info, covalents=[], sequences=chain_seqs)
