@@ -10,6 +10,39 @@ Once `boltz` is installed, you can run predictions with:
 * Without the `--override` options, Boltz will try to use the cached preprocessed files and existing predictions, if any are present in your output directory (name of your input by default). Add the `--override` flag to run the prediction from scratch, e.g. if you change some parameters or complex details without changing the output directory.
 
 
+## Loading a Boltz-2 checkpoint from Python
+
+For custom inference, use Lightning's checkpoint loader and the current inference
+sampler settings, as the CLI does:
+
+```python
+from dataclasses import asdict
+
+from boltz.main import Boltz2DiffusionParams
+from boltz.model.models.boltz2 import Boltz2
+
+model = Boltz2.load_from_checkpoint(
+    "boltz2_conf.ckpt",
+    map_location="cpu",
+    weights_only=False,  # Only load checkpoints from a trusted source.
+    diffusion_process_args=asdict(Boltz2DiffusionParams()),
+).eval()
+```
+
+The released checkpoint's training metadata contains legacy sampler options;
+passing every saved hyperparameter directly to the constructor is not equivalent
+to loading it through Lightning with the CLI's inference settings. Move the
+model and prepared features to the same device before calling `model(feats, ...)`.
+The input preprocessing and feature construction remain necessary; see
+`examples/checkpoint_defaults_smoke.py` for a comparison using processed inputs.
+
+If the checkpoint omits `pairformer_args.v2`, Boltz-2 now defaults it to `True`
+and saves the effective setting in subsequent checkpoints. Explicit settings are
+preserved, and the supplied configuration is not modified. Omitted or partial
+`steering_args` default the three guidance enable flags to `False`; enabling a
+guidance mode still requires its numerical settings. These defaults do not
+change the explicit configuration supplied by `boltz predict`.
+
 ## Input format
 
 Boltz takes inputs in `.yaml` format, which specifies the components of the complex.  

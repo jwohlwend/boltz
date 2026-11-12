@@ -301,7 +301,16 @@ class AtomDiffusion(Module):
         steering_args=None,
         **network_condition_kwargs,
     ):
-        if steering_args is not None and (
+        # Direct model/sampler calls need not supply the predict CLI's settings.
+        # Fill only optional enable flags; active guidance still requires its
+        # numerical settings, and caller-owned mappings are never mutated.
+        steering_args = {
+            "fk_steering": False,
+            "physical_guidance_update": False,
+            "contact_guidance_update": False,
+            **(steering_args if steering_args is not None else {}),
+        }
+        if (
             steering_args["fk_steering"]
             or steering_args["physical_guidance_update"]
             or steering_args["contact_guidance_update"]
