@@ -33,9 +33,9 @@ from boltz.model.modules.trunkv2 import (
     TemplateModule,
     TemplateV2Module,
 )
+from boltz.model.modules.utils import autocast_device_type
 from boltz.model.optim.ema import EMA
 from boltz.model.optim.scheduler import AlphaFoldLRScheduler
-from boltz.model.modules.utils import autocast_device_type
 
 
 class Boltz2(LightningModule):
@@ -107,6 +107,9 @@ class Boltz2(LightningModule):
         use_kernels: bool = False,
     ) -> None:
         super().__init__()
+        # Released checkpoints can omit this CLI-supplied Boltz-2 setting.
+        # Copy mappings (including DictConfig) before saving or adding defaults.
+        pairformer_args = {"v2": True, **pairformer_args}
         self.save_hyperparameters(ignore=["validators"])
 
         # No random recycling
