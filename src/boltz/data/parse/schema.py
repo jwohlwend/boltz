@@ -1033,8 +1033,15 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             else:
                 seq = str(item[entity_type]["ccd"])
 
-        # Group items by entity
-        items_to_group.setdefault((entity_type, seq), []).append(item)
+        # Group items by entity, keeping chains that differ in their
+        # modifications or cyclic flag as separate entities
+        modifications = tuple(
+            (mod["position"], mod["ccd"])
+            for mod in item[entity_type].get("modifications", [])
+        )
+        cyclic = item[entity_type].get("cyclic", False)
+        group_key = (entity_type, seq, modifications, cyclic)
+        items_to_group.setdefault(group_key, []).append(item)
 
         # Map chain names to entity types
         chain_names = item[entity_type]["id"]
