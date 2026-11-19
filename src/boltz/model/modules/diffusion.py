@@ -538,8 +538,8 @@ class AtomDiffusion(Module):
                 )
 
                 sample_ids = torch.arange(multiplicity, device=atom_coords_noisy.device)
-                sample_ids_chunks = sample_ids.chunk(
-                    multiplicity % max_parallel_samples + 1
+                sample_ids_chunks = sample_ids.split(
+                    max_parallel_samples or multiplicity
                 )
                 for sample_ids_chunk in sample_ids_chunks:
                     atom_coords_denoised_chunk, token_a_chunk = (
