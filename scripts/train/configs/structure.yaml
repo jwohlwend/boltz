@@ -75,7 +75,7 @@ data:
   compute_constraint_features: false
 
 model:
-  _target_: boltz.model.model.Boltz1
+  _target_: boltz.model.models.boltz1.Boltz1
   atom_s: 128
   atom_z: 16
   token_s: 384
