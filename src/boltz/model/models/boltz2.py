@@ -746,7 +746,7 @@ class Boltz2(LightningModule):
             for idx in range(batch["token_index"].shape[0]):
                 for rep in range(diffusion_samples):
                     i = idx * diffusion_samples + rep
-                    best_true_coords, best_true_coords_resolved_mask = (
+                    best_true_coords, _, best_true_coords_resolved_mask = (
                         minimum_lddt_symmetry_coords(
                             coords=out["sample_atom_coords"][i : i + 1],
                             feats=batch,

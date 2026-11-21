@@ -1492,7 +1492,7 @@ def process_atom_features(
         coords = override_coords.unsqueeze(0)
 
     # Apply random roto-translation to the input conformers
-    for i in range(torch.max(ref_space_uid)):
+    for i in range(int(torch.max(ref_space_uid)) + 1):
         included = ref_space_uid == i
         if torch.sum(included) > 0 and torch.any(resolved_mask[included]):
             ref_pos[included] = center_random_augmentation(
