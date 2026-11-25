@@ -316,8 +316,8 @@ def construct_paired_msa(  # noqa: C901, PLR0915, PLR0912
             seq_idx = sequence["seq_idx"]
             del_start = sequence["del_start"]
             del_end = sequence["del_end"]
-            chain_deletions = chain_deletions[del_start:del_end]
-            for deletion_data in chain_deletions:
+            seq_deletions = chain_deletions[del_start:del_end]
+            for deletion_data in seq_deletions:
                 res_idx = deletion_data["res_idx"]
                 deletion_values = deletion_data["deletion"]
                 deletions[(chain_id, seq_idx, res_idx)] = deletion_values
