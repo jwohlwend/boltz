@@ -28,7 +28,7 @@ def parse_csv(
 
     """
     # Read file
-    data = pd.read_csv(path)
+    data = pd.read_csv(path, converters={"sequence": str})
 
     # Check columns
     if tuple(sorted(data.columns)) != ("key", "sequence"):
